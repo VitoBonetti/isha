@@ -29,6 +29,9 @@ def get_user_provision_internal(cursor, user_id, year, week_number):
     if end_year and year > end_year: return 0.0
     if end_year and year == end_year and end_week and week_number > end_week: return 0.0
 
+    # FIX: Safely cast the location ID to prevent the "None" UUID crash
+    safe_loc_id = str(user_location_id) if user_location_id is not None else None
+
     # Fetch relevant events (Personal PTO, Team Days, or Local/Global National Holidays)
     cursor.execute("""
         SELECT start_date, end_date
@@ -39,7 +42,7 @@ def get_user_provision_internal(cursor, user_id, year, week_number):
                location_id = %s OR 
                location_id = (SELECT id FROM locations WHERE name = 'Global' LIMIT 1)
            ))
-    """, (str(user_id), str(user_location_id)))
+    """, (str(user_id), safe_loc_id))
     events = cursor.fetchall()
 
     week_dates = []
@@ -95,8 +98,9 @@ def get_quarterly_board(year: int, quarter: int, response: Response,
     categories = [{"id": r[0], "name": r[1], "target_goal": r[2], "service_lane_id": r[3]} for r in cursor.fetchall()]
 
     # 2. Users (Pentesters) & Capacity Matrix
-    cursor.execute('SELECT id, name, role, email, base_capacity FROM users')
-    pentesters = [{"id": r[0], "name": r[1], "role": r[2], "email": r[3], "capacity": r[4]} for r in cursor.fetchall()]
+    cursor.execute('SELECT id, name, role, email, base_capacity, location_id FROM users')
+    pentesters = [{"id": r[0], "name": r[1], "role": r[2], "email": r[3], "capacity": r[4], "location_id": r[5]} for r
+                  in cursor.fetchall()]
 
     cap_matrix = {p["id"]: {w: calculate_weekly_capacity(cursor, p["id"], year, w) for w in weeks} for p in pentesters}
 

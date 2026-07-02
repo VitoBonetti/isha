@@ -160,8 +160,8 @@ export default function CalendarView({ boardData, fetchBoard, setConfirmAction }
                         onClick={() => {
                           if (!day) return;
                           const dStr = toDateStr(day);
-                          // FIX: Always pre-select the logged in user to prevent "User not loading" errors
-                          const defaultUserId = currentUser?.id || '';
+                          // FIX: Properly bind the current user ID
+                          const defaultUserId = currentUser?.role === 'admin' ? '' : (currentUser?.id || '');
 
                           setActiveHoliday({
                             event_type: 'personal_time_off',
@@ -183,11 +183,8 @@ export default function CalendarView({ boardData, fetchBoard, setConfirmAction }
                     );
                   })}
 
-                  {/* FIX: Event Bars Overlay (Using style={{ gridAutoRows: 'min-content' }} to prevent Tailwind collapse bug) */}
-                  <div
-                    className="absolute top-12 left-0 right-0 bottom-1 pointer-events-none grid grid-cols-5 gap-y-1 overflow-y-auto px-1"
-                    style={{ gridAutoRows: 'min-content' }}
-                  >
+                  {/* Event Bars Overlay */}
+                  <div className="absolute top-12 left-0 right-0 bottom-1 pointer-events-none grid grid-cols-5 grid-rows-[min-content] gap-y-1 overflow-y-auto px-1">
                     {weekEvents.map((evt: any, evtIdx: number) => {
                       const eStart = extractDateStr(evt.start_date || evt.start);
                       const eEnd = extractDateStr(evt.end_date || evt.end);
@@ -275,7 +272,7 @@ export default function CalendarView({ boardData, fetchBoard, setConfirmAction }
                 location_id: activeHoliday.location_id === '' ? null : activeHoliday.location_id,
                 start_date: activeHoliday.start_date,
                 end_date: activeHoliday.end_date,
-                user_id: activeHoliday.event_type === 'personal_time_off' ? (activeHoliday.user_id || null) : null
+                user_id: activeHoliday.event_type === 'personal_time_off' ? activeHoliday.user_id : null
               };
 
               const endpoint = activeHoliday.id ? `/api/board/events/${activeHoliday.id}` : '/api/board/events';
@@ -293,7 +290,7 @@ export default function CalendarView({ boardData, fetchBoard, setConfirmAction }
               message: "Are you sure you want to completely delete this time off?",
               onConfirm: async () => {
                 try {
-                  await axios.delete(`/api/board/events/${id}`);
+                  await axios.delete(`/api/events/${id}`);
                   toast.success("Time off deleted!");
                   setModalOpen(false);
                   if (fetchBoard) fetchBoard();

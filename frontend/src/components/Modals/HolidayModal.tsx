@@ -21,8 +21,10 @@ export default function HolidayModal({
 
   const isEditing = !!holidayData.id;
 
+  const getCapacity = (user: any) => Number(user.base_capacity ?? user.capacity ?? 1.0);
+
   const liveCredits = useMemo(() => {
-    if (!holidayData.start_date || !holidayData.end_date) return 0;
+    if (!holidayData.start_date || !holidayData.end_date) return "0.0";
 
     let workingDays = 0;
     let d = new Date(`${holidayData.start_date}T12:00:00`);
@@ -32,26 +34,27 @@ export default function HolidayModal({
       if (d.getDay() !== 0 && d.getDay() !== 6) workingDays++;
       d.setDate(d.getDate() + 1);
     }
-    if (workingDays === 0) return 0;
+    if (workingDays === 0) return "0.0";
 
     if (holidayData.event_type === 'national_holiday' || holidayData.event_type === 'team_day') {
-      const locId = holidayData.location_id || null;
-      const affectedUsers = pentesters.filter(p => !locId || p.location_id === locId);
+      // ✅ FIXED: Safe string comparison for UUIDs, handles null/undefined gracefully
+      const locId = holidayData.location_id ? String(holidayData.location_id) : null;
+      const affectedUsers = pentesters?.filter(p =>
+        !locId || String(p.location_id) === locId
+      ) || [];
 
       let totalDailyCap = 0;
       affectedUsers.forEach(p => {
-         const c = Number(p.base_capacity || 1.0);
-         totalDailyCap += (c / 5);
+         totalDailyCap += (getCapacity(p) / 5);
       });
       return (workingDays * totalDailyCap).toFixed(1);
     }
 
-    if (!holidayData.user_id) return 0;
-    const user = pentesters.find(p => p.id === holidayData.user_id);
-    if (!user) return 0;
+    if (!holidayData.user_id) return "0.0";
+    const user = pentesters?.find(p => p.id === holidayData.user_id);
+    if (!user) return "0.0";
 
-    const baseCap = Number(user.base_capacity || 1.0);
-    return (workingDays * (baseCap / 5)).toFixed(1);
+    return (workingDays * (getCapacity(user) / 5)).toFixed(1);
   }, [holidayData, pentesters]);
 
   return (
@@ -98,7 +101,9 @@ export default function HolidayModal({
                 className="w-full bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 disabled:opacity-60 disabled:cursor-not-allowed dark:text-zinc-100 outline-none font-medium"
               >
                 <option value="" disabled>Select User...</option>
-                {pentesters.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                {(pentesters?.length ? pentesters : []).map(p => (
+                  <option key={p.id} value={p.id}>{p.name || 'Unnamed User'}</option>
+                ))}
               </select>
             </div>
           )}
