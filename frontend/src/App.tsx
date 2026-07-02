@@ -3,6 +3,8 @@ import { ThemeProvider } from "./components/ThemeProvider";
 import { AppProvider, useAppContext } from "./context/AppContext";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
+import SettingsView from "./pages/SettingsView";
+import CalendarView from "./pages/CalendarView";
 
 function AppContent() {
   const { wsStatus } = useAppContext();
@@ -15,13 +17,13 @@ function AppContent() {
 
         {/* Placeholder Routes so clicking the dashboard cards doesn't crash */}
         <Route path="/planner" element={<div className="p-20 text-center">Planner Route Pending</div>} />
-        <Route path="/calendar" element={<div className="p-20 text-center">Holidays Route Pending</div>} />
+        <Route path="/calendar" element={<CalendarView />} />
         <Route path="/tests" element={<div className="p-20 text-center">Tests Route Pending</div>} />
         <Route path="/countries" element={<div className="p-20 text-center">Countries Route Pending</div>} />
         <Route path="/assets" element={<div className="p-20 text-center">Assets Route Pending</div>} />
         <Route path="/raw" element={<div className="p-20 text-center">Raw Data Route Pending</div>} />
         <Route path="/insights" element={<div className="p-20 text-center">Insights Route Pending</div>} />
-        <Route path="/settings" element={<div className="p-20 text-center">Settings Route Pending</div>} />
+        <Route path="/settings" element={<SettingsView />} />
 
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>

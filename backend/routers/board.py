@@ -147,16 +147,19 @@ def get_quarterly_board(year: int, quarter: int, response: Response,
 
 # --- 3. UNIVERSAL CATEGORIES ---
 
-@router.post("/categories")
-def create_category(cat: ServiceCategoryCreate, background_tasks: BackgroundTasks,
-                    current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+@router.post("/categories/")
+def create_category(cat: ServiceCategoryCreate, current_user: dict = Depends(require_admin),
+                    cursor=Depends(get_db_cursor)):
+    # Safely convert UUID to string for psycopg2
+    lane_id = str(cat.service_lane_id) if cat.service_lane_id else None
+
     cursor.execute(
         'INSERT INTO service_categories (service_lane_id, name, target_goal) VALUES (%s, %s, %s) RETURNING id',
-        (cat.service_lane_id, cat.name, cat.target_goal)
+        (lane_id, cat.name, cat.target_goal)
     )
+    new_id = cursor.fetchone()[0]
     cursor.connection.commit()
-    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
-    return {"message": "Category created"}
+    return {"id": new_id}
 
 
 @router.put("/categories/{cat_id}")
@@ -196,13 +199,36 @@ def create_event(e: EventCreate, background_tasks: BackgroundTasks,
             cursor.execute("SELECT id FROM locations WHERE name = 'Global' LIMIT 1")
             e.location_id = cursor.fetchone()[0]
 
+    # FIX: Safely convert UUIDs to strings for psycopg2
+    u_id = str(e.user_id) if e.user_id else None
+    loc_id = str(e.location_id) if e.location_id else None
+
+    # Safely get string value from Enum
+    e_type = e.event_type.value if hasattr(e.event_type, 'value') else e.event_type
+
     cursor.execute(
         'INSERT INTO events (user_id, event_type, location_id, start_date, end_date) VALUES (%s, %s, %s, %s, %s)',
-        (e.user_id, e.event_type, e.location_id, e.start_date, e.end_date)
+        (u_id, e_type, loc_id, e.start_date, e.end_date)
     )
     cursor.connection.commit()
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"status": "ok"}
+
+
+@router.put("/events/{event_id}")
+def update_event(event_id: str, e: EventBase, background_tasks: BackgroundTasks,
+                 current_user: dict = Depends(require_write_access), cursor=Depends(get_db_cursor)):
+    # FIX: Safely convert UUID to string
+    loc_id = str(e.location_id) if e.location_id else None
+    e_type = e.event_type.value if hasattr(e.event_type, 'value') else e.event_type
+
+    cursor.execute(
+        'UPDATE events SET event_type=%s, location_id=%s, start_date=%s, end_date=%s WHERE id=%s',
+        (e_type, loc_id, e.start_date, e.end_date, event_id)
+    )
+    cursor.connection.commit()
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+    return {"message": "Event updated"}
 
 
 @router.delete("/events/{event_id}")
@@ -218,20 +244,3 @@ def delete_event(event_id: str, background_tasks: BackgroundTasks,
     cursor.connection.commit()
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Event deleted"}
-
-
-# --- 5. SYSTEM WIPE ---
-
-@router.delete("/system/wipe")
-def wipe_system(background_tasks: BackgroundTasks,
-                current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
-    cursor.execute('DELETE FROM assignments')
-    cursor.execute('DELETE FROM test_assets')
-    cursor.execute('DELETE FROM tests')
-    cursor.execute('DELETE FROM assets')
-    cursor.execute('DELETE FROM raw_assets')
-    cursor.execute('DELETE FROM notifications')
-
-    cursor.connection.commit()
-    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
-    return {"message": "Board wiped clean, all assets freed!"}

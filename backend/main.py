@@ -4,7 +4,7 @@ from fastapi.responses import JSONResponse
 import traceback
 import os
 from jose import jwt, JWTError
-from routers import auth, services, users, regions, countries, assets, tests, board, logs
+from routers import auth, services, users, regions, countries, assets, tests, board, logs, locations
 from websockets_manager import manager
 from audit_logger import log_audit_event
 
@@ -48,6 +48,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 app.include_router(auth.router)
 app.include_router(services.router)
 app.include_router(users.router)
+app.include_router(locations.router)
 app.include_router(regions.router)
 app.include_router(countries.router)
 app.include_router(assets.router)

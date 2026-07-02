@@ -81,10 +81,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     let reconnectTimer: number;
 
     const connectWebSocket = () => {
-      const backendUrl = new URL(import.meta.env.VITE_API_URL || window.location.origin);
-      const wsProtocol = backendUrl.protocol === 'https:' ? 'wss:' : 'ws:';
-      // In dev mode, we connect to localhost:8000
-      const host = import.meta.env.DEV ? 'localhost:8000' : backendUrl.host;
+      const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const host = window.location.host;
 
       ws = new WebSocket(`${wsProtocol}//${host}/ws/board`);
 
@@ -93,15 +91,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       ws.onmessage = (event) => {
         const data = JSON.parse(event.data);
         if (data.action === 'REFRESH_BOARD' || data.action === 'REFRESH_ASSETS') {
-          fetchNotifications(); // Refresh notifications when board updates
-          // Add react-query invalidation here later
+          fetchNotifications();
         }
       };
 
       ws.onclose = (event) => {
         setWsStatus('disconnected');
         if (event.code === 1008) {
-          // Force logout on authentication failure
           setCurrentUser(null);
           navigate('/login');
         } else {
