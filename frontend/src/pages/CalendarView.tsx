@@ -21,16 +21,41 @@ const getUserColor = (userId: string, pentestersArray: any[]) => {
   return USER_COLORS[Math.max(0, userIndex) % USER_COLORS.length];
 };
 
-export default function CalendarView({ boardData, fetchBoard, setConfirmAction }: any) {
+export default function CalendarView() {
   const { currentUser } = useAppContext();
 
   const [currentDate, setCurrentDate] = useState(new Date());
   const [modalOpen, setModalOpen] = useState(false);
   const [activeHoliday, setActiveHoliday] = useState<any>(null);
-  const [locations, setLocations] = useState<any[]>([]);
 
+  // Local state for data fetching to ensure modal has data even if routed directly
+  const [boardData, setBoardData] = useState<any>({});
+  const [locations, setLocations] = useState<any[]>([]);
+  const [pentesters, setPentesters] = useState<any[]>([]);
+
+  // Fetch all necessary data on mount
   useEffect(() => {
-    axios.get('/api/locations/').then(res => setLocations(res.data)).catch(() => {});
+    const currentYear = new Date().getFullYear();
+    const currentMonth = new Date().getMonth() + 1;
+    let quarter = 1;
+    if (currentMonth > 3) quarter = 2;
+    if (currentMonth > 6) quarter = 3;
+    if (currentMonth > 9) quarter = 4;
+
+    // Fetch Locations for Modal Dropdowns
+    axios.get('/api/locations/')
+      .then(res => setLocations(res.data || []))
+      .catch(() => {});
+
+    // Fetch Users for Credit Calculations and User Selection
+    axios.get('/api/users/')
+      .then(res => setPentesters(res.data || []))
+      .catch(console.error);
+
+    // Fetch Board Data (Events)
+    axios.get(`/api/board/${currentYear}/Q${quarter}`)
+      .then(res => setBoardData(res.data || {}))
+      .catch(console.error);
   }, []);
 
   const year = currentDate.getFullYear();
@@ -79,8 +104,9 @@ export default function CalendarView({ boardData, fetchBoard, setConfirmAction }
     return weeksArray;
   }, [year, month]);
 
-  const events = boardData?.events || boardData?.holidays || [];
-  const pentesters = boardData?.pentesters || [];
+  // Use local state for events and pentesters to ensure they are populated
+  const events = boardData?.events || [];
+  const localPentesters = pentesters.length > 0 ? pentesters : (boardData?.pentesters || []);
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-[#09090b] text-slate-900 dark:text-zinc-100 flex flex-col relative overflow-hidden transition-colors duration-300">
@@ -206,7 +232,7 @@ export default function CalendarView({ boardData, fetchBoard, setConfirmAction }
 
                       if (startCol === null) return null;
 
-                      const user = pentesters.find((p: any) => p.id === evt.user_id);
+                      const user = localPentesters.find((p: any) => p.id === evt.user_id);
                       let label = user?.name || 'Unknown User';
 
                       let bgClass, borderClass, textClass;
@@ -219,7 +245,7 @@ export default function CalendarView({ boardData, fetchBoard, setConfirmAction }
                         bgClass = 'bg-fuchsia-100 dark:bg-fuchsia-500/20'; borderClass = 'border-fuchsia-500'; textClass = 'text-fuchsia-800 dark:text-fuchsia-400';
                         label = `🚀 Team Day`;
                       } else {
-                        const theme = getUserColor(user?.id, pentesters);
+                        const theme = getUserColor(user?.id, localPentesters);
                         bgClass = theme.bg; borderClass = theme.border; textClass = theme.text;
                       }
 
@@ -262,7 +288,7 @@ export default function CalendarView({ boardData, fetchBoard, setConfirmAction }
           onClose={() => setModalOpen(false)}
           holidayData={activeHoliday}
           setHolidayData={setActiveHoliday}
-          pentesters={pentesters}
+          pentesters={localPentesters}
           locations={locations}
           currentUser={currentUser}
           onSave={async () => {
@@ -272,32 +298,48 @@ export default function CalendarView({ boardData, fetchBoard, setConfirmAction }
                 location_id: activeHoliday.location_id === '' ? null : activeHoliday.location_id,
                 start_date: activeHoliday.start_date,
                 end_date: activeHoliday.end_date,
-                user_id: activeHoliday.event_type === 'personal_time_off' ? activeHoliday.user_id : null
+                user_id: activeHoliday.user_id || null
               };
 
-              const endpoint = activeHoliday.id ? `/api/board/events/${activeHoliday.id}` : '/api/board/events';
-              if (activeHoliday.id) await axios.put(endpoint, payload);
-              else await axios.post(endpoint, payload);
+              if (activeHoliday.id) await axios.put(`/api/board/events/${activeHoliday.id}`, payload);
+              else await axios.post('/api/board/events', payload);
 
               toast.success("Time off saved!");
               setModalOpen(false);
-              if (fetchBoard) fetchBoard();
-            } catch (err: any) { toast.error(err.response?.data?.detail || "Failed to save."); }
+
+              // Refresh board data so new events appear immediately
+              const currentYear = new Date().getFullYear();
+              const currentMonth = new Date().getMonth() + 1;
+              let quarter = 1;
+              if (currentMonth > 3) quarter = 2;
+              if (currentMonth > 6) quarter = 3;
+              if (currentMonth > 9) quarter = 4;
+
+              axios.get(`/api/board/${currentYear}/Q${quarter}`).then(res => setBoardData(res.data || {}));
+
+            } catch (err: any) {
+              toast.error(err.response?.data?.detail || "Failed to save.");
+            }
           }}
           onDelete={async (id) => {
-            setConfirmAction({
-              isOpen: true,
-              message: "Are you sure you want to completely delete this time off?",
-              onConfirm: async () => {
-                try {
-                  await axios.delete(`/api/events/${id}`);
-                  toast.success("Time off deleted!");
-                  setModalOpen(false);
-                  if (fetchBoard) fetchBoard();
-                } catch (err) { toast.error("Failed to delete."); }
-                setConfirmAction({ isOpen: false });
-              }
-            });
+            try {
+              await axios.delete(`/api/board/events/${id}`);
+              toast.success("Time off deleted!");
+              setModalOpen(false);
+
+              // Refresh board data after deletion
+              const currentYear = new Date().getFullYear();
+              const currentMonth = new Date().getMonth() + 1;
+              let quarter = 1;
+              if (currentMonth > 3) quarter = 2;
+              if (currentMonth > 6) quarter = 3;
+              if (currentMonth > 9) quarter = 4;
+
+              axios.get(`/api/board/${currentYear}/Q${quarter}`).then(res => setBoardData(res.data || {}));
+
+            } catch (err: any) {
+              toast.error(err.response?.data?.detail || "Failed to delete.");
+            }
           }}
         />
       </main>
