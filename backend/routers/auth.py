@@ -21,40 +21,43 @@ ALGORITHM = "HS256"
 
 @router.get("/github/callback")
 async def github_callback(code: str, cursor=Depends(get_db_cursor)):
-    # Exchange code for token
-    token_resp = await httpx.post(
-        "https://github.com/login/oauth/access_token",
-        data={
-            "client_id": GITHUB_CLIENT_ID,
-            "client_secret": GITHUB_CLIENT_SECRET,
-            "code": code
-        },
-        headers={"Accept": "application/json"}
-    )
-    token_data = token_resp.json()
-    access_token = token_data.get("access_token")
+    # 1. Start the Async Client session
+    async with httpx.AsyncClient() as client:
+        # Exchange code for token
+        token_resp = await client.post(
+            "https://github.com/login/oauth/access_token",
+            data={
+                "client_id": GITHUB_CLIENT_ID,
+                "client_secret": GITHUB_CLIENT_SECRET,
+                "code": code
+            },
+            headers={"Accept": "application/json"}
+        )
+        token_data = token_resp.json()
+        access_token = token_data.get("access_token")
 
-    if not access_token:
-        raise HTTPException(status_code=400, detail="Failed to authenticate with GitHub")
+        if not access_token:
+            raise HTTPException(status_code=400, detail="Failed to authenticate with GitHub")
 
-    # Get User info
-    user_resp = await httpx.get(
-        "https://api.github.com/user",
-        headers={"Authorization": f"token {access_token}"}
-    )
-    gh_user = user_resp.json()
-
-    # Fallback for private emails
-    email = gh_user.get("email")
-    if not email:
-        email_resp = await httpx.get(
-            "https://api.github.com/user/emails",
+        # Get User info
+        user_resp = await client.get(
+            "https://api.github.com/user",
             headers={"Authorization": f"token {access_token}"}
         )
-        emails = email_resp.json()
-        # Find primary email
-        primary = next((e for e in emails if e.get('primary')), None)
-        email = primary['email'] if primary else None
+        gh_user = user_resp.json()
+
+        # Fallback for private emails (Notice this is safely INSIDE the 'async with' block now)
+        email = gh_user.get("email")
+        if not email:
+            email_resp = await client.get(
+                "https://api.github.com/user/emails",
+                headers={"Authorization": f"token {access_token}"}
+            )
+            emails = email_resp.json()
+            primary = next((e for e in emails if e.get('primary')), None)
+            email = primary['email'] if primary else None
+
+    # --- CLIENT SAFELY CLOSES HERE ---
 
     if not email:
         return Response(status_code=302, headers={"Location": "http://localhost:5173/login?error=no_email"})
@@ -68,12 +71,12 @@ async def github_callback(code: str, cursor=Depends(get_db_cursor)):
     existing_user = cursor.fetchone()
 
     if existing_user:
-        # User Exists: Update their GitHub-specific fields and COMMIT
+        # User Exists: Update their GitHub-specific fields
         cursor.execute(
             "UPDATE users SET github_id = %s, avatar_url = %s, name = %s WHERE email = %s",
             (github_id, avatar_url, name, email)
         )
-        cursor.connection.commit()  # FIX: Commits the transaction to prevent database deadlocks
+        cursor.connection.commit()
     else:
         # User NOT Found: Redirect to login with "Not Invited" error
         return Response(status_code=302, headers={"Location": "http://localhost:5173/login?error=not_invited"})
@@ -83,15 +86,13 @@ async def github_callback(code: str, cursor=Depends(get_db_cursor)):
 
     # Redirect to dashboard and set cookie
     response = Response(status_code=302, headers={"Location": "http://localhost:5173/dashboard"})
-
-    # FIX: secure=False allows the browser to accept the cookie on localhost HTTP
     response.set_cookie(
         key="access_token",
         value=token,
         httponly=True,
         secure=False,
         samesite="lax",
-        max_age=86400  # 24 hours
+        max_age=86400
     )
     return response
 
