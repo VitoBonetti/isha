@@ -66,11 +66,10 @@ export function useSettings() {
   };
 
   const handleDelete = async (endpoint: string, id: string) => {
-    if (!window.confirm('Are you sure you want to delete this item?')) return;
     try {
       await axios.delete(`${endpoint}${id}`);
       toast.success('Deleted successfully');
-      fetchAllData(true); // Re-fetch silently in the background
+      fetchAllData(true);
     } catch (error: any) {
       toast.error(error.response?.data?.detail || 'Failed to delete');
     }

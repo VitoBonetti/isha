@@ -150,6 +150,18 @@ def get_quarterly_board(year: int, quarter: int, response: Response,
 
 
 # --- 3. UNIVERSAL CATEGORIES ---
+@router.get("/categories/")
+def get_categories(current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+    """Fetches all service categories for the settings page."""
+    cursor.execute('''
+        SELECT c.id, c.name, c.target_goal, c.service_lane_id, s.name as service_lane_name 
+        FROM service_categories c
+        LEFT JOIN service_lanes s ON c.service_lane_id = s.id
+        ORDER BY c.name ASC
+    ''')
+    columns = [desc[0] for desc in cursor.description]
+    return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
 
 @router.post("/categories/")
 def create_category(cat: ServiceCategoryCreate, current_user: dict = Depends(require_admin),

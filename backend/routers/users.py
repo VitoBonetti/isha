@@ -59,21 +59,35 @@ def create_user(u: UserCreate, background_tasks: BackgroundTasks,
 def delete_user(user_id: str, background_tasks: BackgroundTasks,
                 current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     """
-    SOFT DELETE: Offboards the user instantly by setting their end_year and end_week to today.
-    Assignments and events are preserved for historical graphs.
+    SMART DELETE:
+    If the user has no historical assignments or events (e.g., a fake/test user), we hard-delete them.
+    If they have history, we soft-delete them by setting their end_year and end_week to today to preserve board data.
     """
-    current_year = datetime.now().year
-    current_week = datetime.now().isocalendar()[1]
+    cursor.execute("SELECT COUNT(*) FROM assignments WHERE user_id = %s", (user_id,))
+    assign_count = cursor.fetchone()[0]
 
-    cursor.execute(
-        'UPDATE users SET end_year = %s, end_week = %s WHERE id = %s',
-        (current_year, current_week, user_id)
-    )
+    cursor.execute("SELECT COUNT(*) FROM events WHERE user_id = %s", (user_id,))
+    event_count = cursor.fetchone()[0]
 
-    cursor.connection.commit()
-    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
-    return {"message": "User successfully offboarded."}
+    if assign_count == 0 and event_count == 0:
+        # HARD DELETE: Wipe the test/fake user completely
+        cursor.execute("DELETE FROM users WHERE id = %s", (user_id,))
+        cursor.connection.commit()
+        background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+        return {"message": "User permanently deleted."}
+    else:
+        # SOFT DELETE: Preserve historical data for real users
+        current_year = datetime.now().year
+        current_week = datetime.now().isocalendar()[1]
 
+        cursor.execute(
+            'UPDATE users SET end_year = %s, end_week = %s WHERE id = %s',
+            (current_year, current_week, user_id)
+        )
+
+        cursor.connection.commit()
+        background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+        return {"message": "User successfully offboarded."}
 
 @router.put("/{user_id}")
 def update_user(user_id: str, u: UserBase, background_tasks: BackgroundTasks,
