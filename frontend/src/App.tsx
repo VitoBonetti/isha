@@ -5,6 +5,8 @@ import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import SettingsView from "./pages/SettingsView";
 import CalendarView from "./pages/CalendarView";
+import AssetsView from "./pages/AssetsView";
+import RawAssetsView from "./pages/RawAssetsView";
 
 function AppContent() {
   const { wsStatus } = useAppContext();
@@ -17,11 +19,12 @@ function AppContent() {
 
         {/* Placeholder Routes so clicking the dashboard cards doesn't crash */}
         <Route path="/planner" element={<div className="p-20 text-center">Planner Route Pending</div>} />
-        <Route path="/calendar" element={<CalendarView />} />
+        <Route path="/assets" element={<AssetsView />} />
+        <Route path="/raw" element={<RawAssetsView />} />
         <Route path="/tests" element={<div className="p-20 text-center">Tests Route Pending</div>} />
         <Route path="/countries" element={<div className="p-20 text-center">Countries Route Pending</div>} />
-        <Route path="/assets" element={<div className="p-20 text-center">Assets Route Pending</div>} />
-        <Route path="/raw" element={<div className="p-20 text-center">Raw Data Route Pending</div>} />
+        <Route path="/assets" element={<AssetsView />} />
+        <Route path="/raw" element={<RawAssetsView />} />
         <Route path="/insights" element={<div className="p-20 text-center">Insights Route Pending</div>} />
         <Route path="/settings" element={<SettingsView />} />
 
