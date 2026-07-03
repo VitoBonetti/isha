@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useSettings } from '../hooks/useSettings';
 import TopNav from '../components/TopNav';
 import { Toaster } from 'react-hot-toast';
-import { Users, MapPin, Activity, Tags, Globe, Flag, Server, Trash2, Download, AlertTriangle, Plus, Database, Terminal } from 'lucide-react';
+import { Users, MapPin, Activity, Tags, Globe, Flag, Server, Trash2, Download, AlertTriangle, Plus, Database, Terminal, Edit2 } from 'lucide-react';
 
 export default function SettingsView() {
   const {
@@ -13,7 +13,10 @@ export default function SettingsView() {
 
   const [showForm, setShowForm] = useState<string | null>(null);
 
-  const [userForm, setUserForm] = useState({ email: '', name: '', role: 'read_only', base_capacity: 1.0, location_id: '', start_week: 1, start_year: new Date().getFullYear(), end_week: '', end_year: '' });
+  const defaultUserForm = { email: '', name: '', role: 'read_only', base_capacity: 1.0, location_id: '', start_week: 1, start_year: new Date().getFullYear(), end_week: '', end_year: '' };
+  const [userForm, setUserForm] = useState(defaultUserForm);
+  const [editUserId, setEditUserId] = useState<string | null>(null);
+
   const [locForm, setLocForm] = useState({ name: '', is_active: true });
   const [serviceForm, setServiceForm] = useState({ name: '', theme_color: '#3b82f6', default_credits: 2.0, default_duration_weeks: 1, max_concurrent_per_week: 5, match_keywords: '', display_order: 99, is_active: true });
   const [catForm, setCatForm] = useState({ name: '', target_goal: 0, service_lane_id: '' });
@@ -28,7 +31,11 @@ export default function SettingsView() {
       end_week: userForm.end_week === '' ? null : parseInt(userForm.end_week as string),
       end_year: userForm.end_year === '' ? null : parseInt(userForm.end_year as string)
     };
-    if (await handleSave('/api/users/', payload, false)) setShowForm(null);
+    if (await handleSave('/api/users/', payload, !!editUserId, editUserId)) {
+      setShowForm(null);
+      setEditUserId(null);
+      setUserForm(defaultUserForm);
+    }
   };
 
   const submitLocation = async (e: React.FormEvent) => {
@@ -61,7 +68,6 @@ export default function SettingsView() {
 
   if (isLoading) return <div className="min-h-screen bg-slate-50 flex items-center justify-center text-slate-500">Loading settings...</div>;
 
-  // RESTORED: The Beautiful Card Layout
   const renderSimpleList = (title: string, desc: string, data: any[], endpoint: string, formType: string) => (
     <div className="fade-in">
       <div className="flex justify-between items-center mb-6">
@@ -113,7 +119,6 @@ export default function SettingsView() {
       <Toaster position="bottom-right" />
 
       <main className="flex-1 pt-32 pb-12 px-6 max-w-7xl mx-auto w-full flex flex-col md:flex-row gap-8">
-        {/* Sidebar */}
         <aside className="w-full md:w-64 shrink-0">
           <div className="bg-white border border-slate-200 rounded-2xl p-3 shadow-sm sticky top-32">
             <h3 className="text-xs font-bold uppercase text-slate-400 mb-3 px-3">Platform Settings</h3>
@@ -129,7 +134,6 @@ export default function SettingsView() {
           </div>
         </aside>
 
-        {/* Content */}
         <section className="flex-1 bg-white border border-slate-200 rounded-2xl p-8 shadow-sm min-h-[600px]">
 
           {/* USERS */}
@@ -140,17 +144,17 @@ export default function SettingsView() {
                   <h2 className="text-xl font-bold">User Management</h2>
                   <p className="text-sm text-slate-500">Manage access roles, capacities, and active intervals.</p>
                 </div>
-                <button onClick={() => setShowForm('users')} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2">
+                <button onClick={() => { setEditUserId(null); setUserForm(defaultUserForm); setShowForm('users'); }} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2">
                   <Plus size={16} /> Add User
                 </button>
               </div>
 
               {showForm === 'users' && (
                 <form onSubmit={submitUser} className="bg-slate-50 p-6 rounded-2xl border border-slate-200 mb-8 space-y-4 shadow-inner">
-                  <h3 className="font-bold text-lg mb-2">Create New User</h3>
+                  <h3 className="font-bold text-lg mb-2">{editUserId ? 'Edit User' : 'Create New User'}</h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                     <label className="text-sm font-bold text-slate-700">Name <input className="w-full mt-1 p-2.5 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" value={userForm.name} onChange={e => setUserForm({...userForm, name: e.target.value})} required /></label>
-                    <label className="text-sm font-bold text-slate-700">Email <input type="email" className="w-full mt-1 p-2.5 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" value={userForm.email} onChange={e => setUserForm({...userForm, email: e.target.value})} required /></label>
+                    <label className="text-sm font-bold text-slate-700">Email <input type="email" disabled={!!editUserId} className="w-full mt-1 p-2.5 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none disabled:opacity-50" value={userForm.email} onChange={e => setUserForm({...userForm, email: e.target.value})} required /></label>
 
                     <label className="text-sm font-bold text-slate-700">Role
                       <select className="w-full mt-1 p-2.5 border rounded-lg bg-white focus:ring-2 focus:ring-blue-500 outline-none" value={userForm.role} onChange={e => setUserForm({...userForm, role: e.target.value})}>
@@ -180,8 +184,8 @@ export default function SettingsView() {
                     </div>
                   </div>
                   <div className="flex justify-end gap-3 pt-4 border-t border-slate-200">
-                    <button type="button" onClick={() => setShowForm(null)} className="px-5 py-2.5 text-sm font-medium bg-slate-200 hover:bg-slate-300 rounded-lg transition-colors">Cancel</button>
-                    <button type="submit" className="px-5 py-2.5 text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-sm transition-colors">Save User</button>
+                    <button type="button" onClick={() => {setShowForm(null); setEditUserId(null);}} className="px-5 py-2.5 text-sm font-medium bg-slate-200 hover:bg-slate-300 rounded-lg transition-colors">Cancel</button>
+                    <button type="submit" className="px-5 py-2.5 text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-sm transition-colors">{editUserId ? 'Update User' : 'Save User'}</button>
                   </div>
                 </form>
               )}
@@ -190,7 +194,7 @@ export default function SettingsView() {
                 <table className="w-full text-left text-sm">
                   <thead className="bg-slate-50 border-b border-slate-200">
                     <tr>
-                      <th className="p-4 font-bold text-slate-600">Name / Email</th>
+                      <th className="p-4 font-bold text-slate-600">User Details</th>
                       <th className="p-4 font-bold text-slate-600">Role</th>
                       <th className="p-4 font-bold text-slate-600">Capacity</th>
                       <th className="p-4 font-bold text-slate-600 text-right">Actions</th>
@@ -200,8 +204,19 @@ export default function SettingsView() {
                     {users?.map(u => (
                       <tr key={u.id} className="hover:bg-slate-50 transition-colors">
                         <td className="p-4">
-                          <div className="font-bold text-base text-slate-900">{u.name}</div>
-                          <div className="text-slate-500 mt-0.5">{u.email}</div>
+                          <div className="flex items-center gap-3">
+                            {u.avatar_url ? (
+                              <img src={u.avatar_url} alt={u.name} className="w-9 h-9 rounded-full border border-slate-200" />
+                            ) : (
+                              <div className="w-9 h-9 rounded-full bg-slate-200 text-slate-500 flex items-center justify-center font-bold">
+                                {u.name.charAt(0)}
+                              </div>
+                            )}
+                            <div>
+                              <div className="font-bold text-base text-slate-900">{u.name}</div>
+                              <div className="text-slate-500 mt-0.5">{u.email}</div>
+                            </div>
+                          </div>
                         </td>
                         <td className="p-4">
                           <span className="px-2.5 py-1 rounded-full bg-slate-100 border border-slate-200 text-[11px] font-extrabold uppercase tracking-wider text-slate-700">
@@ -210,9 +225,22 @@ export default function SettingsView() {
                         </td>
                         <td className="p-4 font-medium text-slate-700">{u.base_capacity} cr/wk</td>
                         <td className="p-4 text-right">
-                          <button onClick={() => handleDelete('/api/users/', u.id)} className="text-slate-400 hover:text-red-500 hover:bg-red-50 p-2 rounded-lg transition-colors">
-                            <Trash2 size={18} />
-                          </button>
+                          <div className="flex justify-end gap-2">
+                            <button onClick={() => {
+                              setEditUserId(u.id);
+                              setUserForm({
+                                email: u.email, name: u.name, role: u.role, base_capacity: u.base_capacity,
+                                location_id: u.location_id || '', start_week: u.start_week || 1, start_year: u.start_year || new Date().getFullYear(),
+                                end_week: u.end_week || '', end_year: u.end_year || ''
+                              });
+                              setShowForm('users');
+                            }} className="text-slate-400 hover:text-blue-500 hover:bg-blue-50 p-2 rounded-lg transition-colors">
+                              <Edit2 size={18} />
+                            </button>
+                            <button onClick={() => handleDelete('/api/users/', u.id)} className="text-slate-400 hover:text-red-500 hover:bg-red-50 p-2 rounded-lg transition-colors">
+                              <Trash2 size={18} />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -317,7 +345,7 @@ export default function SettingsView() {
             </div>
           )}
 
-          {/* SYSTEM (FIXED CRASH) */}
+          {/* SYSTEM */}
           {activeTab === 'system' && (
             <div className="space-y-8 fade-in">
               <div>
@@ -333,7 +361,6 @@ export default function SettingsView() {
               <div>
                 <h2 className="text-xl font-bold mb-4 flex items-center gap-2"><Terminal size={20} className="text-slate-500"/> Security Audit Logs</h2>
                 <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
-                  {/* SAFE CHECK APPLIED HERE: logs?.length */}
                   {(!logs || logs?.length === 0) ? <div className="p-12 text-center text-slate-500 bg-slate-50/50">No text logs generated yet in the backend /logs folder.</div> :
                     <ul className="divide-y divide-slate-100">
                       {logs.map(log => (

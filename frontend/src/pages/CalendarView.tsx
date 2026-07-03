@@ -175,42 +175,43 @@ export default function CalendarView() {
               });
 
               return (
-                <div key={weekIdx} className="flex-1 basis-0 relative grid grid-cols-5 border-b border-slate-200 dark:border-zinc-800 last:border-b-0 min-h-[120px]">
+                <div key={weekIdx} className="relative w-full grow shrink-0 basis-auto border-b border-slate-200 dark:border-zinc-800 last:border-b-0 min-h-[120px]">
 
                   {/* Background Day Cells */}
-                  {week.map((day, dayIdx) => {
-                    const isToday = day && toDateStr(day) === toDateStr(new Date());
-                    return (
-                      <div
-                        key={dayIdx}
-                        onClick={() => {
-                          if (!day) return;
-                          const dStr = toDateStr(day);
-                          // FIX: Properly bind the current user ID
-                          const defaultUserId = currentUser?.role === 'admin' ? '' : (currentUser?.id || '');
+                  <div className="absolute inset-0 grid grid-cols-5">
+                    {week.map((day, dayIdx) => {
+                      const isToday = day && toDateStr(day) === toDateStr(new Date());
+                      return (
+                        <div
+                          key={dayIdx}
+                          onClick={() => {
+                            if (!day) return;
+                            const dStr = toDateStr(day);
+                            const defaultUserId = currentUser?.role === 'admin' ? '' : (currentUser?.id || '');
 
-                          setActiveHoliday({
-                            event_type: 'personal_time_off',
-                            user_id: defaultUserId,
-                            location_id: '',
-                            start_date: dStr,
-                            end_date: dStr
-                          });
-                          setModalOpen(true);
-                        }}
-                        className={`border-r border-slate-200 dark:border-zinc-800 last:border-r-0 p-3 cursor-pointer transition-colors ${!day ? 'bg-slate-50/50 dark:bg-zinc-950/50' : 'hover:bg-slate-50 dark:hover:bg-zinc-800/30'}`}
-                      >
-                        {day && (
-                          <span className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-sm font-bold ${isToday ? 'bg-blue-600 text-white shadow-md' : 'text-slate-600 dark:text-zinc-400'}`}>
-                            {day.getDate()}
-                          </span>
-                        )}
-                      </div>
-                    );
-                  })}
+                            setActiveHoliday({
+                              event_type: 'personal_time_off',
+                              user_id: defaultUserId,
+                              location_id: '',
+                              start_date: dStr,
+                              end_date: dStr
+                            });
+                            setModalOpen(true);
+                          }}
+                          className={`border-r border-slate-200 dark:border-zinc-800 last:border-r-0 p-3 h-full cursor-pointer transition-colors ${!day ? 'bg-slate-50/50 dark:bg-zinc-950/50' : 'hover:bg-slate-50 dark:hover:bg-zinc-800/30'}`}
+                        >
+                          {day && (
+                            <span className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-sm font-bold ${isToday ? 'bg-blue-600 text-white shadow-md' : 'text-slate-600 dark:text-zinc-400'}`}>
+                              {day.getDate()}
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
 
-                  {/* Event Bars Overlay */}
-                  <div className="absolute top-12 left-0 right-0 bottom-1 pointer-events-none grid grid-cols-5 grid-rows-[min-content] gap-y-1 overflow-y-auto px-1">
+                  {/* Event Bars Overlay - Content Layer expands parent so no absolute clipping/overlaps occur! */}
+                  <div className="relative z-10 pt-14 pb-2 pointer-events-none grid grid-cols-5 auto-rows-max gap-y-1 px-1">
                     {weekEvents.map((evt: any, evtIdx: number) => {
                       const eStart = extractDateStr(evt.start_date || evt.start);
                       const eEnd = extractDateStr(evt.end_date || evt.end);
@@ -256,6 +257,7 @@ export default function CalendarView() {
                       return (
                         <div
                           key={evt.id || evtIdx}
+                          title={label}
                           onClick={(e) => {
                             e.stopPropagation();
                             if (!canEdit) return;

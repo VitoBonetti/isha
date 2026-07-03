@@ -14,10 +14,10 @@ export function useSettings() {
   const [logs, setLogs] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  const fetchAllData = useCallback(async () => {
-    setIsLoading(true);
+  // Added isBackground flag so we don't trigger the full-page loader on interactions
+  const fetchAllData = useCallback(async (isBackground = false) => {
+    if (!isBackground) setIsLoading(true);
     try {
-      // FIX: Added trailing slashes to prevent 307 Temporary Redirect payload drops
       const [
         resUsers, resLocations, resServices,
         resCategories, resRegions, resCountries, resLogs
@@ -25,7 +25,7 @@ export function useSettings() {
         axios.get('/api/users/').catch(() => ({ data: [] })),
         axios.get('/api/locations/').catch(() => ({ data: [] })),
         axios.get('/api/services/').catch(() => ({ data: [] })),
-        axios.get('/api/board/categories').catch(() => ({ data: [] })),
+        axios.get('/api/board/categories/').catch(() => ({ data: [] })),
         axios.get('/api/regions/').catch(() => ({ data: [] })),
         axios.get('/api/countries/').catch(() => ({ data: [] })),
         axios.get('/api/system/logs/').catch(() => ({ data: { files: [] } }))
@@ -42,11 +42,11 @@ export function useSettings() {
     } catch (error) {
       toast.error('Failed to load settings data');
     } finally {
-      setIsLoading(false);
+      if (!isBackground) setIsLoading(false);
     }
   }, []);
 
-  useEffect(() => { fetchAllData(); }, [fetchAllData]);
+  useEffect(() => { fetchAllData(false); }, [fetchAllData]);
 
   const handleSave = async (endpoint: string, payload: any, isUpdate: boolean, id?: string) => {
     try {
@@ -57,7 +57,7 @@ export function useSettings() {
         await axios.post(endpoint, payload);
         toast.success('Created successfully');
       }
-      fetchAllData();
+      fetchAllData(true); // Re-fetch silently in the background
       return true;
     } catch (error: any) {
       toast.error(error.response?.data?.detail || 'Operation failed');
@@ -70,13 +70,12 @@ export function useSettings() {
     try {
       await axios.delete(`${endpoint}${id}`);
       toast.success('Deleted successfully');
-      fetchAllData();
+      fetchAllData(true); // Re-fetch silently in the background
     } catch (error: any) {
       toast.error(error.response?.data?.detail || 'Failed to delete');
     }
   };
 
-  // ... (Keep downloadLog and handleWipeSystem as they were)
   const downloadLog = async (filename: string) => {
     try {
       const response = await axios.get(`/api/system/logs/${filename}`, { responseType: 'blob' });
@@ -96,7 +95,7 @@ export function useSettings() {
       try {
         await axios.delete('/api/board/system/wipe');
         toast.success('System data wiped successfully.');
-        fetchAllData();
+        fetchAllData(true);
       } catch (error) { toast.error('Failed to wipe system.'); }
     }
   };

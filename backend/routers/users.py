@@ -19,7 +19,7 @@ def check_system_status(cursor=Depends(get_db_cursor)):
 @router.get("/")
 def get_all_users(current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     cursor.execute("""
-        SELECT id, email, name, role, base_capacity, start_week, start_year, end_week, end_year, location_id 
+        SELECT id, email, name, role, base_capacity, start_week, start_year, end_week, end_year, location_id, avatar_url 
         FROM users ORDER BY name
     """)
     users = []
@@ -27,7 +27,8 @@ def get_all_users(current_user: dict = Depends(require_admin), cursor=Depends(ge
         users.append({
             "id": r[0], "email": r[1], "name": r[2], "role": r[3],
             "base_capacity": r[4], "start_week": r[5], "start_year": r[6],
-            "end_week": r[7], "end_year": r[8], "location_id": r[9]
+            "end_week": r[7], "end_year": r[8], "location_id": r[9],
+            "avatar_url": r[10]
         })
     return users
 
