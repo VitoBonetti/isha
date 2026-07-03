@@ -32,3 +32,21 @@ def download_audit_log(filename: str, current_user: dict = Depends(require_admin
         raise HTTPException(status_code=404, detail="Log file not found.")
 
     return FileResponse(path=file_path, filename=filename, media_type="text/plain")
+
+
+@router.delete("/{filename}")
+def delete_audit_log(filename: str, current_user: dict = Depends(require_admin)):
+    """Deletes a specific daily log file."""
+    if not filename.endswith(".txt") or "/" in filename or "\\" in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename.")
+
+    file_path = os.path.join(LOGS_DIR, filename)
+
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="Log file not found.")
+
+    try:
+        os.remove(file_path)
+        return {"message": "Log file deleted."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Failed to delete file.")

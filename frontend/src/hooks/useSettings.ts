@@ -12,15 +12,15 @@ export function useSettings() {
   const [regions, setRegions] = useState<any[]>([]);
   const [countries, setCountries] = useState<any[]>([]);
   const [logs, setLogs] = useState<string[]>([]);
+  const [dbLatency, setDbLatency] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Added isBackground flag so we don't trigger the full-page loader on interactions
   const fetchAllData = useCallback(async (isBackground = false) => {
     if (!isBackground) setIsLoading(true);
     try {
       const [
         resUsers, resLocations, resServices,
-        resCategories, resRegions, resCountries, resLogs
+        resCategories, resRegions, resCountries, resLogs, resPing
       ] = await Promise.all([
         axios.get('/api/users/').catch(() => ({ data: [] })),
         axios.get('/api/locations/').catch(() => ({ data: [] })),
@@ -28,7 +28,8 @@ export function useSettings() {
         axios.get('/api/board/categories/').catch(() => ({ data: [] })),
         axios.get('/api/regions/').catch(() => ({ data: [] })),
         axios.get('/api/countries/').catch(() => ({ data: [] })),
-        axios.get('/api/system/logs/').catch(() => ({ data: { files: [] } }))
+        axios.get('/api/system/logs/').catch(() => ({ data: { files: [] } })),
+        axios.get('/api/system/ping').catch(() => ({ data: { latency_ms: null } }))
       ]);
 
       setUsers(resUsers.data || []);
@@ -38,6 +39,7 @@ export function useSettings() {
       setRegions(resRegions.data || []);
       setCountries(resCountries.data || []);
       setLogs(resLogs.data.files || []);
+      setDbLatency(resPing.data.latency_ms); // Grab latency here
 
     } catch (error) {
       toast.error('Failed to load settings data');
@@ -57,7 +59,7 @@ export function useSettings() {
         await axios.post(endpoint, payload);
         toast.success('Created successfully');
       }
-      fetchAllData(true); // Re-fetch silently in the background
+      fetchAllData(true);
       return true;
     } catch (error: any) {
       toast.error(error.response?.data?.detail || 'Operation failed');
@@ -89,15 +91,13 @@ export function useSettings() {
   };
 
   const handleWipeSystem = async () => {
-    const confirmText = window.prompt('DANGER: Type "NUKE" to permanently wipe all planning data.');
-    if (confirmText === 'NUKE') {
-      try {
-        await axios.delete('/api/board/system/wipe');
-        toast.success('System data wiped successfully.');
-        fetchAllData(true);
-      } catch (error) { toast.error('Failed to wipe system.'); }
-    }
+    try {
+      await axios.delete('/api/board/system/wipe');
+      toast.success('System data wiped successfully.');
+      fetchAllData(true);
+    } catch (error) { toast.error('Failed to wipe system.'); }
   };
 
-  return { activeTab, setActiveTab, users, locations, services, categories, regions, countries, logs, isLoading, handleSave, handleDelete, downloadLog, handleWipeSystem };
+  // MUST return dbLatency here
+  return { activeTab, setActiveTab, users, locations, services, categories, regions, countries, logs, dbLatency, isLoading, handleSave, handleDelete, downloadLog, handleWipeSystem };
 }

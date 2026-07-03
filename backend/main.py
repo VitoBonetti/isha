@@ -1,10 +1,13 @@
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import traceback
 import os
-from jose import jwt, JWTError
+import time
+from jose import jwt
 from routers import auth, services, users, regions, countries, assets, tests, board, logs, locations
+from routers.auth import require_admin
+from database import get_db_connection, release_db_connection
 from websockets_manager import manager
 from audit_logger import log_audit_event
 
@@ -88,6 +91,27 @@ async def websocket_endpoint(websocket: WebSocket):
             await websocket.receive_text()
     except WebSocketDisconnect:
         await manager.disconnect(websocket)
+
+
+@app.get("/api/system/ping")
+def ping_database(current_user: dict = Depends(require_admin)):
+    """Measures actual round-trip latency to the PostgreSQL database."""
+    start_time = time.time()
+    conn = get_db_connection()
+    if not conn:
+        return {"status": "offline", "latency_ms": 0}
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT 1")
+        cur.fetchone()
+        cur.close()
+    except Exception:
+        return {"status": "error", "latency_ms": 0}
+    finally:
+        release_db_connection(conn)
+
+    latency = round((time.time() - start_time) * 1000, 2)
+    return {"status": "online", "latency_ms": latency}
 
 
 @app.get("/api/health")

@@ -6,6 +6,7 @@ from database import get_db_cursor, db_cursor_context
 from routers.auth import get_current_user, require_admin, require_write_access
 from models import EventCreate, EventBase, ServiceCategoryCreate, ServiceCategoryBase
 from websockets_manager import manager
+from audit_logger import log_audit_event
 
 router = APIRouter(prefix="/api/board", tags=["Board & Events"])
 
@@ -173,6 +174,15 @@ def create_category(cat: ServiceCategoryCreate, current_user: dict = Depends(req
         'INSERT INTO service_categories (service_lane_id, name, target_goal) VALUES (%s, %s, %s) RETURNING id',
         (lane_id, cat.name, cat.target_goal)
     )
+
+    log_audit_event(
+        user_id=str(current_user["id"]),
+        username=current_user["name"],
+        action="CATEGORY_CREATE",
+        resource_type="CATEGORY",
+        details=f"Category {cat.name} created with target goal {cat.target_goal}. Service line ID: {lane_id}",
+    )
+
     new_id = cursor.fetchone()[0]
     cursor.connection.commit()
     return {"id": new_id}
@@ -186,6 +196,15 @@ def update_category(cat_id: str, cat: ServiceCategoryBase, background_tasks: Bac
         (cat.service_lane_id, cat.name, cat.target_goal, cat_id)
     )
     cursor.connection.commit()
+
+    log_audit_event(
+        user_id=str(current_user["id"]),
+        username=current_user["name"],
+        action="CATEGORY_UPDATE",
+        resource_type="CATEGORY",
+        details=f"Category {cat.name} updated. ID: {cat.service_lane_id}",
+    )
+
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Category updated"}
 
@@ -193,8 +212,18 @@ def update_category(cat_id: str, cat: ServiceCategoryBase, background_tasks: Bac
 @router.delete("/categories/{cat_id}")
 def delete_category(cat_id: str, background_tasks: BackgroundTasks,
                     current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    service_category_name = cursor.execute('SELECT name FROM service_categories WHERE id=%s', (cat_id,)).fetchone()[0]
     cursor.execute('DELETE FROM service_categories WHERE id=%s', (cat_id,))
     cursor.connection.commit()
+
+    log_audit_event(
+        user_id=str(current_user["id"]),
+        username=current_user["name"],
+        action="CATEGORY_DELETE",
+        resource_type="CATEGORY",
+        details=f"Category {service_category_name} deleted. ID: {cat_id}",
+    )
+
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Category deleted"}
 
@@ -227,6 +256,15 @@ def create_event(e: EventCreate, background_tasks: BackgroundTasks,
         (u_id, e_type, loc_id, e.start_date, e.end_date)
     )
     cursor.connection.commit()
+
+    log_audit_event(
+        user_id=str(current_user["id"]),
+        username=current_user["name"],
+        action="EVENT_CREATED",
+        resource_type="EVENTS",
+        details=f"Event {e_type} created. Start:{e.start_date} End:{e.end_date}"
+    )
+
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"status": "ok"}
 
@@ -243,6 +281,15 @@ def update_event(event_id: str, e: EventBase, background_tasks: BackgroundTasks,
         (e_type, loc_id, e.start_date, e.end_date, event_id)
     )
     cursor.connection.commit()
+
+    log_audit_event(
+        user_id=str(current_user["id"]),
+        username=current_user["name"],
+        action="EVENT_UPDATED",
+        resource_type="EVENTS",
+        details=f"Event {event_id} updated."
+    )
+
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Event updated"}
 
@@ -258,5 +305,55 @@ def delete_event(event_id: str, background_tasks: BackgroundTasks,
 
     cursor.execute('DELETE FROM events WHERE id=%s', (event_id,))
     cursor.connection.commit()
+
+    log_audit_event(
+        user_id=str(current_user["id"]),
+        username=current_user["name"],
+        action="EVENT_DELETE",
+        resource_type="EVENTS",
+        details=f"Event {event_id} deleted."
+    )
+
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Event deleted"}
+
+
+@router.delete("/system/wipe")
+def wipe_system_data(background_tasks: BackgroundTasks,
+                     current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    """
+    FACTORY RESET:
+    Wipes all planning data (Tests, Assignments, Assets, Notifications, Categories, Regions, Countries).
+    Preserves structural configurations (Users, Events, Locations).
+    """
+    try:
+        cursor.execute("""
+            TRUNCATE TABLE notifications CASCADE;
+            TRUNCATE TABLE countries CASCADE;
+            TRUNCATE TABLE regions CASCADE;
+            TRUNCATE TABLE assignments CASCADE;
+            TRUNCATE TABLE test_assets CASCADE;
+            TRUNCATE TABLE tests CASCADE;
+            TRUNCATE TABLE assets CASCADE;
+            TRUNCATE TABLE raw_assets CASCADE;
+            TRUNCATE TABLE service_lanes CASCADE;
+            TRUNCATE TABLE service_categories CASCADE;
+        """)
+        cursor.connection.commit()
+
+        log_audit_event(
+            user_id=str(current_user["id"]),
+            username=current_user["name"],
+            action="FACTORY_RESET",
+            resource_type="DATABASE",
+            details="Administrator successfully wiped all transactional data (Tests, Assignments, Assets)."
+        )
+
+        # Broadcast the wipe to all connected clients
+        background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+        background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
+
+        return {"message": "System data wiped successfully."}
+    except Exception as e:
+        cursor.connection.rollback()
+        raise HTTPException(status_code=500, detail="Failed to wipe system data.")

@@ -28,16 +28,17 @@ def upgrade():
 
         INSERT INTO locations (name) VALUES ('Global');
 
-        CREATE TABLE IF NOT EXISTS countries (
-            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            code VARCHAR(10) UNIQUE NOT NULL, 
-            name VARCHAR(100) NOT NULL,
-            is_active BOOLEAN DEFAULT TRUE
-        );
-
         CREATE TABLE IF NOT EXISTS regions (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             name VARCHAR(50) UNIQUE NOT NULL,
+            is_active BOOLEAN DEFAULT TRUE
+        );
+
+        CREATE TABLE IF NOT EXISTS countries (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            region_id UUID REFERENCES regions(id) ON DELETE CASCADE,
+            code VARCHAR(10) UNIQUE NOT NULL, 
+            name VARCHAR(100) NOT NULL,
             is_active BOOLEAN DEFAULT TRUE
         );
 

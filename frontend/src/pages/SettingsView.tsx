@@ -8,7 +8,7 @@ import { Users, MapPin, Activity, Tags, Globe, Flag, Server, Trash2, Download, A
 export default function SettingsView() {
   const {
     activeTab, setActiveTab,
-    users, locations, services, categories, regions, countries, logs, isLoading,
+    users, locations, services, categories, regions, countries, logs, dbLatency, isLoading,
     handleSave, handleDelete, downloadLog, handleWipeSystem
   } = useSettings();
 
@@ -40,6 +40,9 @@ export default function SettingsView() {
   const defaultCountryForm = { code: '', name: '', region_id: '', is_active: true };
   const [countryForm, setCountryForm] = useState(defaultCountryForm);
   const [editCountryId, setEditCountryId] = useState<string | null>(null);;
+
+  const [nukeModalOpen, setNukeModalOpen] = useState(false);
+  const [nukeText, setNukeText] = useState("");
 
   const confirmDelete = (endpoint: string, id: string, name: string) => {
     setDeleteModal({ isOpen: true, endpoint, id, name });
@@ -162,6 +165,42 @@ export default function SettingsView() {
         onConfirm={executeDelete}
         onCancel={() => setDeleteModal(null)}
       />
+
+      {nukeModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/50 dark:bg-zinc-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-2xl p-6 w-full max-w-md shadow-2xl animate-in zoom-in-95">
+            <div className="flex items-start gap-4">
+              <div className="bg-red-100 dark:bg-red-500/10 text-red-600 dark:text-red-400 p-3 rounded-full shrink-0 border border-red-200 dark:border-red-500/20">
+                <AlertTriangle size={24} />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-slate-900 dark:text-zinc-100">Factory Reset</h3>
+                <p className="text-sm text-slate-500 dark:text-zinc-400 mt-1">This will permanently delete all tests, assets, events, and assignments. Configurations and users will be kept.</p>
+              </div>
+            </div>
+            <div className="mt-6">
+              <label className="block text-sm font-bold text-slate-700 dark:text-zinc-300 mb-2">Type "NUKE" to confirm:</label>
+              <input
+                type="text"
+                className={inputClasses}
+                value={nukeText}
+                onChange={(e) => setNukeText(e.target.value)}
+                placeholder="NUKE"
+              />
+            </div>
+            <div className="flex justify-end gap-3 mt-6">
+              <button onClick={() => {setNukeModalOpen(false); setNukeText("");}} className="px-4 py-2 text-sm font-medium bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-300 rounded-lg transition-colors">Cancel</button>
+              <button
+                onClick={() => { if(nukeText === 'NUKE') { handleWipeSystem(); setNukeModalOpen(false); setNukeText(""); } }}
+                disabled={nukeText !== 'NUKE'}
+                className="px-4 py-2 text-sm font-medium bg-red-600 hover:bg-red-700 disabled:bg-slate-300 dark:disabled:bg-zinc-800 text-white rounded-lg shadow-sm transition-colors"
+              >
+                Execute Reset
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <main className="flex-1 pt-32 pb-12 px-6 max-w-7xl mx-auto w-full flex flex-col md:flex-row gap-8">
         {/* Sidebar */}
@@ -641,7 +680,19 @@ export default function SettingsView() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="border border-slate-200 dark:border-zinc-800 rounded-2xl p-5 flex justify-between items-center bg-slate-50 dark:bg-zinc-900 shadow-sm">
                     <span className="font-bold text-slate-700 dark:text-zinc-300">PostgreSQL Primary</span>
-                    <span className="flex items-center gap-2 text-sm text-emerald-700 dark:text-emerald-400 font-extrabold uppercase tracking-wider bg-emerald-100 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/20 px-3 py-1.5 rounded-full"><div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div> Connected</span>
+
+                    {dbLatency !== null ? (
+                      <span className="flex items-center gap-2 text-sm text-emerald-700 dark:text-emerald-400 font-extrabold uppercase tracking-wider bg-emerald-100 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/20 px-3 py-1.5 rounded-full">
+                        <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
+                        Connected ({dbLatency}ms)
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-2 text-sm text-red-700 dark:text-red-400 font-extrabold uppercase tracking-wider bg-red-100 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 px-3 py-1.5 rounded-full">
+                        <div className="w-2 h-2 rounded-full bg-red-500"></div>
+                        Offline
+                      </span>
+                    )}
+
                   </div>
                 </div>
               </div>
@@ -654,7 +705,11 @@ export default function SettingsView() {
                       {logs.map(log => (
                         <li key={log} className="p-4 flex justify-between items-center hover:bg-slate-50 dark:hover:bg-zinc-800/50 transition-colors">
                           <span className="font-mono text-sm font-medium text-slate-700 dark:text-zinc-300">{log}</span>
-                          <button onClick={() => downloadLog(log)} className="text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-500/10 px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-bold transition-colors"><Download size={16} /> Download</button>
+                          <div className="flex gap-2">
+                            <button onClick={() => downloadLog(log)} className="text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-500/10 px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-bold transition-colors"><Download size={16} /> Download</button>
+                            {/* Reusing our awesome Confirm Modal for Log Deletion! */}
+                            <button onClick={() => confirmDelete('/api/system/logs/', log, log)} className="text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-bold transition-colors"><Trash2 size={16} /> Delete</button>
+                          </div>
                         </li>
                       ))}
                     </ul>
@@ -663,7 +718,7 @@ export default function SettingsView() {
               </div>
               <div className="pt-6 border-t border-slate-200 dark:border-zinc-800">
                 <h2 className="text-xl font-bold text-red-600 dark:text-red-500 mb-2 flex items-center gap-2"><AlertTriangle size={20} /> Danger Zone</h2>
-                <button onClick={handleWipeSystem} className="bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-8 rounded-xl shadow-sm mt-4 transition-colors focus:ring-4 focus:ring-red-500/20">Execute Factory Reset</button>
+                <button onClick={() => setNukeModalOpen(true)} className="bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-8 rounded-xl shadow-sm mt-4 transition-colors focus:ring-4 focus:ring-red-500/20">Execute Factory Reset</button>
               </div>
             </div>
           )}
