@@ -33,6 +33,7 @@ class Tests(Base):
     services_lanes = relationship("ServiceLanes", back_populates="tests")
     service_categories = relationship("ServiceCategories", back_populates="tests")
     assignments = relationship("Assignments", back_populates="tests")
+    test_history = relationship("TestHistory", back_populates="tests", cascade="all, delete-orphan")
 
 
 class TestAssets(Base):
