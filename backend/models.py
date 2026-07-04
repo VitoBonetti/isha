@@ -77,6 +77,7 @@ class AssetBase(BaseModel):
     name: str
     country_id: Optional[UUID4] = None
     service_forecast_id: Optional[UUID4] = None
+    category_id: Optional[UUID4] = None
 
 class RawAssetCreate(AssetBase):
     description: Optional[str] = None

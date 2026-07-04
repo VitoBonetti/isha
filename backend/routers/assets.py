@@ -49,7 +49,7 @@ def get_raw_assets(
         LEFT JOIN service_lanes s ON r.service_forecast_id = s.id
         LEFT JOIN assets a ON r.id = a.raw_asset_id
         {where_str}
-        ORDER BY r.date_first_seen DESC
+        ORDER BY r.name DESC
         LIMIT %s OFFSET %s
     """
 
@@ -61,10 +61,23 @@ def get_raw_assets(
 @router.post("/raw")
 def create_manual_raw_asset(asset: RawAssetCreate, background_tasks: BackgroundTasks,
                             current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    # FIX: Explicitly cast UUID4 objects to strings for psycopg2
+    c_id = str(asset.country_id) if asset.country_id else None
+    s_id = str(asset.service_forecast_id) if asset.service_forecast_id else None
+    cat_id = str(asset.category_id) if asset.category_id else None
+
     cursor.execute("""
-        INSERT INTO raw_assets (name, description, business_critical, country_id, service_forecast_id)
-        VALUES (%s, %s, %s, %s, %s) RETURNING id
-    """, (asset.name, asset.description, asset.business_critical, asset.country_id, asset.service_forecast_id))
+        INSERT INTO raw_assets (
+            name, description, business_critical, 
+            confidentiality_rating, integrity_rating, availability_rating, 
+            country_id, service_forecast_id, category_id
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
+    """, (
+        asset.name, asset.description, asset.business_critical,
+        asset.confidentiality_rating, asset.integrity_rating, asset.availability_rating,
+        c_id, s_id, cat_id
+    ))
 
     new_id = cursor.fetchone()[0]
     cursor.connection.commit()
