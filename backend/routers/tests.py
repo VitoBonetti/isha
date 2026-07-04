@@ -4,7 +4,7 @@ from pydantic import BaseModel, UUID4
 from database import get_db_cursor, db_cursor_context
 from routers.auth import get_current_user, require_admin
 from websockets_manager import manager
-from models import TestCreate, TestBase, AssignmentBase
+from schema import TestCreate, TestBase, AssignmentBase
 
 router = APIRouter(prefix="/api/tests", tags=["Tests & Assignments"])
 

@@ -5,7 +5,7 @@ import pandas as pd
 import io
 from database import get_db_cursor, db_cursor_context
 from routers.auth import get_current_user, require_admin
-from models import RawAssetCreate, AssetBase
+from schema import RawAssetCreate, AssetBase
 from websockets_manager import manager
 
 router = APIRouter(prefix="/api/assets", tags=["Assets"])
@@ -13,8 +13,8 @@ router = APIRouter(prefix="/api/assets", tags=["Assets"])
 class PromoteAssetRequest(BaseModel):
     raw_asset_ids: List[UUID4]
 
-# --- 1. RAW ASSETS (The Intake Source) ---
 
+# --- RAW ASSETS (The Intake Source) ---
 @router.get("/raw")
 def get_raw_assets(
         page: int = Query(1, ge=1), limit: int = Query(50, ge=1, le=500),
@@ -74,6 +74,7 @@ def get_raw_assets(
     columns = [col[0] for col in cursor.description]
     return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
+
 @router.post("/raw")
 def create_manual_raw_asset(asset: RawAssetCreate, background_tasks: BackgroundTasks,
                             current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
@@ -99,6 +100,7 @@ def create_manual_raw_asset(asset: RawAssetCreate, background_tasks: BackgroundT
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
     return {"message": "Raw Asset created", "id": new_id}
 
+
 @router.get("/raw/{raw_id}")
 def get_single_raw_asset(raw_id: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
     cursor.execute("""
@@ -113,6 +115,7 @@ def get_single_raw_asset(raw_id: str, current_user: dict = Depends(get_current_u
     if not row: raise HTTPException(status_code=404, detail="Asset not found")
     columns = [col[0] for col in cursor.description]
     return dict(zip(columns, row))
+
 
 @router.put("/raw/{raw_id}")
 def update_raw_asset(raw_id: str, asset: RawAssetCreate, background_tasks: BackgroundTasks,
@@ -136,6 +139,7 @@ def update_raw_asset(raw_id: str, asset: RawAssetCreate, background_tasks: Backg
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
     return {"message": "Raw Asset updated"}
 
+
 @router.delete("/raw/{raw_id}")
 def delete_raw_asset(raw_id: str, background_tasks: BackgroundTasks,
                      current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
@@ -145,27 +149,40 @@ def delete_raw_asset(raw_id: str, background_tasks: BackgroundTasks,
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
     return {"message": "Asset permanently deleted"}
 
-def process_excel_import(contents: bytes):
+
+def process_excel_import(contents: bytes, filename: str):
     with db_cursor_context() as cursor:
         if not cursor: return
         try:
-            df = pd.read_excel(io.BytesIO(contents))
+            # Smart fallback: Parse as CSV if the file extension matches
+            if filename.lower().endswith('.csv'):
+                df = pd.read_csv(io.BytesIO(contents))
+            else:
+                df = pd.read_excel(io.BytesIO(contents))
+
             df = df.fillna('')
             for _, row in df.iterrows():
                 name = str(row.get('Name', '')).strip()
                 if not name: continue
-                cursor.execute("INSERT INTO raw_assets (name, description) VALUES (%s, %s)", (name, str(row.get('Description', ''))))
+
+                cursor.execute(
+                    "INSERT INTO raw_assets (name, description) VALUES (%s, %s)",
+                    (name, str(row.get('Description', '')))
+                )
         except Exception as e:
             print(f"Import Failed: {e}")
 
+
 @router.post("/raw/import")
-async def import_assets(file: UploadFile = File(...), background_tasks: BackgroundTasks = BackgroundTasks(), current_user: dict = Depends(require_admin)):
+async def import_assets(file: UploadFile = File(...), background_tasks: BackgroundTasks = BackgroundTasks(),
+                        current_user: dict = Depends(require_admin)):
     contents = await file.read()
-    background_tasks.add_task(process_excel_import, contents)
+    # Pass the filename so Pandas knows how to parse it
+    background_tasks.add_task(process_excel_import, contents, file.filename)
     return {"message": "Standard format import started in the background."}
 
-# --- 2. THE PROMOTION ENGINE ---
 
+# --- THE PROMOTION ENGINE ---
 @router.post("/promote")
 def promote_raw_assets_to_pool(req: PromoteAssetRequest, background_tasks: BackgroundTasks,
                                current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
@@ -188,8 +205,8 @@ def promote_raw_assets_to_pool(req: PromoteAssetRequest, background_tasks: Backg
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
     return {"message": f"Successfully promoted {promoted} assets to the Active Pool."}
 
-# --- 3. ACTIVE ASSET POOL ---
 
+# --- ACTIVE ASSET POOL ---
 @router.get("/")
 def get_active_asset_pool(current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
     if current_user['role'] == 'pentester':
@@ -204,6 +221,7 @@ def get_active_asset_pool(current_user: dict = Depends(get_current_user), cursor
     ''')
     columns = [col[0] for col in cursor.description]
     return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
 
 @router.delete("/{asset_id}")
 def remove_from_active_pool(asset_id: str, background_tasks: BackgroundTasks,

@@ -3,6 +3,8 @@ from dotenv import load_dotenv
 from psycopg2 import pool
 from fastapi import HTTPException
 from contextlib import contextmanager
+from sqlalchemy import create_engine
+from sqlalchemy.orm import declarative_base, sessionmaker
 
 env_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env')
 load_dotenv(env_path)
@@ -14,21 +16,25 @@ DB_HOST = os.environ.get("DB_HOST")
 DB_PORT = os.environ.get("DB_PORT",)
 DB_NAME = os.environ.get("POSTGRES_DB")
 
-# Create a thread-safe connection pool
+# Sqlalchemy orm setup for all the models
+# ---------------------------------------
+DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+engine = create_engine(DATABASE_URL)  # The engine connects to the database
+Base = declarative_base()  # The Base class that all your models will inherit from
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)  # SessionLocal is used if you eventually want to write routes using the ORM
+
+# raw psycopg2 setup for the routes
+# ---------------------------------
 try:
     connection_pool = pool.ThreadedConnectionPool(
-        minconn=1,
-        maxconn=20,
-        user=DB_USER,
-        password=DB_PASSWORD,
-        host=DB_HOST,
-        port=DB_PORT,
-        database=DB_NAME
+        minconn=1, maxconn=20,
+        user=DB_USER, password=DB_PASSWORD, host=DB_HOST, port=DB_PORT, database=DB_NAME
     )
     print("✅ Successfully connected to PostgreSQL Pool")
 except Exception as e:
     print(f"🚨 Failed to initialize database pool: {e}")
     connection_pool = None
+
 
 def get_db_connection():
     if not connection_pool:

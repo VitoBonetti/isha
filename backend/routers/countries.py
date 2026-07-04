@@ -3,7 +3,7 @@ from pydantic import BaseModel, UUID4
 from typing import Optional
 from database import get_db_cursor
 from routers.auth import get_current_user, require_admin
-from models import CountryBase
+from schema import CountryBase
 
 
 router = APIRouter(prefix="/api/countries", tags=["Countries"])

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, BackgroundTasks
 from database import get_db_cursor
 from routers.auth import require_admin
-from models import ServiceLaneBase
+from schema import ServiceLaneBase
 from websockets_manager import manager
 
 router = APIRouter(prefix="/api/services", tags=["Services"])

@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timedelta
 from database import get_db_cursor, db_cursor_context
 from routers.auth import get_current_user, require_admin, require_write_access
-from models import EventCreate, EventBase, ServiceCategoryCreate, ServiceCategoryBase
+from schema import EventCreate, EventBase, ServiceCategoryCreate, ServiceCategoryBase
 from websockets_manager import manager
 from audit_logger import log_audit_event
 

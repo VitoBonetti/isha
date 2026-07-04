@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, BackgroundTasks
 from database import get_db_cursor
 from routers.auth import get_current_user, require_admin
-from models import UserCreate, UserBase
+from schema import UserCreate, UserBase
 from websockets_manager import manager
 from datetime import datetime
 
