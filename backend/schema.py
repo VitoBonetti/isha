@@ -76,6 +76,7 @@ class NotificationResponse(BaseModel):
 # --- ASSETS ---
 class AssetBase(BaseModel):
     name: str
+    asset_type_id: UUID4
     country_id: Optional[UUID4] = None
     service_forecast_id: Optional[UUID4] = None
     category_id: Optional[UUID4] = None
@@ -86,6 +87,7 @@ class RawAssetCreate(AssetBase):
     confidentiality_rating: Optional[int] = None
     integrity_rating: Optional[int] = None
     availability_rating: Optional[int] = None
+    facing_internet: bool = False
 
 class AssetResponse(AssetBase):
     id: UUID4

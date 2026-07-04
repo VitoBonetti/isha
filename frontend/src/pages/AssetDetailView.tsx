@@ -14,6 +14,7 @@ export default function AssetDetailView() {
   const [countries, setCountries] = useState<any[]>([]);
   const [services, setServices] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
+  const [assetTypes, setAssetTypes] = useState<any[]>([]);
 
   const [asset, setAsset] = useState<any>(null);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
@@ -23,8 +24,10 @@ export default function AssetDetailView() {
       axios.get(`/api/assets/raw/${id}`),
       axios.get('/api/countries/'),
       axios.get('/api/services/'),
-      axios.get('/api/board/categories/')
-    ]).then(([resAsset, resC, resS, resCat]) => {
+      axios.get('/api/board/categories/'),
+      axios.get('/api/assets/types')
+    ]).then(([resAsset, resC, resS, resCat, resTypes]) => {
+      setAssetTypes(resTypes.data);
       setAsset(resAsset.data);
       setCountries(resC.data);
       setServices(resS.data);
@@ -95,14 +98,29 @@ export default function AssetDetailView() {
           </div>
 
           <form onSubmit={handleUpdate} className="space-y-8">
-            <div className="grid grid-cols-1 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
               <div>
                 <label className="text-sm font-bold text-slate-700 dark:text-zinc-300">Asset Name *</label>
                 <input required className={inputClasses} value={asset.name} onChange={e => setAsset({...asset, name: e.target.value})} />
               </div>
               <div>
+                <label className="text-sm font-bold text-slate-700 dark:text-zinc-300">Asset Type *</label>
+                <select required className={inputClasses} value={asset.asset_type_id} onChange={e => setAsset({...asset, asset_type_id: e.target.value})}>
+                  {assetTypes.map(at => <option key={at.id} value={at.id}>{at.name}</option>)}
+                </select>
+              </div>
+              <div className="sm:col-span-2">
                 <label className="text-sm font-bold text-slate-700 dark:text-zinc-300">Description</label>
-                <textarea className={`${inputClasses} resize-none h-32`} value={asset.description || ""} onChange={e => setAsset({...asset, description: e.target.value})} />
+                <textarea className={`${inputClasses} resize-none h-24`} value={asset.description || ""} onChange={e => setAsset({...asset, description: e.target.value})} />
+              </div>
+
+              <div className="sm:col-span-2">
+                <label className="flex items-center w-fit gap-3 p-3 bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-lg cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800/50 transition-colors">
+                  <input type="checkbox" className="h-4 w-4 rounded text-emerald-500 border-slate-300" checked={asset.facing_internet} onChange={e => setAsset({...asset, facing_internet: e.target.checked})} />
+                  <div className="flex flex-col">
+                    <span className="text-sm font-bold text-slate-700 dark:text-zinc-300">Facing Internet</span>
+                  </div>
+                </label>
               </div>
             </div>
 

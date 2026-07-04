@@ -9,7 +9,7 @@ class Events(Base):
     __tablename__ = 'events'
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    user_id = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='CASCADE'), nullable=True)
     event_type = Column(String(50))
     location_id = Column(UUID(as_uuid=True), ForeignKey('locations.id', ondelete='CASCADE'))
     start_date = Column(Date)

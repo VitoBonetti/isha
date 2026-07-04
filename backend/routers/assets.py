@@ -11,8 +11,17 @@ from websockets_manager import manager
 
 router = APIRouter(prefix="/api/assets", tags=["Assets"])
 
+
 class PromoteAssetRequest(BaseModel):
     raw_asset_ids: List[UUID4]
+
+
+# --- ASSET TYPES DICTIONARY ---
+@router.get("/types")
+def get_asset_types(current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+    cursor.execute("SELECT id, name FROM asset_types ORDER BY name ASC")
+    columns = [col[0] for col in cursor.description]
+    return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
 
 # --- RAW ASSETS (The Intake Source) ---
@@ -47,30 +56,27 @@ def get_raw_assets(
 
     where_str = "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
 
-    # Map frontend sort keys to database columns securely
     sort_map = {
-        "name": "r.name",
-        "country": "c.name",
-        "service": "s.name",
-        "category": "cat.name",
-        "status": "is_promoted"
+        "name": "r.name", "country": "c.name", "service": "s.name",
+        "category": "cat.name", "type": "at.name", "status": "is_promoted"
     }
     order_col = sort_map.get(sort_by, "r.name")
     order_dir = "DESC" if sort_dir.lower() == "desc" else "ASC"
 
     query = f"""
         SELECT r.id, r.name, c.name as country_name, s.name as service_name, cat.name as category_name,
+               at.name as asset_type_name, r.facing_internet,
                CASE WHEN a.id IS NOT NULL THEN true ELSE false END as is_promoted
         FROM raw_assets r
         LEFT JOIN countries c ON r.country_id = c.id
         LEFT JOIN services_lanes s ON r.service_forecast_id = s.id
         LEFT JOIN service_categories cat ON r.category_id = cat.id
+        LEFT JOIN asset_types at ON r.asset_type_id = at.id
         LEFT JOIN assets a ON r.id = a.raw_asset_id
         {where_str}
         ORDER BY {order_col} {order_dir}
         LIMIT %s OFFSET %s
     """
-
     cursor.execute(query, tuple(params + [limit, offset]))
     columns = [col[0] for col in cursor.description]
     return [dict(zip(columns, row)) for row in cursor.fetchall()]
@@ -82,20 +88,21 @@ def create_manual_raw_asset(asset: RawAssetCreate, background_tasks: BackgroundT
     c_id = str(asset.country_id) if asset.country_id else None
     s_id = str(asset.service_forecast_id) if asset.service_forecast_id else None
     cat_id = str(asset.category_id) if asset.category_id else None
+    at_id = str(asset.asset_type_id)
+
     new_raw_assets_id = str(uuid.uuid4())
     cursor.execute("""
         INSERT INTO raw_assets (
             id, name, description, business_critical, 
             confidentiality_rating, integrity_rating, availability_rating, 
-            country_id, service_forecast_id, category_id
+            country_id, service_forecast_id, category_id, asset_type_id, facing_internet
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
     """, (
         new_raw_assets_id, asset.name, asset.description, asset.business_critical,
         asset.confidentiality_rating, asset.integrity_rating, asset.availability_rating,
-        c_id, s_id, cat_id
+        c_id, s_id, cat_id, at_id, asset.facing_internet
     ))
-
     new_id = cursor.fetchone()[0]
     cursor.connection.commit()
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
@@ -106,7 +113,8 @@ def create_manual_raw_asset(asset: RawAssetCreate, background_tasks: BackgroundT
 def get_single_raw_asset(raw_id: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
     cursor.execute("""
         SELECT r.id, r.name, r.description, r.business_critical, r.confidentiality_rating, 
-               r.integrity_rating, r.availability_rating, r.country_id, r.service_forecast_id, r.category_id,
+               r.integrity_rating, r.availability_rating, r.country_id, r.service_forecast_id, 
+               r.category_id, r.asset_type_id, r.facing_internet,
                CASE WHEN a.id IS NOT NULL THEN true ELSE false END as is_promoted
         FROM raw_assets r
         LEFT JOIN assets a ON r.id = a.raw_asset_id
@@ -124,17 +132,18 @@ def update_raw_asset(raw_id: str, asset: RawAssetCreate, background_tasks: Backg
     c_id = str(asset.country_id) if asset.country_id else None
     s_id = str(asset.service_forecast_id) if asset.service_forecast_id else None
     cat_id = str(asset.category_id) if asset.category_id else None
+    at_id = str(asset.asset_type_id)
 
     cursor.execute("""
         UPDATE raw_assets 
         SET name=%s, description=%s, business_critical=%s, 
             confidentiality_rating=%s, integrity_rating=%s, availability_rating=%s, 
-            country_id=%s, service_forecast_id=%s, category_id=%s
+            country_id=%s, service_forecast_id=%s, category_id=%s, asset_type_id=%s, facing_internet=%s
         WHERE id=%s
     """, (
         asset.name, asset.description, asset.business_critical,
         asset.confidentiality_rating, asset.integrity_rating, asset.availability_rating,
-        c_id, s_id, cat_id, raw_id
+        c_id, s_id, cat_id, at_id, asset.facing_internet, raw_id
     ))
     cursor.connection.commit()
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
@@ -144,7 +153,6 @@ def update_raw_asset(raw_id: str, asset: RawAssetCreate, background_tasks: Backg
 @router.delete("/raw/{raw_id}")
 def delete_raw_asset(raw_id: str, background_tasks: BackgroundTasks,
                      current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
-    # Deleting the raw asset automatically removes it from the active pool via SQL CASCADE
     cursor.execute("DELETE FROM raw_assets WHERE id = %s", (raw_id,))
     cursor.connection.commit()
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
@@ -192,16 +200,15 @@ def promote_raw_assets_to_pool(req: PromoteAssetRequest, background_tasks: Backg
         cursor.execute("SELECT id FROM assets WHERE raw_asset_id = %s", (str(raw_id),))
         if cursor.fetchone(): continue
 
-        cursor.execute("SELECT name, country_id, service_forecast_id, category_id FROM raw_assets WHERE id = %s", (str(raw_id),))
+        cursor.execute("SELECT name, country_id, service_forecast_id, category_id, asset_type_id FROM raw_assets WHERE id = %s", (str(raw_id),))
         raw_data = cursor.fetchone()
         if not raw_data: continue
 
         new_promote_id = str(uuid.uuid4())
-
         cursor.execute("""
-            INSERT INTO assets (id, raw_asset_id, name, country_id, service_forecast_id, category_id)
-            VALUES (%s, %s, %s, %s, %s, %s)
-        """, (new_promote_id, str(raw_id), raw_data[0], raw_data[1], raw_data[2], raw_data[3]))
+            INSERT INTO assets (id, raw_asset_id, name, country_id, service_forecast_id, category_id, asset_type_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """, (new_promote_id, str(raw_id), raw_data[0], raw_data[1], raw_data[2], raw_data[3], raw_data[4]))
         promoted += 1
 
     cursor.connection.commit()
@@ -215,11 +222,12 @@ def get_active_asset_pool(current_user: dict = Depends(get_current_user), cursor
     if current_user['role'] == 'pentester':
         raise HTTPException(status_code=403, detail="Pentesters cannot view the unassigned asset inventory.")
     cursor.execute('''
-        SELECT a.id, a.name, c.name as country, s.name as service_forecast, cat.name as category_name, a.is_assigned
+        SELECT a.id, a.name, c.name as country, s.name as service_forecast, cat.name as category_name, at.name as asset_type_name, a.is_assigned
         FROM assets a
         LEFT JOIN countries c ON a.country_id = c.id
         LEFT JOIN services_lanes s ON a.service_forecast_id = s.id
         LEFT JOIN service_categories cat ON a.category_id = cat.id
+        LEFT JOIN asset_types at ON a.asset_type_id = at.id
         ORDER BY a.name ASC
     ''')
     columns = [col[0] for col in cursor.description]

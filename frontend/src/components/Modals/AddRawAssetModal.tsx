@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Plus, ShieldAlert } from 'lucide-react';
+import { X, Plus, ShieldAlert, Globe } from 'lucide-react';
 import axios from 'axios';
 import toast from 'react-hot-toast';
 
@@ -10,12 +10,15 @@ interface AddRawAssetModalProps {
   countries: any[];
   services: any[];
   categories: any[];
+  assetTypes: any[];
 }
 
-export default function AddRawAssetModal({ isOpen, onClose, onSuccess, countries, services, categories }: AddRawAssetModalProps) {
+export default function AddRawAssetModal({ isOpen, onClose, onSuccess, countries, services, categories, assetTypes }: AddRawAssetModalProps) {
   const [newAsset, setNewAsset] = useState({
     name: "",
     description: "",
+    asset_type_id: "",
+    facing_internet: false,
     country_id: "",
     service_forecast_id: "",
     category_id: "",
@@ -26,7 +29,6 @@ export default function AddRawAssetModal({ isOpen, onClose, onSuccess, countries
 
   if (!isOpen) return null;
 
-  // FIX: Sum the values, but cap the absolute maximum at 9
   const businessCritical = Math.min(
     9,
     newAsset.confidentiality_rating + newAsset.integrity_rating + newAsset.availability_rating
@@ -48,7 +50,7 @@ export default function AddRawAssetModal({ isOpen, onClose, onSuccess, countries
       await axios.post('/api/assets/raw', payload);
       toast.success("Asset added successfully!");
 
-      setNewAsset({ name: "", description: "", country_id: "", service_forecast_id: "", category_id: "", confidentiality_rating: 0, integrity_rating: 0, availability_rating: 0 });
+      setNewAsset({ name: "", description: "", asset_type_id: "", facing_internet: false, country_id: "", service_forecast_id: "", category_id: "", confidentiality_rating: 0, integrity_rating: 0, availability_rating: 0 });
       onSuccess();
       onClose();
     } catch (error) {
@@ -64,8 +66,7 @@ export default function AddRawAssetModal({ isOpen, onClose, onSuccess, countries
       <div className="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-2xl p-6 w-full max-w-xl shadow-2xl animate-in zoom-in-95 my-8">
         <div className="flex justify-between items-center mb-6 border-b border-slate-100 dark:border-zinc-800 pb-4">
           <h2 className="text-xl font-bold flex items-center gap-2">
-            <Plus size={20} className="text-emerald-500" />
-            Add Raw Asset
+            <Plus size={20} className="text-emerald-500" /> Add Raw Asset
           </h2>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-900 dark:hover:text-zinc-100 transition-colors">
             <X size={20} />
@@ -74,15 +75,32 @@ export default function AddRawAssetModal({ isOpen, onClose, onSuccess, countries
 
         <form onSubmit={handleCreateAsset} className="space-y-5">
           {/* Basic Info */}
-          <div>
-            <label className="text-sm font-bold text-slate-700 dark:text-zinc-300">Asset Name *</label>
-            <input required className={inputClasses} value={newAsset.name} onChange={e => setNewAsset({...newAsset, name: e.target.value})} placeholder="e.g. Primary Banking API" />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="text-sm font-bold text-slate-700 dark:text-zinc-300">Asset Name *</label>
+              <input required className={inputClasses} value={newAsset.name} onChange={e => setNewAsset({...newAsset, name: e.target.value})} placeholder="e.g. Primary Banking API" />
+            </div>
+            <div>
+              <label className="text-sm font-bold text-slate-700 dark:text-zinc-300">Asset Type *</label>
+              <select required className={inputClasses} value={newAsset.asset_type_id} onChange={e => setNewAsset({...newAsset, asset_type_id: e.target.value})}>
+                <option value="" disabled>-- Select Type --</option>
+                {assetTypes.map(at => <option key={at.id} value={at.id}>{at.name}</option>)}
+              </select>
+            </div>
           </div>
 
           <div>
             <label className="text-sm font-bold text-slate-700 dark:text-zinc-300">Description</label>
             <textarea className={`${inputClasses} resize-none h-20`} value={newAsset.description} onChange={e => setNewAsset({...newAsset, description: e.target.value})} placeholder="Brief overview of the asset..." />
           </div>
+
+          <label className="flex items-center gap-3 p-3 bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-lg cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800/50 transition-colors">
+            <input type="checkbox" className="h-4 w-4 rounded text-emerald-500 border-slate-300" checked={newAsset.facing_internet} onChange={e => setNewAsset({...newAsset, facing_internet: e.target.checked})} />
+            <div className="flex flex-col">
+              <span className="text-sm font-bold text-slate-700 dark:text-zinc-300 flex items-center gap-2"><Globe size={14}/> Facing Internet</span>
+              <span className="text-xs text-slate-500">Asset is accessible externally without VPN.</span>
+            </div>
+          </label>
 
           {/* Ratings (CIA Triad & Business Criticality) */}
           <div className="bg-slate-50 dark:bg-zinc-950/50 p-4 rounded-xl border border-slate-200 dark:border-zinc-800">
@@ -127,23 +145,14 @@ export default function AddRawAssetModal({ isOpen, onClose, onSuccess, countries
             </div>
             <div>
               <label className="text-sm font-bold text-slate-700 dark:text-zinc-300">Service Lane</label>
-              <select
-                className={inputClasses}
-                value={newAsset.service_forecast_id}
-                onChange={e => setNewAsset({...newAsset, service_forecast_id: e.target.value, category_id: ""})}
-              >
+              <select className={inputClasses} value={newAsset.service_forecast_id} onChange={e => setNewAsset({...newAsset, service_forecast_id: e.target.value, category_id: ""})}>
                 <option value="">-- None --</option>
                 {services.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
             </div>
             <div>
               <label className="text-sm font-bold text-slate-700 dark:text-zinc-300">Category</label>
-              <select
-                className={`${inputClasses} disabled:opacity-50 disabled:cursor-not-allowed`}
-                value={newAsset.category_id}
-                onChange={e => setNewAsset({...newAsset, category_id: e.target.value})}
-                disabled={!newAsset.service_forecast_id}
-              >
+              <select className={`${inputClasses} disabled:opacity-50 disabled:cursor-not-allowed`} value={newAsset.category_id} onChange={e => setNewAsset({...newAsset, category_id: e.target.value})} disabled={!newAsset.service_forecast_id}>
                 <option value="">-- None --</option>
                 {filteredCategories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>

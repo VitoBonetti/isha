@@ -6,6 +6,7 @@ import { Search, Filter, MoveRight, AlertCircle } from "lucide-react";
 interface PoolAsset {
   id: string;
   name: string;
+  asset_type_name?: string;
   country?: string;
   service_forecast?: string;
   is_assigned: boolean;
@@ -141,6 +142,7 @@ export default function AssetsView() {
                     <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
                       Asset Name
                     </th>
+                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Type</th>
                     <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
                       Country
                     </th>
@@ -163,6 +165,9 @@ export default function AssetsView() {
                           <div className="text-sm font-medium">{asset.name}</div>
                           <div className="text-xs text-slate-500 dark:text-zinc-400 mt-1">ID: {asset.id.substring(0, 8)}...</div>
                         </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="text-sm font-medium text-slate-700 dark:text-zinc-300">{asset.asset_type_name || 'Unknown'}</div>
                       </td>
                       <td className="px-6 py-4">
                         <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200">

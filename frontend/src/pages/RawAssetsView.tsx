@@ -9,6 +9,7 @@ import toast, { Toaster } from 'react-hot-toast';
 interface RawAsset {
   id: string;
   name: string;
+  asset_type_name?: string;
   country_name?: string;
   service_name?: string;
   category_name?: string;
@@ -40,6 +41,7 @@ export default function RawAssetsView() {
   const [countries, setCountries] = useState<any[]>([]);
   const [services, setServices] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
+  const [assetTypes, setAssetTypes] = useState<any[]>([]);
 
   // Debounce the search input
   useEffect(() => {
@@ -56,6 +58,7 @@ export default function RawAssetsView() {
     axios.get('/api/countries/').then(res => setCountries(res.data)).catch(() => {});
     axios.get('/api/services/').then(res => setServices(res.data)).catch(() => {});
     axios.get('/api/board/categories/').then(res => setCategories(res.data)).catch(() => {});
+    axios.get('/api/assets/types').then(res => setAssetTypes(res.data)).catch(() => {});
   }, []);
 
   const fetchRawAssets = async () => {
@@ -150,7 +153,7 @@ export default function RawAssetsView() {
       <TopNav />
       <Toaster position="bottom-right" />
 
-      <AddRawAssetModal isOpen={showAddModal} onClose={() => setShowAddModal(false)} onSuccess={fetchRawAssets} countries={countries} services={services} categories={categories} />
+      <AddRawAssetModal isOpen={showAddModal} onClose={() => setShowAddModal(false)} onSuccess={fetchRawAssets} countries={countries} services={services} categories={categories} assetTypes={assetTypes} />
 
       <div className="pt-24 px-6 max-w-7xl mx-auto">
         <h1 className="text-3xl font-bold mb-2">Raw Assets</h1>
@@ -209,6 +212,7 @@ export default function RawAssetsView() {
                 <tr>
                   <th className="p-4 w-12"><input type="checkbox" className="h-4 w-4 rounded text-emerald-500" onChange={(e) => { if(e.target.checked) { setSelectedAssets(assets.map(a => a.id)); } else { setSelectedAssets([]); } }} checked={selectedAssets.length === assets.length && assets.length > 0} /></th>
                   <th className="p-4 font-semibold text-slate-500 uppercase cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort("name")}><div className="flex items-center gap-2">Name <SortIcon column="name" /></div></th>
+                  <th className="p-4 font-semibold text-slate-500 uppercase cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort("type")}><div className="flex items-center gap-2">Type <SortIcon column="type" /></div></th>
                   <th className="p-4 font-semibold text-slate-500 uppercase cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort("country")}><div className="flex items-center gap-2">Country <SortIcon column="country" /></div></th>
                   <th className="p-4 font-semibold text-slate-500 uppercase cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort("service")}><div className="flex items-center gap-2">Service Lane <SortIcon column="service" /></div></th>
                   <th className="p-4 font-semibold text-slate-500 uppercase cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort("category")}><div className="flex items-center gap-2">Category <SortIcon column="category" /></div></th>
@@ -223,6 +227,7 @@ export default function RawAssetsView() {
                       <Link to={`/raw/${asset.id}`} className="font-bold text-blue-600 dark:text-blue-400 hover:underline">{asset.name}</Link>
                       <div className="text-xs text-slate-500 mt-1">{asset.id.substring(0, 8)}</div>
                     </td>
+                    <td className="p-4 font-medium text-slate-700 dark:text-zinc-300">{asset.asset_type_name || 'Unknown'}</td>
                     <td className="p-4"><span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-bold bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300">{asset.country_name || 'N/A'}</span></td>
                     <td className="p-4 font-medium">{asset.service_name || '-'}</td>
                     <td className="p-4 text-slate-500">{asset.category_name || '-'}</td>
