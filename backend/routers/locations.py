@@ -16,14 +16,14 @@ def get_locations(current_user: dict = Depends(get_current_user), cursor = Depen
 
 @router.post("/")
 def create_location(loc: LocationBase, current_user: dict = Depends(require_admin), cursor = Depends(get_db_cursor)):
-    new_location_id = uuid.uuid4()
+    new_location_id = str(uuid.uuid4())
     try:
         cursor.execute("INSERT INTO locations (id, name, is_active) VALUES (%s, %s, %s)", (new_location_id, loc.name, loc.is_active))
         cursor.connection.commit()
         return {"id": new_location_id, "message": "Location created."}
     except Exception as e:
         cursor.connection.rollback()
-        raise HTTPException(status_code=400, detail="Location name already exists.")
+        raise HTTPException(status_code=400, detail=f"Location name already exists. {e}")
 
 
 @router.put("/{loc_id}")

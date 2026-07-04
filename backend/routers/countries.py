@@ -26,7 +26,7 @@ def get_countries(current_user: dict = Depends(get_current_user), cursor = Depen
 @router.post("/")
 def create_country(c: CountryBase, current_user: dict = Depends(require_admin), cursor = Depends(get_db_cursor)):
     reg_id = str(c.region_id) if c.region_id else None
-    new_country_id = uuid.uuid4()
+    new_country_id = str(uuid.uuid4())
     try:
         cursor.execute(
             "INSERT INTO countries (id, code, name, region_id, is_active) VALUES (%s, %s, %s, %s, %s)",

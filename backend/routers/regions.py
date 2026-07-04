@@ -24,7 +24,7 @@ def get_regions(current_user: dict = Depends(get_current_user), cursor=Depends(g
 @router.post("/")
 def create_region(r: RegionBase, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
 
-    new_region_id = uuid.uuid4()
+    new_region_id = str(uuid.uuid4())
     try:
         cursor.execute(
             "INSERT INTO regions (id, name, is_active) VALUES (%s, %s, %s)",

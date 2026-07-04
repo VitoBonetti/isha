@@ -114,14 +114,13 @@ def process_bulk_tests_background(asset_ids: List[UUID4]):
                 continue  # Skip if already assigned or lacks a forecast lane
 
             asset_name, service_lane_id, def_credits, def_duration = asset_data
+            new_test_id = str(uuid.uuid4())
 
             # Create the test using the lane's defaults
             cursor.execute('''
-                INSERT INTO tests (name, service_lane_id, credits_per_week, duration_weeks, status) 
-                VALUES (%s, %s, %s, %s, 'Not Planned') RETURNING id
-            ''', (asset_name, service_lane_id, def_credits, def_duration))
-
-            new_test_id = cursor.fetchone()[0]
+                INSERT INTO tests (id, name, service_lane_id, credits_per_week, duration_weeks, status) 
+                VALUES (%s, %s, %s, %s, %s, 'Not Planned')
+            ''', (new_test_id, asset_name, service_lane_id, def_credits, def_duration))
 
             # Link it
             cursor.execute('INSERT INTO test_assets (test_id, asset_id) VALUES (%s, %s)', (new_test_id, str(asset_id)))
@@ -243,8 +242,9 @@ def create_assignment(assign: AssignmentCreate, background_tasks: BackgroundTask
     test_row = cursor.fetchone()
 
     if test_row:
-        cursor.execute("INSERT INTO notifications (user_id, message, type) VALUES (%s, %s, %s)",
-                       (str(assign.user_id), f"You were assigned to {test_row[0]} for Week {assign.week_number}.",
+        new_notification_id = str(uuid.uuid4())
+        cursor.execute("INSERT INTO notifications (id, user_id, message, type) VALUES (%s, %s, %s, %s)",
+                       (new_notification_id, str(assign.user_id), f"You were assigned to {test_row[0]} for Week {assign.week_number}.",
                         "ASSIGNMENT"))
 
     cursor.connection.commit()

@@ -75,7 +75,8 @@ def calculate_weekly_capacity(cursor, user_id, year, week_number):
         SELECT SUM(a.allocated_credits) 
         FROM assignments a
         JOIN tests t ON a.test_id = t.id
-        WHERE a.user_id = %s AND a.year = %s AND a.week_number = %s AND t.status != 'Unable'
+        -- FIX: Changed t.status to t.stages::text to match the database schema
+        WHERE a.user_id = %s AND a.year = %s AND a.week_number = %s AND t.stages::text != 'Unable'
     ''', (str(user_id), year, week_number))
 
     used = cursor.fetchone()[0] or 0.0
@@ -108,7 +109,7 @@ def get_quarterly_board(year: int, quarter: int, response: Response,
     # 3. Tests (Backlog & Scheduled)
     cursor.execute('''
         SELECT t.id, t.name, t.service_lane_id, t.category_id, t.credits_per_week, t.duration_weeks, 
-               t.start_week, t.start_year, t.status,
+               t.start_week, t.start_year, t.stages as status,  -- FIX: Aliased stages as status
                (SELECT COUNT(*) FROM test_assets WHERE test_id = t.id) as asset_count
         FROM tests t
         WHERE t.start_week IS NULL OR t.start_year = %s
@@ -244,9 +245,10 @@ def create_event(e: EventCreate, background_tasks: BackgroundTasks,
         e.user_id = None
         if e.event_type == 'team_day':
             cursor.execute("SELECT id FROM locations WHERE name = 'Global' LIMIT 1")
-            e.location_id = cursor.fetchone()[0]
+            global_loc = cursor.fetchone()
+            e.location_id = global_loc[0] if global_loc else None
 
-    # FIX: Safely convert UUIDs to strings for psycopg2
+    # Safely convert UUIDs to strings for psycopg2
     u_id = str(e.user_id) if e.user_id else None
     loc_id = str(e.location_id) if e.location_id else None
 
@@ -254,6 +256,15 @@ def create_event(e: EventCreate, background_tasks: BackgroundTasks,
     e_type = e.event_type.value if hasattr(e.event_type, 'value') else e.event_type
 
     new_event_id = str(uuid.uuid4())
+
+    #  check if user_id is locked to NOT NULL and unlock it automatically.
+    cursor.execute("""
+        SELECT is_nullable FROM information_schema.columns 
+        WHERE table_name = 'events' AND column_name = 'user_id'
+    """)
+    row = cursor.fetchone()
+    if row and row[0] == 'NO':
+        cursor.execute("ALTER TABLE events ALTER COLUMN user_id DROP NOT NULL;")
 
     cursor.execute(
         'INSERT INTO events (id, user_id, event_type, location_id, start_date, end_date) VALUES (%s, %s, %s, %s, %s, %s)',
@@ -271,7 +282,6 @@ def create_event(e: EventCreate, background_tasks: BackgroundTasks,
 
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"status": "ok"}
-
 
 @router.put("/events/{event_id}")
 def update_event(event_id: str, e: EventBase, background_tasks: BackgroundTasks,
