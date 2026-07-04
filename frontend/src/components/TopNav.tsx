@@ -4,11 +4,13 @@ import { useAppContext } from '../context/AppContext';
 import { useTheme } from './ThemeProvider';
 import {
   Sun, Moon, Laptop, LogOut, User as UserIcon, Bell,
-  SprayCan, Snail, SunMoon, Fingerprint, Rabbit, Cat, Shell, Turtle, Radar, HandMetal, Drum, TentTree
+  SprayCan, Snail, SunMoon, Fingerprint, Rabbit, Cat, Shell, Turtle, Radar, HandMetal, Drum, TentTree,
+  Wifi, WifiOff, Loader2
 } from 'lucide-react';
 
 export default function TopNav() {
-  const { currentUser, handleLogout, notifications, showNotifications, setShowNotifications, markNotificationsRead } = useAppContext();
+  // Added wsStatus extraction here
+  const { currentUser, handleLogout, notifications, showNotifications, setShowNotifications, markNotificationsRead, wsStatus } = useAppContext();
   const { setTheme } = useTheme();
   const location = useLocation();
   const currentPath = location.pathname;
@@ -66,11 +68,27 @@ export default function TopNav() {
       {/* User Actions */}
       <div className="flex items-center gap-4">
 
+        {/* Live Sync WebSocket Status */}
+        <div className="relative group flex items-center justify-center cursor-help">
+          {wsStatus === 'connected' ? (
+            <Wifi className="h-4 w-4 text-emerald-500" />
+          ) : wsStatus === 'connecting' ? (
+            <Loader2 className="h-4 w-4 text-amber-500 animate-spin" />
+          ) : (
+            <WifiOff className="h-4 w-4 text-red-500 animate-pulse" />
+          )}
+
+          {/* Tooltip */}
+          <div className="absolute top-full mt-3 left-1/2 -translate-x-1/2 px-2.5 py-1 bg-slate-900 dark:bg-zinc-100 text-white dark:text-slate-900 text-[10px] font-bold uppercase tracking-wider rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none shadow-lg">
+            Live Sync: {wsStatus}
+          </div>
+        </div>
+
         {/* Notifications */}
         <div className="relative">
           <button
             onClick={() => setShowNotifications(!showNotifications)}
-            className="text-slate-500 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-100 transition-colors relative"
+            className="text-slate-500 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-100 transition-colors relative flex items-center"
           >
             <Bell className="h-4 w-4" />
             {unreadCount > 0 && (
