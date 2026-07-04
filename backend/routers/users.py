@@ -1,3 +1,5 @@
+import uuid
+
 from fastapi import APIRouter, Depends, BackgroundTasks
 from database import get_db_cursor
 from routers.auth import get_current_user, require_admin
@@ -44,11 +46,11 @@ def create_user(u: UserCreate, background_tasks: BackgroundTasks,
 
     # Safely convert UUID to string
     loc_id = str(u.location_id) if u.location_id else None
-
+    new_user_id = str(uuid.uuid4())
     cursor.execute(
-        '''INSERT INTO users (email, name, role, location_id, base_capacity, start_week, start_year, end_week, end_year)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)''',
-        (u.email.lower(), u.name, u.role.value, loc_id, u.base_capacity, u.start_week, u.start_year, ew, ey)
+        '''INSERT INTO users (id, email, name, role, location_id, base_capacity, start_week, start_year, end_week, end_year)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)''',
+        (new_user_id, u.email.lower(), u.name, u.role.value, loc_id, u.base_capacity, u.start_week, u.start_year, ew, ey)
     )
 
     cursor.connection.commit()

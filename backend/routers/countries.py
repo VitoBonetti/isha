@@ -4,15 +4,11 @@ from typing import Optional
 from database import get_db_cursor
 from routers.auth import get_current_user, require_admin
 from schema import CountryBase
+import uuid
 
 
 router = APIRouter(prefix="/api/countries", tags=["Countries"])
 
-class CountryBase(BaseModel):
-    code: str
-    name: str
-    region_id: Optional[UUID4] = None
-    is_active: bool = True
 
 @router.get("/")
 def get_countries(current_user: dict = Depends(get_current_user), cursor = Depends(get_db_cursor)):
@@ -30,15 +26,14 @@ def get_countries(current_user: dict = Depends(get_current_user), cursor = Depen
 @router.post("/")
 def create_country(c: CountryBase, current_user: dict = Depends(require_admin), cursor = Depends(get_db_cursor)):
     reg_id = str(c.region_id) if c.region_id else None
-
+    new_country_id = uuid.uuid4()
     try:
         cursor.execute(
-            "INSERT INTO countries (code, name, region_id, is_active) VALUES (%s, %s, %s, %s) RETURNING id",
-            (c.code, c.name, reg_id, c.is_active)
+            "INSERT INTO countries (id, code, name, region_id, is_active) VALUES (%s, %s, %s, %s, %s)",
+            (new_country_id, c.code, c.name, reg_id, c.is_active)
         )
-        new_id = cursor.fetchone()[0]
         cursor.connection.commit()
-        return {"id": new_id, "message": "Country created successfully."}
+        return {"id": new_country_id, "message": "Country created successfully."}
     except Exception as e:
         cursor.connection.rollback()
         raise HTTPException(status_code=400, detail="Database error (Code might already exist)")

@@ -25,8 +25,9 @@ class LocationResponse(LocationBase):
     id: UUID4
 
 class CountryBase(BaseModel):
-    code: str = Field(..., max_length=10)
+    code: str
     name: str
+    region_id: Optional[UUID4] = None
     is_active: bool = True
 
 class CountryResponse(CountryBase):

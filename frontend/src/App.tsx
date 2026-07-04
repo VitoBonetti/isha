@@ -11,7 +11,7 @@ import AssetDetailView from "./pages/AssetDetailView";
 import { SprayCan, LogOut } from "lucide-react";
 
 function AppContent() {
-  const { wsStatus, handleLogout } = useAppContext();
+  const { wsStatus, handleLogout, currentUser } = useAppContext();
 
   // To support your navClass logic
   const location = useLocation();
@@ -26,7 +26,7 @@ function AppContent() {
 
   return (
     <div className="bg-slate-50 dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 min-h-screen transition-colors">
-      {wsStatus !== 'connected' && (
+      {currentUser && wsStatus !== 'connected' && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-emerald-500/10 backdrop-blur-sm">
           <span className="text-sm font-medium text-slate-900 dark:text-zinc-100 animate-pulse">Connecting to server...</span>
         </div>

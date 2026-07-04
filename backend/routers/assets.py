@@ -3,6 +3,7 @@ from typing import Optional, List
 from pydantic import BaseModel, UUID4
 import pandas as pd
 import io
+import uuid
 from database import get_db_cursor, db_cursor_context
 from routers.auth import get_current_user, require_admin
 from schema import RawAssetCreate, AssetBase
@@ -62,7 +63,7 @@ def get_raw_assets(
                CASE WHEN a.id IS NOT NULL THEN true ELSE false END as is_promoted
         FROM raw_assets r
         LEFT JOIN countries c ON r.country_id = c.id
-        LEFT JOIN service_lanes s ON r.service_forecast_id = s.id
+        LEFT JOIN services_lanes s ON r.service_forecast_id = s.id
         LEFT JOIN service_categories cat ON r.category_id = cat.id
         LEFT JOIN assets a ON r.id = a.raw_asset_id
         {where_str}
@@ -81,16 +82,16 @@ def create_manual_raw_asset(asset: RawAssetCreate, background_tasks: BackgroundT
     c_id = str(asset.country_id) if asset.country_id else None
     s_id = str(asset.service_forecast_id) if asset.service_forecast_id else None
     cat_id = str(asset.category_id) if asset.category_id else None
-
+    new_raw_assets_id = str(uuid.uuid4())
     cursor.execute("""
         INSERT INTO raw_assets (
-            name, description, business_critical, 
+            id, name, description, business_critical, 
             confidentiality_rating, integrity_rating, availability_rating, 
             country_id, service_forecast_id, category_id
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
     """, (
-        asset.name, asset.description, asset.business_critical,
+        new_raw_assets_id, asset.name, asset.description, asset.business_critical,
         asset.confidentiality_rating, asset.integrity_rating, asset.availability_rating,
         c_id, s_id, cat_id
     ))
@@ -164,10 +165,10 @@ def process_excel_import(contents: bytes, filename: str):
             for _, row in df.iterrows():
                 name = str(row.get('Name', '')).strip()
                 if not name: continue
-
+                new_raw_assets_id= str(uuid.uuid4())
                 cursor.execute(
-                    "INSERT INTO raw_assets (name, description) VALUES (%s, %s)",
-                    (name, str(row.get('Description', '')))
+                    "INSERT INTO raw_assets (id, name, description) VALUES (%s, %s, %s)",
+                    (id, name, str(row.get('Description', '')))
                 )
         except Exception as e:
             print(f"Import Failed: {e}")
@@ -195,10 +196,12 @@ def promote_raw_assets_to_pool(req: PromoteAssetRequest, background_tasks: Backg
         raw_data = cursor.fetchone()
         if not raw_data: continue
 
+        new_promote_id = str(uuid.uuid4())
+
         cursor.execute("""
-            INSERT INTO assets (raw_asset_id, name, country_id, service_forecast_id, category_id)
-            VALUES (%s, %s, %s, %s, %s)
-        """, (str(raw_id), raw_data[0], raw_data[1], raw_data[2], raw_data[3]))
+            INSERT INTO assets (id, raw_asset_id, name, country_id, service_forecast_id, category_id)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """, (new_promote_id, str(raw_id), raw_data[0], raw_data[1], raw_data[2], raw_data[3]))
         promoted += 1
 
     cursor.connection.commit()
@@ -215,7 +218,7 @@ def get_active_asset_pool(current_user: dict = Depends(get_current_user), cursor
         SELECT a.id, a.name, c.name as country, s.name as service_forecast, cat.name as category_name, a.is_assigned
         FROM assets a
         LEFT JOIN countries c ON a.country_id = c.id
-        LEFT JOIN service_lanes s ON a.service_forecast_id = s.id
+        LEFT JOIN services_lanes s ON a.service_forecast_id = s.id
         LEFT JOIN service_categories cat ON a.category_id = cat.id
         ORDER BY a.name ASC
     ''')

@@ -92,7 +92,7 @@ def get_quarterly_board(year: int, quarter: int, response: Response,
 
     # 1. Services & Categories
     cursor.execute(
-        'SELECT id, name, theme_color, display_order FROM service_lanes WHERE is_active = TRUE ORDER BY display_order ASC')
+        'SELECT id, name, theme_color, display_order FROM services_lanes WHERE is_active = TRUE ORDER BY display_order ASC')
     services = [{"id": r[0], "name": r[1], "theme_color": r[2]} for r in cursor.fetchall()]
 
     cursor.execute('SELECT id, name, target_goal, service_lane_id FROM service_categories ORDER BY name ASC')
@@ -157,7 +157,7 @@ def get_categories(current_user: dict = Depends(get_current_user), cursor=Depend
     cursor.execute('''
         SELECT c.id, c.name, c.target_goal, c.service_lane_id, s.name as service_lane_name 
         FROM service_categories c
-        LEFT JOIN service_lanes s ON c.service_lane_id = s.id
+        LEFT JOIN services_lanes s ON c.service_lane_id = s.id
         ORDER BY c.name ASC
     ''')
     columns = [desc[0] for desc in cursor.description]
@@ -170,9 +170,11 @@ def create_category(cat: ServiceCategoryCreate, current_user: dict = Depends(req
     # Safely convert UUID to string for psycopg2
     lane_id = str(cat.service_lane_id) if cat.service_lane_id else None
 
+    new_category_id= str(uuid.uuid4())
+
     cursor.execute(
-        'INSERT INTO service_categories (service_lane_id, name, target_goal) VALUES (%s, %s, %s) RETURNING id',
-        (lane_id, cat.name, cat.target_goal)
+        'INSERT INTO service_categories (id, service_lane_id, name, target_goal) VALUES (%s, %s, %s, %s) RETURNING id',
+        (new_category_id, lane_id, cat.name, cat.target_goal)
     )
 
     log_audit_event(
@@ -251,9 +253,11 @@ def create_event(e: EventCreate, background_tasks: BackgroundTasks,
     # Safely get string value from Enum
     e_type = e.event_type.value if hasattr(e.event_type, 'value') else e.event_type
 
+    new_event_id = str(uuid.uuid4())
+
     cursor.execute(
-        'INSERT INTO events (user_id, event_type, location_id, start_date, end_date) VALUES (%s, %s, %s, %s, %s)',
-        (u_id, e_type, loc_id, e.start_date, e.end_date)
+        'INSERT INTO events (id, user_id, event_type, location_id, start_date, end_date) VALUES (%s, %s, %s, %s, %s, %s)',
+        (new_event_id, u_id, e_type, loc_id, e.start_date, e.end_date)
     )
     cursor.connection.commit()
 
