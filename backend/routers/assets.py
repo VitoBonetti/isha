@@ -104,15 +104,22 @@ def create_manual_raw_asset(asset: RawAssetCreate, background_tasks: BackgroundT
         INSERT INTO raw_assets (
             id, name, description, business_critical, 
             confidentiality_rating, integrity_rating, availability_rating, 
-            country_id, service_forecast_id, category_id, asset_type_id, facing_internet
+            country_id, service_forecast_id, category_id, asset_type_id, facing_internet, create_date
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP) RETURNING id
     """, (
         new_raw_assets_id, asset.name, asset.description, asset.business_critical,
         asset.confidentiality_rating, asset.integrity_rating, asset.availability_rating,
         c_id, s_id, cat_id, at_id, asset.facing_internet
     ))
     new_id = cursor.fetchone()[0]
+
+    # Insert History Log
+    cursor.execute("""
+        INSERT INTO asset_history (id, raw_asset_id, user_id, action, details)
+        VALUES (%s, %s, %s, 'CREATED', 'Asset manually created.')
+    """, (str(uuid.uuid4()), new_id, str(current_user["id"])))
+
     cursor.connection.commit()
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
     return {"message": "Raw Asset created", "id": new_id}
@@ -120,10 +127,18 @@ def create_manual_raw_asset(asset: RawAssetCreate, background_tasks: BackgroundT
 
 @router.get("/raw/{raw_id}")
 def get_single_raw_asset(raw_id: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+    # Dynamic Patch: Ensure update_date exists
+    cursor.execute(
+        "SELECT column_name FROM information_schema.columns WHERE table_name = 'raw_assets' AND column_name = 'update_date'")
+    if not cursor.fetchone():
+        cursor.execute(
+            "ALTER TABLE raw_assets ADD COLUMN update_date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;")
+        cursor.connection.commit()
+
     cursor.execute("""
         SELECT r.id, r.name, r.description, r.business_critical, r.confidentiality_rating, 
                r.integrity_rating, r.availability_rating, r.country_id, r.service_forecast_id, 
-               r.category_id, r.asset_type_id, r.facing_internet,
+               r.category_id, r.asset_type_id, r.facing_internet, r.create_date, r.update_date,
                CASE WHEN a.id IS NOT NULL THEN true ELSE false END as is_promoted
         FROM raw_assets r
         LEFT JOIN assets a ON r.id = a.raw_asset_id
@@ -131,8 +146,22 @@ def get_single_raw_asset(raw_id: str, current_user: dict = Depends(get_current_u
     """, (raw_id,))
     row = cursor.fetchone()
     if not row: raise HTTPException(status_code=404, detail="Asset not found")
+
     columns = [col[0] for col in cursor.description]
-    return dict(zip(columns, row))
+    asset_data = dict(zip(columns, row))
+
+    # Fetch History
+    cursor.execute("""
+        SELECT h.id, h.action, h.details, h.timestamp, u.name as user_name
+        FROM asset_history h
+        LEFT JOIN users u ON h.user_id = u.id
+        WHERE h.raw_asset_id = %s
+        ORDER BY h.timestamp DESC
+    """, (raw_id,))
+    hist_cols = [col[0] for col in cursor.description]
+    asset_data["history"] = [dict(zip(hist_cols, h_row)) for h_row in cursor.fetchall()]
+
+    return asset_data
 
 
 @router.put("/raw/{raw_id}")
@@ -147,13 +176,21 @@ def update_raw_asset(raw_id: str, asset: RawAssetCreate, background_tasks: Backg
         UPDATE raw_assets 
         SET name=%s, description=%s, business_critical=%s, 
             confidentiality_rating=%s, integrity_rating=%s, availability_rating=%s, 
-            country_id=%s, service_forecast_id=%s, category_id=%s, asset_type_id=%s, facing_internet=%s
+            country_id=%s, service_forecast_id=%s, category_id=%s, asset_type_id=%s, facing_internet=%s,
+            update_date=CURRENT_TIMESTAMP
         WHERE id=%s
     """, (
         asset.name, asset.description, asset.business_critical,
         asset.confidentiality_rating, asset.integrity_rating, asset.availability_rating,
         c_id, s_id, cat_id, at_id, asset.facing_internet, raw_id
     ))
+
+    # Insert History Log
+    cursor.execute("""
+        INSERT INTO asset_history (id, raw_asset_id, user_id, action, details)
+        VALUES (%s, %s, %s, 'UPDATED', 'Asset metadata was modified.')
+    """, (str(uuid.uuid4()), raw_id, str(current_user["id"])))
+
     cursor.connection.commit()
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
     return {"message": "Raw Asset updated"}
@@ -264,10 +301,9 @@ def process_excel_import_sync(contents: bytes, filename: str, current_user: dict
                             INSERT INTO raw_assets (
                                 id, name, description, business_critical, 
                                 confidentiality_rating, integrity_rating, availability_rating, 
-                                country_id, service_forecast_id, category_id, asset_type_id, facing_internet
-                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        """, (new_id, name, desc, business_critical, c_val, i_val, a_val, country_id, service_id,
-                              cat_id, type_id, facing_internet))
+                                country_id, service_forecast_id, category_id, asset_type_id, facing_internet, create_date
+                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                        """, (new_id, name, desc, business_critical, c_val, i_val, a_val, country_id, service_id, cat_id, type_id, facing_internet))
 
                     success_count += 1
                 except Exception:
@@ -330,6 +366,13 @@ def promote_raw_assets_to_pool(req: BulkAssetRequest, background_tasks: Backgrou
             INSERT INTO assets (id, raw_asset_id, name, country_id, service_forecast_id, category_id, asset_type_id)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
         """, (new_promote_id, str(raw_id), raw_data[0], raw_data[1], raw_data[2], raw_data[3], raw_data[4]))
+
+        # Log Promotion in History
+        cursor.execute("""
+            INSERT INTO asset_history (id, raw_asset_id, user_id, action, details)
+            VALUES (%s, %s, %s, 'PROMOTED', 'Asset promoted to the Active testing pool.')
+        """, (str(uuid.uuid4()), str(raw_id), str(current_user["id"])))
+
         promoted += 1
 
     cursor.connection.commit()
