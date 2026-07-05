@@ -9,12 +9,12 @@ class Assets(Base):
     __tablename__ = 'assets'
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    raw_asset_id = Column(UUID(as_uuid=True), ForeignKey('raw_assets.id'), nullable=False, unique=True)
-    asset_type_id = Column(UUID(as_uuid=True), ForeignKey('asset_types.id'), nullable=False)
+    raw_asset_id = Column(UUID(as_uuid=True), ForeignKey('raw_assets.id', ondelete='CASCADE'), nullable=False, unique=True)
+    asset_type_id = Column(UUID(as_uuid=True), ForeignKey('asset_types.id', ondelete='CASCADE'), nullable=False)
     name = Column(String(500), nullable=False)
-    country_id = Column(UUID(as_uuid=True), ForeignKey('countries.id'), nullable=False)
-    service_forecast_id = Column(UUID(as_uuid=True), ForeignKey('services_lanes.id'), nullable=True)
-    category_id = Column(UUID(as_uuid=True), ForeignKey('service_categories.id'), nullable=True)
+    country_id = Column(UUID(as_uuid=True), ForeignKey('countries.id', ondelete='CASCADE'), nullable=False)
+    service_forecast_id = Column(UUID(as_uuid=True), ForeignKey('services_lanes.id', ondelete='SET NULL'), nullable=True)
+    category_id = Column(UUID(as_uuid=True), ForeignKey('service_categories.id', ondelete='SET NULL'), nullable=True)
     is_assigned = Column(Boolean, default=False)
 
     # relationship

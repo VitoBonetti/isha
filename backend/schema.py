@@ -97,6 +97,9 @@ class AssetResponse(AssetBase):
 class PromoteAssetRequest(BaseModel):
     raw_asset_ids: List[UUID4]
 
+class BulkAssetRequest(BaseModel):
+    raw_asset_ids: List[UUID4]
+
 # --- TESTS & ASSIGNMENTS ---
 class TestBase(BaseModel):
     name: str

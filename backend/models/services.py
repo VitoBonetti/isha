@@ -28,7 +28,7 @@ class ServiceCategories(Base):
     __tablename__ = 'service_categories'
 
     id = Column(UUID, primary_key=True, default=uuid.uuid4)
-    service_lane_id = Column(UUID, ForeignKey('services_lanes.id'), nullable=False)
+    service_lane_id = Column(UUID, ForeignKey('services_lanes.id', ondelete='CASCADE'), nullable=False)
     name = Column(String(100), unique=True, nullable=False)
     target_goal = Column(Integer, default=0)
 

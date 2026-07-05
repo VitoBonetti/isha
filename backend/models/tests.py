@@ -21,8 +21,8 @@ class Tests(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String(500), nullable=False)
-    service_lane_id = Column(UUID(as_uuid=True), ForeignKey('services_lanes.id'), nullable=False)
-    category_id = Column(UUID(as_uuid=True), ForeignKey('service_categories.id'), nullable=True)
+    service_lane_id = Column(UUID(as_uuid=True), ForeignKey('services_lanes.id', ondelete='CASCADE'), nullable=False)
+    category_id = Column(UUID(as_uuid=True), ForeignKey('service_categories.id', ondelete='SET NULL'), nullable=True)
     credits_per_week = Column(REAL)
     duration_weeks = Column(REAL)
     start_week = Column(Integer)

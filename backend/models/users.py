@@ -15,7 +15,7 @@ class Users(Base):
     name = Column(String(255), nullable=False)
     avatar_url = Column(String(500))
     role = Column(String(50), nullable=False)
-    location_id = Column(UUID(as_uuid=True), ForeignKey("locations.id"), nullable=True)
+    location_id = Column(UUID(as_uuid=True), ForeignKey("locations.id", ondelete='SET NULL'), nullable=True)
     base_capacity = Column(Float, default=1.0)
     start_week = Column(Integer, default=1)
     start_year = Column(Integer, default=2024)

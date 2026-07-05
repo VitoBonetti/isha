@@ -32,7 +32,7 @@ class Country(Base):
     __tablename__ = 'countries'
 
     id = Column(UUID, primary_key=True, default=uuid.uuid4)
-    region_id = Column(UUID(as_uuid=True), ForeignKey('regions.id'), nullable=False)
+    region_id = Column(UUID(as_uuid=True), ForeignKey('regions.id', ondelete='CASCADE'), nullable=False)
     code = Column(String(10), unique=True, nullable=False)
     name = Column(String(100), unique=True, nullable=False)
     is_active = Column(Boolean, default=True)

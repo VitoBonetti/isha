@@ -1,8 +1,9 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 import axios from "axios";
 import TopNav from "../components/TopNav";
 import AddRawAssetModal from "../components/Modals/AddRawAssetModal";
+import ConfirmModal from "../components/Modals/ConfirmModal";
 import { Search, Upload, Plus, Filter, ChevronUp, ChevronDown, ChevronsUpDown, Download, Globe, Database } from "lucide-react";
 import toast, { Toaster } from 'react-hot-toast';
 
@@ -14,9 +15,7 @@ interface RawAsset {
   country_code?: string;
   service_name?: string;
   category_name?: string;
-  confidentiality_rating: number;
-  integrity_rating: number;
-  availability_rating: number;
+  business_critical: number;
   is_promoted: boolean;
 }
 
@@ -29,21 +28,25 @@ export default function RawAssetsView() {
   const [searchTerm, setSearchTerm] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
 
-  // Sorting State
+  // Sorting & Filtering
   const [sortBy, setSortBy] = useState("name");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
-
-  // Filtering State
   const [showFilters, setShowFilters] = useState(false);
   const [filters, setFilters] = useState({
     country: "", service: "", category: "", status: "",
-    asset_type: "", facing_internet: "",
-    cia_c: "", cia_i: "", cia_a: ""
+    asset_type: "", facing_internet: "", business_critical: ""
   });
 
   // Modal & Selection State
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedAssets, setSelectedAssets] = useState<string[]>([]);
+
+  // Bulk Actions
+  const [showBulkActions, setShowBulkActions] = useState(false);
+  const bulkActionsRef = useRef<HTMLDivElement>(null);
+  const [confirmModal, setConfirmModal] = useState<{isOpen: boolean, title: string, message: string, action: 'promote'|'delete'|null}>({
+    isOpen: false, title: "", message: "", action: null
+  });
 
   // Dropdown Data
   const [countries, setCountries] = useState<any[]>([]);
@@ -56,15 +59,21 @@ export default function RawAssetsView() {
     return () => clearTimeout(timer);
   }, [searchTerm]);
 
-  useEffect(() => {
-    fetchRawAssets();
-  }, [page, debouncedSearch, sortBy, sortDir, filters]);
+  useEffect(() => { fetchRawAssets(); }, [page, debouncedSearch, sortBy, sortDir, filters]);
 
   useEffect(() => {
     axios.get('/api/countries/').then(res => setCountries(res.data)).catch(() => {});
     axios.get('/api/services/').then(res => setServices(res.data)).catch(() => {});
     axios.get('/api/board/categories/').then(res => setCategories(res.data)).catch(() => {});
     axios.get('/api/assets/types').then(res => setAssetTypes(res.data)).catch(() => {});
+
+    const handleClickOutside = (e: MouseEvent) => {
+      if (bulkActionsRef.current && !bulkActionsRef.current.contains(e.target as Node)) {
+        setShowBulkActions(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
   const fetchRawAssets = async () => {
@@ -79,9 +88,7 @@ export default function RawAssetsView() {
       if (filters.status) params.status = filters.status;
       if (filters.asset_type) params.asset_type_id = filters.asset_type;
       if (filters.facing_internet !== "") params.facing_internet = filters.facing_internet;
-      if (filters.cia_c) params.cia_c = filters.cia_c;
-      if (filters.cia_i) params.cia_i = filters.cia_i;
-      if (filters.cia_a) params.cia_a = filters.cia_a;
+      if (filters.business_critical) params.business_critical = filters.business_critical;
 
       const res = await axios.get("/api/assets/raw", { params });
       setAssets(res.data);
@@ -106,22 +113,28 @@ export default function RawAssetsView() {
     setSelectedAssets(prev => prev.includes(assetId) ? prev.filter(id => id !== assetId) : [...prev, assetId]);
   };
 
-  const handlePromoteSelected = async () => {
-    if (selectedAssets.length === 0) return;
+  const executeBulkAction = async () => {
+    if (selectedAssets.length === 0 || !confirmModal.action) return;
+
+    const isPromote = confirmModal.action === 'promote';
+    const endpoint = isPromote ? "/api/assets/promote" : "/api/assets/raw/bulk-delete";
+
     try {
-      await axios.post("/api/assets/promote", { raw_asset_ids: selectedAssets });
+      await axios.post(endpoint, { raw_asset_ids: selectedAssets });
+      toast.success(isPromote ? `Promoted ${selectedAssets.length} assets!` : `Deleted ${selectedAssets.length} assets.`);
       setSelectedAssets([]);
       fetchRawAssets();
-      toast.success(`Promoted ${selectedAssets.length} assets!`);
     } catch (error) {
-      toast.error("Failed to promote assets");
+      toast.error(`Failed to ${isPromote ? 'promote' : 'delete'} assets`);
+    } finally {
+      setConfirmModal({ ...confirmModal, isOpen: false });
     }
   };
 
   const handleDownloadTemplate = () => {
     const csvContent = "Name,Description,Asset Type,Country,Service Lane,Category,Facing Internet,Confidentiality,Integrity,Availability\n" +
-                       "Primary Banking API,Handles routing.,API,United States,,,TRUE,4,4,4\n" +
-                       "Internal HR Portal,Employee management system.,Web Application/Website,United Kingdom,,,FALSE,3,2,1";
+                       "Primary Banking API,Handles routing.,API,United States,,,TRUE,4,4,1\n" +
+                       "Internal HR Portal,Employee management system.,Web Application/Website,GB,,,FALSE,3,2,1";
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
@@ -141,7 +154,7 @@ export default function RawAssetsView() {
       const file = e.target.files[0];
       if (!file) return;
 
-      const toastId = toast.loading("Processing import...");
+      const toastId = toast.loading("Processing import in background...");
 
       try {
         const formData = new FormData();
@@ -151,10 +164,10 @@ export default function RawAssetsView() {
         toast.dismiss(toastId);
 
         if (res.data.failed && res.data.failed.length > 0) {
-          toast.success(`Imported ${res.data.success} assets.`);
-          toast.error(`Failed to import ${res.data.failed.length} assets (e.g. ${res.data.failed[0]}). Check system logs for full details.`, { duration: 6000 });
+          toast.success(`Imported/Updated ${res.data.success} assets.`);
+          toast.error(`Failed to import ${res.data.failed.length} assets (e.g. ${res.data.failed[0]}). Check system logs for details.`, { duration: 6000 });
         } else {
-          toast.success(`Successfully imported all ${res.data.success} assets!`);
+          toast.success(`Successfully imported/updated all ${res.data.success} assets!`);
         }
         fetchRawAssets();
       } catch (error) {
@@ -167,12 +180,26 @@ export default function RawAssetsView() {
 
   const filteredCategories = categories.filter(c => !filters.service || c.service_lane_id === filters.service);
 
+  const getCriticalityPill = (score: number) => {
+    if (score >= 8) return <span className="px-2 py-0.5 rounded-md font-bold bg-red-100 text-red-800 dark:bg-red-500/10 dark:text-red-400">Critical ({score})</span>;
+    if (score >= 5) return <span className="px-2 py-0.5 rounded-md font-bold bg-amber-100 text-amber-800 dark:bg-amber-500/10 dark:text-amber-400">High ({score})</span>;
+    return <span className="px-2 py-0.5 rounded-md font-bold bg-blue-100 text-blue-800 dark:bg-blue-500/10 dark:text-blue-400">Med/Low ({score || 0})</span>;
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 pb-12">
       <TopNav />
       <Toaster position="bottom-right" />
 
       <AddRawAssetModal isOpen={showAddModal} onClose={() => setShowAddModal(false)} onSuccess={fetchRawAssets} countries={countries} services={services} categories={categories} assetTypes={assetTypes} />
+
+      <ConfirmModal
+        isOpen={confirmModal.isOpen}
+        title={confirmModal.title}
+        message={confirmModal.message}
+        onConfirm={executeBulkAction}
+        onCancel={() => setConfirmModal({ ...confirmModal, isOpen: false })}
+      />
 
       <div className="pt-32 px-6 max-w-7xl mx-auto">
         <h1 className="text-2xl font-extrabold flex items-center gap-2">
@@ -196,40 +223,45 @@ export default function RawAssetsView() {
 
           <div className="flex items-center gap-3">
             {selectedAssets.length > 0 && (
-              <button onClick={handlePromoteSelected} className="px-4 py-2 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition-colors font-medium">Promote ({selectedAssets.length})</button>
+              <div className="relative" ref={bulkActionsRef}>
+                <button onClick={() => setShowBulkActions(!showBulkActions)} className="flex items-center gap-2 px-4 py-2 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition-colors font-medium">
+                  Actions ({selectedAssets.length}) <ChevronDown size={16}/>
+                </button>
+                {showBulkActions && (
+                  <div className="absolute top-full right-0 mt-2 w-48 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-xl shadow-xl py-2 z-30 animate-in fade-in zoom-in-95">
+                    <button onClick={() => { setShowBulkActions(false); setConfirmModal({isOpen: true, action: 'promote', title: "Promote Assets", message: `Are you sure you want to promote ${selectedAssets.length} assets to the Active Pool?`}); }} className="w-full text-left px-4 py-2 text-sm font-medium hover:bg-slate-50 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300">Promote Selected</button>
+                    <div className="h-px bg-slate-100 dark:bg-zinc-800 my-1"></div>
+                    <button onClick={() => { setShowBulkActions(false); setConfirmModal({isOpen: true, action: 'delete', title: "Delete Assets", message: `Are you sure you want to permanently delete ${selectedAssets.length} raw assets?`}); }} className="w-full text-left px-4 py-2 text-sm font-medium hover:bg-red-50 dark:hover:bg-red-900/20 text-red-600 dark:text-red-400">Delete Selected</button>
+                  </div>
+                )}
+              </div>
             )}
             <button onClick={handleDownloadTemplate} className="flex items-center gap-2 px-4 py-2 bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 rounded-lg hover:bg-slate-200 dark:hover:bg-zinc-700 transition-colors font-medium"><Download className="h-4 w-4" /> Template</button>
             <button onClick={handleImportExcel} className="flex items-center gap-2 px-4 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 transition-colors font-medium"><Upload className="h-4 w-4" /> Import Data</button>
             <button onClick={() => setShowAddModal(true)} className="flex items-center gap-2 px-4 py-2 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition-colors font-medium"><Plus className="h-4 w-4" /> Add Asset</button>
           </div>
 
-          {/* Filter Popover - Updated to include CIA, Type, Internet */}
+          {/* Filter Popover */}
           {showFilters && (
             <div className="absolute top-full left-0 mt-2 w-full max-w-4xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-xl shadow-xl p-6 z-20 grid grid-cols-3 gap-6">
-              {/* Column 1: Core Mappings */}
               <div className="space-y-4">
                 <div><label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Status</label><select className="w-full p-2 border border-slate-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800" value={filters.status} onChange={e => {setFilters({...filters, status: e.target.value}); setPage(1);}}><option value="">All</option><option value="raw">Raw Only</option><option value="pool">In Active Pool</option></select></div>
                 <div><label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Country</label><select className="w-full p-2 border border-slate-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800" value={filters.country} onChange={e => {setFilters({...filters, country: e.target.value}); setPage(1);}}><option value="">All Countries</option>{countries.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
                 <div><label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Asset Type</label><select className="w-full p-2 border border-slate-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800" value={filters.asset_type} onChange={e => {setFilters({...filters, asset_type: e.target.value}); setPage(1);}}><option value="">All Types</option>{assetTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></div>
               </div>
 
-              {/* Column 2: Service Mappings & Internet */}
               <div className="space-y-4">
                 <div><label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Service Lane</label><select className="w-full p-2 border border-slate-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800" value={filters.service} onChange={e => {setFilters({...filters, service: e.target.value, category: ""}); setPage(1);}}><option value="">All Services</option>{services.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
                 <div><label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Category</label><select className="w-full p-2 border border-slate-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 disabled:opacity-50" value={filters.category} onChange={e => {setFilters({...filters, category: e.target.value}); setPage(1);}} disabled={!filters.service}><option value="">All Categories</option>{filteredCategories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
-                <div><label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Internet Facing</label><select className="w-full p-2 border border-slate-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800" value={filters.facing_internet} onChange={e => {setFilters({...filters, facing_internet: e.target.value}); setPage(1);}}><option value="">Any</option><option value="true">Yes</option><option value="false">No</option></select></div>
               </div>
 
-              {/* Column 3: CIA Ratings (Greater than or equal to) */}
-              <div className="space-y-4 bg-slate-50 dark:bg-zinc-950/50 p-4 rounded-xl border border-slate-200 dark:border-zinc-800">
-                <h4 className="text-xs font-bold text-slate-500 uppercase mb-2">Min. Risk Ratings (≥)</h4>
-                <div><label className="text-xs font-bold text-slate-700 dark:text-zinc-300 block mb-1">Confidentiality</label><input type="number" min="0" max="5" className="w-full p-2 border border-slate-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800" value={filters.cia_c} onChange={e => {setFilters({...filters, cia_c: e.target.value}); setPage(1);}} /></div>
-                <div><label className="text-xs font-bold text-slate-700 dark:text-zinc-300 block mb-1">Integrity</label><input type="number" min="0" max="5" className="w-full p-2 border border-slate-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800" value={filters.cia_i} onChange={e => {setFilters({...filters, cia_i: e.target.value}); setPage(1);}} /></div>
-                <div><label className="text-xs font-bold text-slate-700 dark:text-zinc-300 block mb-1">Availability</label><input type="number" min="0" max="5" className="w-full p-2 border border-slate-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800" value={filters.cia_a} onChange={e => {setFilters({...filters, cia_a: e.target.value}); setPage(1);}} /></div>
+              <div className="space-y-4">
+                <div><label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Internet Facing</label><select className="w-full p-2 border border-slate-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800" value={filters.facing_internet} onChange={e => {setFilters({...filters, facing_internet: e.target.value}); setPage(1);}}><option value="">Any</option><option value="true">Yes</option><option value="false">No</option></select></div>
+                <div><label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Min. Business Criticality (≥)</label><input type="number" min="0" max="9" placeholder="0-9" className="w-full p-2 border border-slate-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800" value={filters.business_critical} onChange={e => {setFilters({...filters, business_critical: e.target.value}); setPage(1);}} /></div>
               </div>
 
               <div className="col-span-3 flex justify-end mt-2 pt-4 border-t border-slate-100 dark:border-zinc-800">
-                <button onClick={() => {setFilters({country: "", service: "", category: "", status: "", asset_type: "", facing_internet: "", cia_c: "", cia_i: "", cia_a: ""}); setPage(1);}} className="text-sm text-blue-500 font-bold hover:text-blue-600">Clear All Filters</button>
+                <button onClick={() => {setFilters({country: "", service: "", category: "", status: "", asset_type: "", facing_internet: "", business_critical: ""}); setPage(1);}} className="text-sm text-blue-500 font-bold hover:text-blue-600">Clear All Filters</button>
               </div>
             </div>
           )}
@@ -246,7 +278,7 @@ export default function RawAssetsView() {
                   <th className="p-4 w-12"><input type="checkbox" className="h-4 w-4 rounded text-emerald-500" onChange={(e) => { if(e.target.checked) { setSelectedAssets(assets.map(a => a.id)); } else { setSelectedAssets([]); } }} checked={selectedAssets.length === assets.length && assets.length > 0} /></th>
                   <th className="p-4 font-semibold text-slate-500 uppercase cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort("name")}><div className="flex items-center gap-2">Asset Details <SortIcon column="name" /></div></th>
                   <th className="p-4 font-semibold text-slate-500 uppercase cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort("country")}><div className="flex items-center gap-2">Loc. <SortIcon column="country" /></div></th>
-                  <th className="p-4 font-semibold text-slate-500 uppercase">CIA Ratings</th>
+                  <th className="p-4 font-semibold text-slate-500 uppercase">Criticality</th>
                   <th className="p-4 font-semibold text-slate-500 uppercase cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort("service")}><div className="flex items-center gap-2">Forecast Lane <SortIcon column="service" /></div></th>
                   <th className="p-4 font-semibold text-slate-500 uppercase text-right cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort("status")}><div className="flex items-center justify-end gap-2"><SortIcon column="status" /> Status</div></th>
                 </tr>
@@ -267,12 +299,8 @@ export default function RawAssetsView() {
                       </div>
                     </td>
                     <td className="p-4"><span className="font-mono font-bold text-slate-500 dark:text-zinc-400">{asset.country_code || '--'}</span></td>
-                    <td className="p-4">
-                      <div className="flex gap-1.5 text-[10px] font-extrabold font-mono">
-                        <span className="px-1.5 py-0.5 rounded bg-red-100 text-red-800 dark:bg-red-500/10 dark:text-red-400">C:{asset.confidentiality_rating || 0}</span>
-                        <span className="px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 dark:bg-blue-500/10 dark:text-blue-400">I:{asset.integrity_rating || 0}</span>
-                        <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 dark:bg-amber-500/10 dark:text-amber-400">A:{asset.availability_rating || 0}</span>
-                      </div>
+                    <td className="p-4 font-mono text-[10px]">
+                      {getCriticalityPill(asset.business_critical)}
                     </td>
                     <td className="p-4">
                       <div className="font-medium">{asset.service_name || '-'}</div>

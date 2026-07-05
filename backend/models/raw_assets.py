@@ -22,7 +22,7 @@ class RawAssets(Base):
     __tablename__ = 'raw_assets'
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    asset_type_id = Column(UUID(as_uuid=True), ForeignKey('asset_types.id'), nullable=False)
+    asset_type_id = Column(UUID(as_uuid=True), ForeignKey('asset_types.id', ondelete='CASCADE'), nullable=False)
     name = Column(String(500), nullable=False)
     description = Column(Text, nullable=True)
     business_critical = Column(Integer)
@@ -30,9 +30,9 @@ class RawAssets(Base):
     integrity_rating = Column(Integer)
     availability_rating = Column(Integer)
     facing_internet = Column(Boolean, default=False)
-    country_id = Column(UUID(as_uuid=True), ForeignKey('countries.id'), nullable=False)
-    service_forecast_id = Column(UUID(as_uuid=True), ForeignKey('services_lanes.id'), nullable=True)
-    category_id = Column(UUID(as_uuid=True), ForeignKey('service_categories.id'), nullable=True)
+    country_id = Column(UUID(as_uuid=True), ForeignKey('countries.id', ondelete='CASCADE'), nullable=False)
+    service_forecast_id = Column(UUID(as_uuid=True), ForeignKey('services_lanes.id', ondelete='SET NULL'), nullable=True)
+    category_id = Column(UUID(as_uuid=True), ForeignKey('service_categories.id', ondelete='SET NULL'), nullable=True)
     create_date = Column(DateTime(timezone=True), default=aware_utcnow)
 
     # relashionship
