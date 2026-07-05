@@ -4,19 +4,23 @@ import { useAppContext } from '../context/AppContext';
 import { useTheme } from './ThemeProvider';
 import {
   Sun, Moon, Laptop, LogOut, User as UserIcon, Bell,
-  SprayCan, Snail, SunMoon, Fingerprint, Rabbit, Cat, Shell, Turtle, Radar, HandMetal, Drum, TentTree
+  SprayCan, Snail, SunMoon, Fingerprint, Rabbit, Cat, Shell, Turtle, Radar, HandMetal, Drum, TentTree,
+  Wifi, WifiOff, Loader2, ChevronDown
 } from 'lucide-react';
 
 export default function TopNav() {
-  const { currentUser, handleLogout, notifications, showNotifications, setShowNotifications, markNotificationsRead } = useAppContext();
+  const { currentUser, handleLogout, notifications, showNotifications, setShowNotifications, markNotificationsRead, wsStatus } = useAppContext();
   const { setTheme } = useTheme();
   const location = useLocation();
   const currentPath = location.pathname;
 
   const [isThemeOpen, setIsThemeOpen] = useState(false);
   const [isUserOpen, setIsUserOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+
   const themeRef = useRef<HTMLDivElement>(null);
   const userRef = useRef<HTMLDivElement>(null);
+  const settingsRef = useRef<HTMLDivElement>(null);
 
   // Rotating Logo Icons Logic
   const logoIcons = [SprayCan, Snail, SunMoon, Fingerprint, Rabbit, Cat, Shell, Turtle, Radar, HandMetal, Drum, TentTree];
@@ -28,6 +32,7 @@ export default function TopNav() {
     const handleClickOutside = (event: MouseEvent) => {
       if (themeRef.current && !themeRef.current.contains(event.target as Node)) setIsThemeOpen(false);
       if (userRef.current && !userRef.current.contains(event.target as Node)) setIsUserOpen(false);
+      if (settingsRef.current && !settingsRef.current.contains(event.target as Node)) setIsSettingsOpen(false);
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
@@ -58,19 +63,54 @@ export default function TopNav() {
         <Link to="/planner" className={navClass("/planner")}>Planner</Link>
         <Link to="/calendar" className={navClass("/calendar")}>Holidays</Link>
         <Link to="/tests" className={navClass("/tests")}>Tests</Link>
+
         {currentUser?.role === 'admin' && (
-          <Link to="/settings" className={navClass("/settings")}>Settings</Link>
+          <div className="relative" ref={settingsRef}>
+            <button
+              onClick={() => setIsSettingsOpen(!isSettingsOpen)}
+              className={`flex items-center gap-1.5 ${['/settings', '/raw', '/assets', '/countries', '/insights'].some(p => currentPath.startsWith(p)) ? "text-slate-900 dark:text-zinc-100 px-4 py-1.5 rounded-full bg-slate-200/50 dark:bg-zinc-800/50 border border-slate-300/50 dark:border-zinc-700/50" : "text-slate-500 dark:text-zinc-400 px-4 py-1.5 rounded-full border border-transparent hover:text-slate-900 dark:hover:text-zinc-100 transition-colors"}`}
+            >
+              Settings <ChevronDown size={14} className={`transition-transform ${isSettingsOpen ? 'rotate-180' : ''}`} />
+            </button>
+
+            {isSettingsOpen && (
+              <div className="absolute left-0 top-full mt-2 w-48 bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-xl shadow-xl py-2 animate-in fade-in zoom-in-95 overflow-hidden">
+                <Link to="/countries" onClick={() => setIsSettingsOpen(false)} className="block px-4 py-2 text-sm font-medium text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors">Countries</Link>
+                <Link to="/raw" onClick={() => setIsSettingsOpen(false)} className="block px-4 py-2 text-sm font-medium text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors">Raw Data Lab</Link>
+                <Link to="/assets" onClick={() => setIsSettingsOpen(false)} className="block px-4 py-2 text-sm font-medium text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors">Active Pool</Link>
+                <Link to="/insights" onClick={() => setIsSettingsOpen(false)} className="block px-4 py-2 text-sm font-medium text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors">Insights</Link>
+                <div className="h-px bg-slate-100 dark:bg-zinc-800 my-1"></div>
+                <Link to="/settings" onClick={() => setIsSettingsOpen(false)} className="block px-4 py-2 text-sm font-bold text-slate-900 dark:text-zinc-100 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors">System Settings</Link>
+              </div>
+            )}
+          </div>
         )}
       </div>
 
       {/* User Actions */}
       <div className="flex items-center gap-4">
 
+        {/* Live Sync WebSocket Status */}
+        <div className="relative group flex items-center justify-center cursor-help">
+          {wsStatus === 'connected' ? (
+            <Wifi className="h-4 w-4 text-emerald-500" />
+          ) : wsStatus === 'connecting' ? (
+            <Loader2 className="h-4 w-4 text-amber-500 animate-spin" />
+          ) : (
+            <WifiOff className="h-4 w-4 text-red-500 animate-pulse" />
+          )}
+
+          {/* Tooltip */}
+          <div className="absolute top-full mt-3 left-1/2 -translate-x-1/2 px-2.5 py-1 bg-slate-900 dark:bg-zinc-100 text-white dark:text-slate-900 text-[10px] font-bold uppercase tracking-wider rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none shadow-lg">
+            Live Sync: {wsStatus}
+          </div>
+        </div>
+
         {/* Notifications */}
         <div className="relative">
           <button
             onClick={() => setShowNotifications(!showNotifications)}
-            className="text-slate-500 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-100 transition-colors relative"
+            className="text-slate-500 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-100 transition-colors relative flex items-center"
           >
             <Bell className="h-4 w-4" />
             {unreadCount > 0 && (
@@ -116,7 +156,7 @@ export default function TopNav() {
           </button>
 
           {isThemeOpen && (
-            <div className="absolute right-0 top-full mt-2 w-32 bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-lg shadow-lg py-1 animate-in fade-in zoom-in-95">
+            <div className="absolute right-0 top-full mt-2 w-32 bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-lg shadow-lg py-1 animate-in fade-in zoom-in-95 overflow-hidden">
               <button onClick={() => {setTheme("light"); setIsThemeOpen(false)}} className="w-full flex items-center px-3 py-2 text-sm hover:bg-slate-100 dark:hover:bg-zinc-800"><Sun className="mr-2 h-4 w-4" /> Light</button>
               <button onClick={() => {setTheme("dark"); setIsThemeOpen(false)}} className="w-full flex items-center px-3 py-2 text-sm hover:bg-slate-100 dark:hover:bg-zinc-800"><Moon className="mr-2 h-4 w-4" /> Dark</button>
               <button onClick={() => {setTheme("system"); setIsThemeOpen(false)}} className="w-full flex items-center px-3 py-2 text-sm hover:bg-slate-100 dark:hover:bg-zinc-800"><Laptop className="mr-2 h-4 w-4" /> System</button>
@@ -137,7 +177,7 @@ export default function TopNav() {
           </button>
 
           {isUserOpen && (
-            <div className="absolute right-0 top-full mt-2 w-56 bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-xl shadow-xl py-2 animate-in fade-in zoom-in-95">
+            <div className="absolute right-0 top-full mt-2 w-56 bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-xl shadow-xl py-2 animate-in fade-in zoom-in-95 overflow-hidden">
               <div className="px-4 py-3 border-b border-slate-200 dark:border-zinc-800 mb-2">
                 <p className="text-sm font-semibold text-slate-900 dark:text-zinc-100">{currentUser?.name || 'User'}</p>
                 <p className="text-xs text-slate-500 dark:text-zinc-400 truncate">{currentUser?.email}</p>

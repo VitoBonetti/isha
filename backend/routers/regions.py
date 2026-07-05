@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, UUID4
 from database import get_db_cursor
 from routers.auth import get_current_user, require_admin
+import uuid
 
 router = APIRouter(prefix="/api/regions", tags=["Regions"])
 
@@ -22,14 +23,15 @@ def get_regions(current_user: dict = Depends(get_current_user), cursor=Depends(g
 
 @router.post("/")
 def create_region(r: RegionBase, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+
+    new_region_id = str(uuid.uuid4())
     try:
         cursor.execute(
-            "INSERT INTO regions (name, is_active) VALUES (%s, %s) RETURNING id",
-            (r.name, r.is_active)
+            "INSERT INTO regions (id, name, is_active) VALUES (%s, %s, %s)",
+            (new_region_id, r.name, r.is_active)
         )
-        new_id = cursor.fetchone()[0]
         cursor.connection.commit()
-        return {"id": new_id, "message": "Region created."}
+        return {"id": new_region_id, "message": "Region created."}
     except Exception as e:
         cursor.connection.rollback()
         raise HTTPException(status_code=400, detail="Region name already exists.")

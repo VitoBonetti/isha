@@ -25,8 +25,9 @@ class LocationResponse(LocationBase):
     id: UUID4
 
 class CountryBase(BaseModel):
-    code: str = Field(..., max_length=10)
+    code: str
     name: str
+    region_id: Optional[UUID4] = None
     is_active: bool = True
 
 class CountryResponse(CountryBase):
@@ -75,8 +76,10 @@ class NotificationResponse(BaseModel):
 # --- ASSETS ---
 class AssetBase(BaseModel):
     name: str
+    asset_type_id: UUID4
     country_id: Optional[UUID4] = None
     service_forecast_id: Optional[UUID4] = None
+    category_id: Optional[UUID4] = None
 
 class RawAssetCreate(AssetBase):
     description: Optional[str] = None
@@ -84,11 +87,18 @@ class RawAssetCreate(AssetBase):
     confidentiality_rating: Optional[int] = None
     integrity_rating: Optional[int] = None
     availability_rating: Optional[int] = None
+    facing_internet: bool = False
 
 class AssetResponse(AssetBase):
     id: UUID4
     raw_asset_id: UUID4
     is_assigned: bool = False
+
+class PromoteAssetRequest(BaseModel):
+    raw_asset_ids: List[UUID4]
+
+class BulkAssetRequest(BaseModel):
+    raw_asset_ids: List[UUID4]
 
 # --- TESTS & ASSIGNMENTS ---
 class TestBase(BaseModel):

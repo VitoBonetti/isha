@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timedelta
 from database import get_db_cursor, db_cursor_context
 from routers.auth import get_current_user, require_admin, require_write_access
-from models import EventCreate, EventBase, ServiceCategoryCreate, ServiceCategoryBase
+from schema import EventCreate, EventBase, ServiceCategoryCreate, ServiceCategoryBase
 from websockets_manager import manager
 from audit_logger import log_audit_event
 
@@ -75,7 +75,8 @@ def calculate_weekly_capacity(cursor, user_id, year, week_number):
         SELECT SUM(a.allocated_credits) 
         FROM assignments a
         JOIN tests t ON a.test_id = t.id
-        WHERE a.user_id = %s AND a.year = %s AND a.week_number = %s AND t.status != 'Unable'
+        -- FIX: Changed t.status to t.stages::text to match the database schema
+        WHERE a.user_id = %s AND a.year = %s AND a.week_number = %s AND t.stages::text != 'Unable'
     ''', (str(user_id), year, week_number))
 
     used = cursor.fetchone()[0] or 0.0
@@ -92,7 +93,7 @@ def get_quarterly_board(year: int, quarter: int, response: Response,
 
     # 1. Services & Categories
     cursor.execute(
-        'SELECT id, name, theme_color, display_order FROM service_lanes WHERE is_active = TRUE ORDER BY display_order ASC')
+        'SELECT id, name, theme_color, display_order FROM services_lanes WHERE is_active = TRUE ORDER BY display_order ASC')
     services = [{"id": r[0], "name": r[1], "theme_color": r[2]} for r in cursor.fetchall()]
 
     cursor.execute('SELECT id, name, target_goal, service_lane_id FROM service_categories ORDER BY name ASC')
@@ -108,7 +109,7 @@ def get_quarterly_board(year: int, quarter: int, response: Response,
     # 3. Tests (Backlog & Scheduled)
     cursor.execute('''
         SELECT t.id, t.name, t.service_lane_id, t.category_id, t.credits_per_week, t.duration_weeks, 
-               t.start_week, t.start_year, t.status,
+               t.start_week, t.start_year, t.stages as status,  -- FIX: Aliased stages as status
                (SELECT COUNT(*) FROM test_assets WHERE test_id = t.id) as asset_count
         FROM tests t
         WHERE t.start_week IS NULL OR t.start_year = %s
@@ -157,7 +158,7 @@ def get_categories(current_user: dict = Depends(get_current_user), cursor=Depend
     cursor.execute('''
         SELECT c.id, c.name, c.target_goal, c.service_lane_id, s.name as service_lane_name 
         FROM service_categories c
-        LEFT JOIN service_lanes s ON c.service_lane_id = s.id
+        LEFT JOIN services_lanes s ON c.service_lane_id = s.id
         ORDER BY c.name ASC
     ''')
     columns = [desc[0] for desc in cursor.description]
@@ -170,9 +171,11 @@ def create_category(cat: ServiceCategoryCreate, current_user: dict = Depends(req
     # Safely convert UUID to string for psycopg2
     lane_id = str(cat.service_lane_id) if cat.service_lane_id else None
 
+    new_category_id= str(uuid.uuid4())
+
     cursor.execute(
-        'INSERT INTO service_categories (service_lane_id, name, target_goal) VALUES (%s, %s, %s) RETURNING id',
-        (lane_id, cat.name, cat.target_goal)
+        'INSERT INTO service_categories (id, service_lane_id, name, target_goal) VALUES (%s, %s, %s, %s) RETURNING id',
+        (new_category_id, lane_id, cat.name, cat.target_goal)
     )
 
     log_audit_event(
@@ -242,18 +245,30 @@ def create_event(e: EventCreate, background_tasks: BackgroundTasks,
         e.user_id = None
         if e.event_type == 'team_day':
             cursor.execute("SELECT id FROM locations WHERE name = 'Global' LIMIT 1")
-            e.location_id = cursor.fetchone()[0]
+            global_loc = cursor.fetchone()
+            e.location_id = global_loc[0] if global_loc else None
 
-    # FIX: Safely convert UUIDs to strings for psycopg2
+    # Safely convert UUIDs to strings for psycopg2
     u_id = str(e.user_id) if e.user_id else None
     loc_id = str(e.location_id) if e.location_id else None
 
     # Safely get string value from Enum
     e_type = e.event_type.value if hasattr(e.event_type, 'value') else e.event_type
 
+    new_event_id = str(uuid.uuid4())
+
+    #  check if user_id is locked to NOT NULL and unlock it automatically.
+    cursor.execute("""
+        SELECT is_nullable FROM information_schema.columns 
+        WHERE table_name = 'events' AND column_name = 'user_id'
+    """)
+    row = cursor.fetchone()
+    if row and row[0] == 'NO':
+        cursor.execute("ALTER TABLE events ALTER COLUMN user_id DROP NOT NULL;")
+
     cursor.execute(
-        'INSERT INTO events (user_id, event_type, location_id, start_date, end_date) VALUES (%s, %s, %s, %s, %s)',
-        (u_id, e_type, loc_id, e.start_date, e.end_date)
+        'INSERT INTO events (id, user_id, event_type, location_id, start_date, end_date) VALUES (%s, %s, %s, %s, %s, %s)',
+        (new_event_id, u_id, e_type, loc_id, e.start_date, e.end_date)
     )
     cursor.connection.commit()
 
@@ -267,7 +282,6 @@ def create_event(e: EventCreate, background_tasks: BackgroundTasks,
 
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"status": "ok"}
-
 
 @router.put("/events/{event_id}")
 def update_event(event_id: str, e: EventBase, background_tasks: BackgroundTasks,

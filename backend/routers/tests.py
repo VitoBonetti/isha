@@ -1,10 +1,11 @@
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from typing import List
+import uuid
 from pydantic import BaseModel, UUID4
 from database import get_db_cursor, db_cursor_context
 from routers.auth import get_current_user, require_admin
 from websockets_manager import manager
-from models import TestCreate, TestBase, AssignmentBase
+from schema import TestCreate, TestBase, AssignmentBase
 
 router = APIRouter(prefix="/api/tests", tags=["Tests & Assignments"])
 
@@ -32,10 +33,11 @@ class AssignmentCreate(BaseModel):
 @router.post("/")
 def create_test(t: TestCreate, background_tasks: BackgroundTasks,
                 current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    new_test_id = str(uuid.uuid4())
     cursor.execute('''
-        INSERT INTO tests (name, service_lane_id, credits_per_week, duration_weeks, status) 
-        VALUES (%s, %s, %s, %s, 'Not Planned') RETURNING id
-    ''', (t.name, t.service_lane_id, t.credits_per_week, t.duration_weeks))
+        INSERT INTO tests (id, name, service_lane_id, credits_per_week, duration_weeks, status) 
+        VALUES (%s, %s, %s, %s, %s, 'Not Planned') RETURNING id
+    ''', (new_test_id, t.name, t.service_lane_id, t.credits_per_week, t.duration_weeks))
 
     new_id = cursor.fetchone()[0]
 
@@ -112,14 +114,13 @@ def process_bulk_tests_background(asset_ids: List[UUID4]):
                 continue  # Skip if already assigned or lacks a forecast lane
 
             asset_name, service_lane_id, def_credits, def_duration = asset_data
+            new_test_id = str(uuid.uuid4())
 
             # Create the test using the lane's defaults
             cursor.execute('''
-                INSERT INTO tests (name, service_lane_id, credits_per_week, duration_weeks, status) 
-                VALUES (%s, %s, %s, %s, 'Not Planned') RETURNING id
-            ''', (asset_name, service_lane_id, def_credits, def_duration))
-
-            new_test_id = cursor.fetchone()[0]
+                INSERT INTO tests (id, name, service_lane_id, credits_per_week, duration_weeks, status) 
+                VALUES (%s, %s, %s, %s, %s, 'Not Planned')
+            ''', (new_test_id, asset_name, service_lane_id, def_credits, def_duration))
 
             # Link it
             cursor.execute('INSERT INTO test_assets (test_id, asset_id) VALUES (%s, %s)', (new_test_id, str(asset_id)))
@@ -231,18 +232,19 @@ def create_assignment(assign: AssignmentCreate, background_tasks: BackgroundTask
 
     if cursor.fetchone():
         raise HTTPException(status_code=400, detail="Pentester is already assigned to this test for this week!")
-
+    new_assignment_id = str(uuid.uuid4())
     cursor.execute('''
-        INSERT INTO assignments (test_id, user_id, week_number, year, allocated_credits) 
-        VALUES (%s, %s, %s, %s, %s)
-    ''', (str(assign.test_id), str(assign.user_id), assign.week_number, assign.year, assign.allocated_credits))
+        INSERT INTO assignments (id, test_id, user_id, week_number, year, allocated_credits) 
+        VALUES (%s, %s, %s, %s, %s, %s)
+    ''', (new_assignment_id, str(assign.test_id), str(assign.user_id), assign.week_number, assign.year, assign.allocated_credits))
 
     cursor.execute("SELECT name FROM tests WHERE id = %s", (str(assign.test_id),))
     test_row = cursor.fetchone()
 
     if test_row:
-        cursor.execute("INSERT INTO notifications (user_id, message, type) VALUES (%s, %s, %s)",
-                       (str(assign.user_id), f"You were assigned to {test_row[0]} for Week {assign.week_number}.",
+        new_notification_id = str(uuid.uuid4())
+        cursor.execute("INSERT INTO notifications (id, user_id, message, type) VALUES (%s, %s, %s, %s)",
+                       (new_notification_id, str(assign.user_id), f"You were assigned to {test_row[0]} for Week {assign.week_number}.",
                         "ASSIGNMENT"))
 
     cursor.connection.commit()
