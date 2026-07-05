@@ -119,22 +119,24 @@ def get_my_profile(current_user: dict = Depends(get_current_user)):
 
 
 # --- NOTIFICATIONS RESTORED ---
-
 @router.get("/me/notifications")
 def get_my_notifications(current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+    # FIX: Account for is_read being NULL, and cast the UUID to string!
     cursor.execute("""
         SELECT id, message, type, created_at 
         FROM notifications 
-        WHERE user_id = %s AND is_read = FALSE 
+        WHERE user_id = %s AND (is_read = FALSE OR is_read IS NULL)
         ORDER BY created_at DESC
-    """, (current_user['id'],))
+    """, (str(current_user['id']),))
 
-    notifs = [{"id": r[0], "message": r[1], "type": r[2], "created_at": r[3]} for r in cursor.fetchall()]
+    # FIX: Cast the notification ID to string to prevent JSON serialization crashes
+    notifs = [{"id": str(r[0]), "message": r[1], "type": r[2], "created_at": r[3]} for r in cursor.fetchall()]
     return notifs
 
 
 @router.put("/me/notifications/read")
 def mark_notifications_read(current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
-    cursor.execute("UPDATE notifications SET is_read = TRUE WHERE user_id = %s", (current_user['id'],))
+    # FIX: Cast the UUID to string
+    cursor.execute("UPDATE notifications SET is_read = TRUE WHERE user_id = %s", (str(current_user['id']),))
     cursor.connection.commit()
     return {"message": "Notifications marked as read."}

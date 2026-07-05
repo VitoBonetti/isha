@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import axios from "axios";
 import toast from "react-hot-toast";
 import type { DropResult } from '@hello-pangea/dnd';
@@ -32,8 +32,51 @@ export default function Planner() {
     action: (() => Promise<void>) | null;
   }>({ isOpen: false, title: "", message: "", action: null });
 
+  // --- MULTIPLAYER & WEBSOCKET STATE ---
+  const [onlineUsers, setOnlineUsers] = useState<string[]>([]);
+  const ws = useRef<WebSocket | null>(null);
+
   useEffect(() => {
     fetchBoardData();
+
+    // 1. Establish WebSocket connection automatically
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/ws/board`;
+
+    const socket = new WebSocket(wsUrl);
+    ws.current = socket;
+
+    socket.onopen = () => {
+      console.log("🟢 Connected to live board synchronization");
+    };
+
+    socket.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+
+        // 2. Listen for Database Changes
+        if (data.action === 'REFRESH_BOARD') {
+          fetchBoardData();
+
+          // Dispatch a global event so your TopNav knows to re-fetch notifications!
+          window.dispatchEvent(new CustomEvent('refresh_notifications'));
+        }
+        // 3. Listen for User Presence (Other admins opening the page)
+        else if (data.action === 'ONLINE_USERS' && data.users) {
+          setOnlineUsers(data.users);
+        }
+      } catch (e) {
+        console.error("WebSocket message error:", e);
+      }
+    };
+
+    socket.onclose = () => {
+      console.log("🔴 Disconnected from live board");
+    };
+
+    return () => {
+      socket.close();
+    };
   }, [targetYear, targetQuarter]);
 
   const fetchBoardData = async () => {
@@ -85,7 +128,8 @@ export default function Planner() {
         await axios.put(`/api/tests/${draggableId}/unschedule`);
         toast.success("Test returned to backlog.");
       }
-      fetchBoardData();
+      // Note: We don't strictly need fetchBoardData() here anymore because the backend
+      // will broadcast 'REFRESH_BOARD' and trigger it for everyone, including us!
     } catch (error) {
       console.error("Failed to move test:", error);
       toast.error("Failed to move test.");
@@ -97,7 +141,6 @@ export default function Planner() {
     try {
       await axios.put(`/api/tests/${testId}/complete`);
       toast.success("Test marked as Completed!");
-      fetchBoardData();
     } catch (error) { toast.error("Failed to complete test."); }
   };
 
@@ -105,7 +148,6 @@ export default function Planner() {
     try {
       await axios.put(`/api/tests/${testId}/unschedule`);
       toast.success("Test unscheduled and returned to backlog.");
-      fetchBoardData();
     } catch (error) { toast.error("Failed to unschedule test."); }
   };
 
@@ -118,7 +160,6 @@ export default function Planner() {
         try {
           await axios.put(`/api/tests/${testId}/unable`);
           toast.success("Test stopped. Original returned to backlog.");
-          fetchBoardData();
         } catch (error) { toast.error("Failed to stop test."); }
       }
     });
@@ -133,7 +174,6 @@ export default function Planner() {
         try {
           await axios.delete(`/api/tests/${testId}`);
           toast.success("Test permanently deleted.");
-          fetchBoardData();
         } catch (error) { toast.error("Failed to delete test."); }
       }
     });
@@ -149,12 +189,10 @@ export default function Planner() {
 
       const assignmentPromises = [];
 
-      // Loop through the duration and assign them to every week of the test
       for (let i = 0; i < duration; i++) {
         let assignWeek = startWk + i;
         let assignYear = startYr;
 
-        // Safely handle Year Rollover (e.g., Week 52 -> Week 1)
         if (assignWeek > 52) {
           assignWeek -= 52;
           assignYear += 1;
@@ -166,16 +204,14 @@ export default function Planner() {
             user_id: userId,
             week_number: assignWeek,
             year: assignYear,
-            allocated_credits: 1.0 // Adjust default credits here if needed
+            allocated_credits: 1.0
           })
         );
       }
 
-      // Wait for all assignments to finish saving
       await Promise.all(assignmentPromises);
 
       toast.success("Pentester Assigned to all weeks!");
-      fetchBoardData();
       setAssignModalTest(null);
     } catch (error: any) {
       if (error.response?.data?.detail) {
@@ -190,7 +226,6 @@ export default function Planner() {
     try {
       await axios.delete(`/api/tests/assignments/${testId}/${userId}`);
       toast.success("Pentester removed from test.");
-      fetchBoardData();
     } catch (error) { toast.error("Failed to remove pentester."); }
   };
 
@@ -206,7 +241,6 @@ export default function Planner() {
         status: 'Scheduled'
       });
       toast.success("Test status reverted.");
-      fetchBoardData();
     } catch (error) { toast.error("Failed to revert status."); }
   };
 
@@ -214,7 +248,6 @@ export default function Planner() {
     try {
       await axios.put(`/api/tests/${testId}`, updatedData);
       toast.success("Test settings updated!");
-      fetchBoardData();
       setEditModalTest(null);
     } catch (error) {
       console.error(error);
@@ -227,7 +260,7 @@ export default function Planner() {
   return (
     <>
       <PlannerView
-        onlineUsers={[]}
+        onlineUsers={onlineUsers} // <--- WIRED TO LIVE DATA
         targetYear={targetYear}
         targetQuarter={targetQuarter}
         handlePrevQuarter={handlePrevQuarter}
