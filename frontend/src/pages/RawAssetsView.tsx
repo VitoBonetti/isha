@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import axios from "axios";
 import TopNav from "../components/TopNav";
 import AddRawAssetModal from "../components/Modals/AddRawAssetModal";
-import { Search, Upload, Plus, Filter, ChevronUp, ChevronDown, ChevronsUpDown, Download } from "lucide-react";
+import { Search, Upload, Plus, Filter, ChevronUp, ChevronDown, ChevronsUpDown, Download, Database } from "lucide-react";
 import toast, { Toaster } from 'react-hot-toast';
 
 interface RawAsset {
@@ -155,8 +155,11 @@ export default function RawAssetsView() {
 
       <AddRawAssetModal isOpen={showAddModal} onClose={() => setShowAddModal(false)} onSuccess={fetchRawAssets} countries={countries} services={services} categories={categories} assetTypes={assetTypes} />
 
-      <div className="pt-24 px-6 max-w-7xl mx-auto">
-        <h1 className="text-3xl font-bold mb-2">Raw Assets</h1>
+      <div className="pt-32 px-6 max-w-7xl mx-auto">
+        <h1 className="text-2xl font-extrabold flex items-center gap-2">
+          <Database size={28} className="text-slate-500" />
+          Raw Assets
+        </h1>
         <p className="text-slate-500 dark:text-zinc-400 mb-8">Unprocessed assets ready for review and promotion.</p>
 
         {/* Toolbar */}
@@ -214,7 +217,7 @@ export default function RawAssetsView() {
                   <th className="p-4 font-semibold text-slate-500 uppercase cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort("name")}><div className="flex items-center gap-2">Name <SortIcon column="name" /></div></th>
                   <th className="p-4 font-semibold text-slate-500 uppercase cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort("type")}><div className="flex items-center gap-2">Type <SortIcon column="type" /></div></th>
                   <th className="p-4 font-semibold text-slate-500 uppercase cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort("country")}><div className="flex items-center gap-2">Country <SortIcon column="country" /></div></th>
-                  <th className="p-4 font-semibold text-slate-500 uppercase cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort("service")}><div className="flex items-center gap-2">Service Lane <SortIcon column="service" /></div></th>
+                  <th className="p-4 font-semibold text-slate-500 uppercase cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort("service")}><div className="flex items-center gap-2">Service <SortIcon column="service" /></div></th>
                   <th className="p-4 font-semibold text-slate-500 uppercase cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort("category")}><div className="flex items-center gap-2">Category <SortIcon column="category" /></div></th>
                   <th className="p-4 font-semibold text-slate-500 uppercase text-right cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort("status")}><div className="flex items-center justify-end gap-2"><SortIcon column="status" /> Status</div></th>
                 </tr>

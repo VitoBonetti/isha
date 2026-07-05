@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import axios from "axios";
 import TopNav from "../components/TopNav";
-import { Search, Filter, MoveRight, AlertCircle } from "lucide-react";
+import { Search, Filter, MoveRight, AlertCircle, Server } from "lucide-react";
 
 interface PoolAsset {
   id: string;
@@ -73,8 +73,11 @@ export default function AssetsView() {
       <TopNav />
       
       {/* Header */}
-      <div className="pt-24 pb-8 px-6 max-w-7xl mx-auto">
-        <h1 className="text-3xl font-bold mb-2">Active Asset Pool</h1>
+      <div className="pt-32 pb-8 px-6 max-w-7xl mx-auto">
+        <h1 className="text-2xl font-extrabold flex items-center gap-2">
+          <Server size={28} className="text-emerald-500" />
+          Active Asset Pool
+        </h1>
         <p className="text-slate-500 dark:text-zinc-400 mb-8">
           Assets currently in the pool and ready for testing assignments.
         </p>
