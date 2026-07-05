@@ -90,6 +90,14 @@ def get_raw_assets(
     columns = [col[0] for col in cursor.description]
     return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
+# --- STANDARDIZED ASSET HISTORY LOGGING ---
+def insert_asset_history(cursor, raw_asset_id: str, user_id: str, action: str, details: str):
+    """Guarantees a standardized action format and a strict, non-null Database Timestamp."""
+    cursor.execute("""
+        INSERT INTO asset_history (id, raw_asset_id, user_id, action, details, timestamp)
+        VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+    """, (str(uuid.uuid4()), raw_asset_id, user_id, action, details))
+
 
 @router.post("/raw")
 def create_manual_raw_asset(asset: RawAssetCreate, background_tasks: BackgroundTasks,
@@ -104,15 +112,19 @@ def create_manual_raw_asset(asset: RawAssetCreate, background_tasks: BackgroundT
         INSERT INTO raw_assets (
             id, name, description, business_critical, 
             confidentiality_rating, integrity_rating, availability_rating, 
-            country_id, service_forecast_id, category_id, asset_type_id, facing_internet
+            country_id, service_forecast_id, category_id, asset_type_id, facing_internet, create_date
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP) RETURNING id
     """, (
         new_raw_assets_id, asset.name, asset.description, asset.business_critical,
         asset.confidentiality_rating, asset.integrity_rating, asset.availability_rating,
         c_id, s_id, cat_id, at_id, asset.facing_internet
     ))
     new_id = cursor.fetchone()[0]
+
+    # Standardized Creation Log
+    insert_asset_history(cursor, new_id, str(current_user["id"]), "CREATED", "Asset manually added to the system.")
+
     cursor.connection.commit()
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
     return {"message": "Raw Asset created", "id": new_id}
@@ -123,7 +135,7 @@ def get_single_raw_asset(raw_id: str, current_user: dict = Depends(get_current_u
     cursor.execute("""
         SELECT r.id, r.name, r.description, r.business_critical, r.confidentiality_rating, 
                r.integrity_rating, r.availability_rating, r.country_id, r.service_forecast_id, 
-               r.category_id, r.asset_type_id, r.facing_internet,
+               r.category_id, r.asset_type_id, r.facing_internet, r.create_date, r.update_date,
                CASE WHEN a.id IS NOT NULL THEN true ELSE false END as is_promoted
         FROM raw_assets r
         LEFT JOIN assets a ON r.id = a.raw_asset_id
@@ -131,29 +143,106 @@ def get_single_raw_asset(raw_id: str, current_user: dict = Depends(get_current_u
     """, (raw_id,))
     row = cursor.fetchone()
     if not row: raise HTTPException(status_code=404, detail="Asset not found")
+
     columns = [col[0] for col in cursor.description]
-    return dict(zip(columns, row))
+    asset_data = dict(zip(columns, row))
+
+    # Fetch History (Already ordered DESC, so newest is always at the top)
+    cursor.execute("""
+        SELECT h.id, h.action, h.details, h.timestamp, u.name as user_name
+        FROM asset_history h
+        LEFT JOIN users u ON h.user_id = u.id
+        WHERE h.raw_asset_id = %s
+        ORDER BY h.timestamp DESC
+    """, (raw_id,))
+    hist_cols = [col[0] for col in cursor.description]
+    asset_data["history"] = [dict(zip(hist_cols, h_row)) for h_row in cursor.fetchall()]
+
+    return asset_data
 
 
 @router.put("/raw/{raw_id}")
 def update_raw_asset(raw_id: str, asset: RawAssetCreate, background_tasks: BackgroundTasks,
                      current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    # 1. Fetch the OLD state (including relational names via JOINs)
+    cursor.execute("""
+        SELECT r.name, r.facing_internet, r.confidentiality_rating, r.integrity_rating, r.availability_rating,
+               c.name as country_name, s.name as service_name, cat.name as category_name, at.name as type_name
+        FROM raw_assets r
+        LEFT JOIN countries c ON r.country_id = c.id
+        LEFT JOIN services_lanes s ON r.service_forecast_id = s.id
+        LEFT JOIN service_categories cat ON r.category_id = cat.id
+        LEFT JOIN asset_types at ON r.asset_type_id = at.id
+        WHERE r.id = %s
+    """, (raw_id,))
+    old_state = cursor.fetchone()
+    if not old_state:
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    # Unpack old state and handle NULLs gracefully
+    old_name, old_internet, old_c, old_i, old_a, old_country, old_service, old_category, old_type = old_state
+    old_country = old_country or "None"
+    old_service = old_service or "None"
+    old_category = old_category or "None"
+    old_type = old_type or "None"
+
+    # 2. Fetch the NEW state names based on the submitted UUIDs
+    new_country, new_service, new_category, new_type = "None", "None", "None", "None"
+
     c_id = str(asset.country_id) if asset.country_id else None
     s_id = str(asset.service_forecast_id) if asset.service_forecast_id else None
     cat_id = str(asset.category_id) if asset.category_id else None
-    at_id = str(asset.asset_type_id)
+    at_id = str(asset.asset_type_id) if asset.asset_type_id else None
 
+    if c_id:
+        cursor.execute("SELECT name FROM countries WHERE id = %s", (c_id,))
+        res = cursor.fetchone()
+        if res: new_country = res[0]
+    if s_id:
+        cursor.execute("SELECT name FROM services_lanes WHERE id = %s", (s_id,))
+        res = cursor.fetchone()
+        if res: new_service = res[0]
+    if cat_id:
+        cursor.execute("SELECT name FROM service_categories WHERE id = %s", (cat_id,))
+        res = cursor.fetchone()
+        if res: new_category = res[0]
+    if at_id:
+        cursor.execute("SELECT name FROM asset_types WHERE id = %s", (at_id,))
+        res = cursor.fetchone()
+        if res: new_type = res[0]
+
+    # 3. Perform the Database Update
     cursor.execute("""
         UPDATE raw_assets 
         SET name=%s, description=%s, business_critical=%s, 
             confidentiality_rating=%s, integrity_rating=%s, availability_rating=%s, 
-            country_id=%s, service_forecast_id=%s, category_id=%s, asset_type_id=%s, facing_internet=%s
+            country_id=%s, service_forecast_id=%s, category_id=%s, asset_type_id=%s, facing_internet=%s,
+            update_date=CURRENT_TIMESTAMP
         WHERE id=%s
     """, (
         asset.name, asset.description, asset.business_critical,
         asset.confidentiality_rating, asset.integrity_rating, asset.availability_rating,
         c_id, s_id, cat_id, at_id, asset.facing_internet, raw_id
     ))
+
+    # 4. Supercharged Diff Engine
+    changes = []
+    if old_name != asset.name: changes.append(f"Name: '{old_name}' ➔ '{asset.name}'")
+    if old_type != new_type: changes.append(f"Type: '{old_type}' ➔ '{new_type}'")
+    if old_country != new_country: changes.append(f"Country: '{old_country}' ➔ '{new_country}'")
+    if old_service != new_service: changes.append(f"Service: '{old_service}' ➔ '{new_service}'")
+    if old_category != new_category: changes.append(f"Category: '{old_category}' ➔ '{new_category}'")
+    if old_internet != asset.facing_internet: changes.append(
+        f"Internet Facing: {old_internet} ➔ {asset.facing_internet}")
+    if old_c != asset.confidentiality_rating: changes.append(f"C-Rating: {old_c} ➔ {asset.confidentiality_rating}")
+    if old_i != asset.integrity_rating: changes.append(f"I-Rating: {old_i} ➔ {asset.integrity_rating}")
+    if old_a != asset.availability_rating: changes.append(f"A-Rating: {old_a} ➔ {asset.availability_rating}")
+
+    details_str = " | ".join(changes) if changes else "Description Updated."
+
+    # 5. Standardized Update Log
+    insert_asset_history(cursor, raw_id, str(current_user["id"]), "UPDATED", details_str)
+
     cursor.connection.commit()
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
     return {"message": "Raw Asset updated"}
@@ -264,10 +353,9 @@ def process_excel_import_sync(contents: bytes, filename: str, current_user: dict
                             INSERT INTO raw_assets (
                                 id, name, description, business_critical, 
                                 confidentiality_rating, integrity_rating, availability_rating, 
-                                country_id, service_forecast_id, category_id, asset_type_id, facing_internet
-                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        """, (new_id, name, desc, business_critical, c_val, i_val, a_val, country_id, service_id,
-                              cat_id, type_id, facing_internet))
+                                country_id, service_forecast_id, category_id, asset_type_id, facing_internet, create_date
+                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                        """, (new_id, name, desc, business_critical, c_val, i_val, a_val, country_id, service_id, cat_id, type_id, facing_internet))
 
                     success_count += 1
                 except Exception:
@@ -330,6 +418,11 @@ def promote_raw_assets_to_pool(req: BulkAssetRequest, background_tasks: Backgrou
             INSERT INTO assets (id, raw_asset_id, name, country_id, service_forecast_id, category_id, asset_type_id)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
         """, (new_promote_id, str(raw_id), raw_data[0], raw_data[1], raw_data[2], raw_data[3], raw_data[4]))
+
+        # Standardized Promotion Log
+        insert_asset_history(cursor, str(raw_id), str(current_user["id"]), "PROMOTED",
+                             "Asset moved to the Active testing pool.")
+
         promoted += 1
 
     cursor.connection.commit()
