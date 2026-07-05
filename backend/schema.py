@@ -117,6 +117,20 @@ class TestResponse(TestBase):
     id: UUID4
     asset_ids: List[UUID4] = []
 
+class TestSchedule(BaseModel):
+    start_week: int
+    start_year: int
+
+class BulkTestCreate(BaseModel):
+    asset_ids: List[UUID4]
+
+class AssignmentCreate(BaseModel):
+    test_id: UUID4
+    user_id: UUID4
+    week_number: int
+    year: int
+    allocated_credits: float
+
 class AssignmentBase(BaseModel):
     test_id: UUID4
     user_id: UUID4

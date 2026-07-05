@@ -8,6 +8,7 @@ import CalendarView from "./pages/CalendarView";
 import AssetsView from "./pages/AssetsView";
 import RawAssetsView from "./pages/RawAssetsView";
 import AssetDetailView from "./pages/AssetDetailView";
+import Planner from "./pages/Planner";
 import { SprayCan, LogOut } from "lucide-react";
 
 function AppContent() {
@@ -58,6 +59,7 @@ function AppContent() {
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/settings" element={<SettingsView />} />
         <Route path="/calendar" element={<CalendarView />} />
+        <Route path="/planner" element={<Planner />} />
         <Route path="/assets" element={<AssetsView />} />
         <Route path="/raw" element={<RawAssetsView />} />
         <Route path="/raw/:id" element={<AssetDetailView />} />
