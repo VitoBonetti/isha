@@ -104,6 +104,7 @@ class BulkAssetRequest(BaseModel):
 class TestBase(BaseModel):
     name: str
     service_lane_id: UUID4
+    category_id: Optional[UUID4] = None
     credits_per_week: float
     duration_weeks: float
     start_week: Optional[int] = None

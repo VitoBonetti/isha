@@ -99,9 +99,9 @@ def get_quarterly_board(year: int, quarter: int, response: Response,
                   for r in cursor.fetchall()]
 
     # 2. Users (Pentesters) & Capacity Matrix
-    cursor.execute('SELECT id, name, role, email, base_capacity, location_id FROM users')
+    cursor.execute('SELECT id, name, role, email, base_capacity, location_id, avatar_url FROM users')
     pentesters = [{"id": str(r[0]), "name": r[1], "role": r[2], "email": r[3], "capacity": r[4],
-                   "location_id": str(r[5]) if r[5] else None} for r in cursor.fetchall()]
+                   "location_id": str(r[5]) if r[5] else None, "avatar_url": r[6]} for r in cursor.fetchall()]
 
     cap_matrix = {p["id"]: {w: calculate_weekly_capacity(cursor, p["id"], year, w) for w in weeks} for p in pentesters}
 

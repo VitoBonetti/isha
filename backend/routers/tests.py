@@ -64,11 +64,13 @@ def update_test(test_id: str, t: TestBase, background_tasks: BackgroundTasks,
         cursor.execute('DELETE FROM assignments WHERE test_id = %s', (test_id,))
         cursor.execute('UPDATE tests SET start_week = NULL, start_year = NULL WHERE id = %s', (test_id,))
 
+    cat_id = str(t.category_id) if hasattr(t, 'category_id') and t.category_id else None
+
     cursor.execute('''
         UPDATE tests 
-        SET name=%s, service_lane_id=%s, credits_per_week=%s, duration_weeks=%s, stages=%s
+        SET name=%s, service_lane_id=%s, category_id=%s, credits_per_week=%s, duration_weeks=%s, stages=%s
         WHERE id=%s
-    ''', (t.name, str(t.service_lane_id), t.credits_per_week, t.duration_weeks, db_stage, test_id))
+    ''', (t.name, str(t.service_lane_id), cat_id, t.credits_per_week, t.duration_weeks, db_stage, test_id))
 
     log_test_history(cursor, test_id, current_user['id'], "UPDATED", f"Test settings updated.")
     cursor.connection.commit()
