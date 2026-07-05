@@ -289,7 +289,7 @@ export default function RawAssetsView() {
                     <td className="p-4"><input type="checkbox" checked={selectedAssets.includes(asset.id)} onChange={() => toggleAssetSelection(asset.id)} className="h-4 w-4 text-emerald-500 rounded border-slate-300" /></td>
                     <td className="p-4">
                       <div className="flex items-center gap-2">
-                        <Link to={`/raw/${asset.id}`} className="font-bold text-blue-600 dark:text-blue-400 hover:underline">{asset.name}</Link>
+                        <Link to={`/raw/${asset.id}`} state={{ from: '/raw', label: 'Raw Assets' }} className="font-bold text-blue-600 dark:text-blue-400 hover:underline">{asset.name}</Link>
                         {asset.facing_internet && <Globe size={14} className="text-blue-500" title="Internet Facing" />}
                       </div>
                       <div className="text-xs text-slate-500 mt-1 flex gap-2 items-center">

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import axios from "axios";
 import TopNav from "../components/TopNav";
 import ConfirmModal from "../components/Modals/ConfirmModal";
@@ -9,6 +9,9 @@ import { ChevronLeft, Save, Trash2, ShieldAlert, FileText, Edit2, X, History, Ch
 export default function AssetDetailView() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+  const backPath = location.state?.from || "/raw";
+  const backLabel = location.state?.label || "Raw Assets";
   const [loading, setLoading] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
@@ -107,8 +110,8 @@ export default function AssetDetailView() {
 
       <div className="pt-32 pb-12 px-6 max-w-4xl mx-auto">
         <div className="flex justify-between items-center mb-6">
-          <button onClick={() => navigate("/raw")} className="flex items-center gap-2 text-sm text-slate-500 hover:text-slate-900 dark:hover:text-white transition-colors">
-            <ChevronLeft size={16} /> Back to Raw Assets
+          <button onClick={() => navigate(backPath)} className="flex items-center gap-2 text-sm text-slate-500 hover:text-slate-900 dark:hover:text-white transition-colors">
+            <ChevronLeft size={16} /> Back to {backLabel}
           </button>
 
           {!isEditing && (
