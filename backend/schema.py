@@ -94,6 +94,9 @@ class AssetResponse(AssetBase):
     raw_asset_id: UUID4
     is_assigned: bool = False
 
+class PromoteAssetRequest(BaseModel):
+    raw_asset_ids: List[UUID4]
+
 # --- TESTS & ASSIGNMENTS ---
 class TestBase(BaseModel):
     name: str

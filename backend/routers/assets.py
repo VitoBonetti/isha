@@ -6,14 +6,11 @@ import io
 import uuid
 from database import get_db_cursor, db_cursor_context
 from routers.auth import get_current_user, require_admin
-from schema import RawAssetCreate, AssetBase
+from schema import RawAssetCreate, AssetBase, PromoteAssetRequest
 from websockets_manager import manager
+from audit_logger import log_audit_event
 
 router = APIRouter(prefix="/api/assets", tags=["Assets"])
-
-
-class PromoteAssetRequest(BaseModel):
-    raw_asset_ids: List[UUID4]
 
 
 # --- ASSET TYPES DICTIONARY ---
@@ -30,6 +27,8 @@ def get_raw_assets(
         page: int = Query(1, ge=1), limit: int = Query(50, ge=1, le=500),
         search: Optional[str] = None, country_id: Optional[str] = None,
         service_id: Optional[str] = None, category_id: Optional[str] = None,
+        asset_type_id: Optional[str] = None, facing_internet: Optional[bool] = None,  # <-- NEW
+        cia_c: Optional[int] = None, cia_i: Optional[int] = None, cia_a: Optional[int] = None,  # <-- NEW
         status: Optional[str] = None, sort_by: Optional[str] = "name", sort_dir: Optional[str] = "asc",
         current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)
 ):
@@ -49,6 +48,22 @@ def get_raw_assets(
     if category_id:
         where_clauses.append("r.category_id = %s")
         params.append(category_id)
+    if asset_type_id:
+        where_clauses.append("r.asset_type_id = %s")
+        params.append(asset_type_id)
+    if facing_internet is not None:
+        where_clauses.append("r.facing_internet = %s")
+        params.append(facing_internet)
+    if cia_c is not None:
+        where_clauses.append("r.confidentiality_rating >= %s")
+        params.append(cia_c)
+    if cia_i is not None:
+        where_clauses.append("r.integrity_rating >= %s")
+        params.append(cia_i)
+    if cia_a is not None:
+        where_clauses.append("r.availability_rating >= %s")
+        params.append(cia_a)
+
     if status == 'raw':
         where_clauses.append("a.id IS NULL")
     elif status == 'pool':
@@ -57,15 +72,17 @@ def get_raw_assets(
     where_str = "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
 
     sort_map = {
-        "name": "r.name", "country": "c.name", "service": "s.name",
+        "name": "r.name", "country": "c.code", "service": "s.name",
         "category": "cat.name", "type": "at.name", "status": "is_promoted"
     }
     order_col = sort_map.get(sort_by, "r.name")
     order_dir = "DESC" if sort_dir.lower() == "desc" else "ASC"
 
+    # Included country code, CIA ratings, and facing_internet
     query = f"""
-        SELECT r.id, r.name, c.name as country_name, s.name as service_name, cat.name as category_name,
-               at.name as asset_type_name, r.facing_internet,
+        SELECT r.id, r.name, c.code as country_code, c.name as country_name, s.name as service_name, cat.name as category_name,
+               at.name as asset_type_name, r.facing_internet, 
+               r.confidentiality_rating, r.integrity_rating, r.availability_rating,
                CASE WHEN a.id IS NOT NULL THEN true ELSE false END as is_promoted
         FROM raw_assets r
         LEFT JOIN countries c ON r.country_id = c.id
@@ -149,7 +166,6 @@ def update_raw_asset(raw_id: str, asset: RawAssetCreate, background_tasks: Backg
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
     return {"message": "Raw Asset updated"}
 
-
 @router.delete("/raw/{raw_id}")
 def delete_raw_asset(raw_id: str, background_tasks: BackgroundTasks,
                      current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
@@ -159,36 +175,120 @@ def delete_raw_asset(raw_id: str, background_tasks: BackgroundTasks,
     return {"message": "Asset permanently deleted"}
 
 
-def process_excel_import(contents: bytes, filename: str):
+def process_excel_import_sync(contents: bytes, filename: str, current_user: dict):
     with db_cursor_context() as cursor:
-        if not cursor: return
+        if not cursor: return 0, ["Database connection unavailable"]
+
         try:
-            # Smart fallback: Parse as CSV if the file extension matches
             if filename.lower().endswith('.csv'):
                 df = pd.read_csv(io.BytesIO(contents))
             else:
                 df = pd.read_excel(io.BytesIO(contents))
 
             df = df.fillna('')
+
+            # 1. Pre-fetch reverse lookup maps (Case-insensitive matching)
+            cursor.execute("SELECT LOWER(name), id FROM asset_types")
+            types_map = {row[0]: row[1] for row in cursor.fetchall()}
+
+            cursor.execute("SELECT LOWER(name), id FROM countries")
+            countries_map = {row[0]: row[1] for row in cursor.fetchall()}
+
+            cursor.execute("SELECT LOWER(name), id FROM services_lanes")
+            services_map = {row[0]: row[1] for row in cursor.fetchall()}
+
+            cursor.execute("SELECT LOWER(name), id FROM service_categories")
+            categories_map = {row[0]: row[1] for row in cursor.fetchall()}
+
+            success_count = 0
+            failed_items = []
+
             for _, row in df.iterrows():
                 name = str(row.get('Name', '')).strip()
                 if not name: continue
-                new_raw_assets_id= str(uuid.uuid4())
-                cursor.execute(
-                    "INSERT INTO raw_assets (id, name, description) VALUES (%s, %s, %s)",
-                    (id, name, str(row.get('Description', '')))
+
+                desc = str(row.get('Description', '')).strip()
+                type_str = str(row.get('Asset Type', '')).strip().lower()
+                country_str = str(row.get('Country', '')).strip().lower()
+                service_str = str(row.get('Service Lane', '')).strip().lower()
+                cat_str = str(row.get('Category', '')).strip().lower()
+
+                internet_val = str(row.get('Facing Internet', '')).strip().lower()
+                facing_internet = internet_val in ['true', 'yes', '1', 'y']
+
+                try:
+                    c_val = int(row.get('Confidentiality', 0))
+                    i_val = int(row.get('Integrity', 0))
+                    a_val = int(row.get('Availability', 0))
+                except ValueError:
+                    c_val, i_val, a_val = 0, 0, 0
+
+                business_critical = min(9, c_val + i_val + a_val)
+
+                # Reverse lookups
+                type_id = types_map.get(type_str)
+                country_id = countries_map.get(country_str)
+                service_id = services_map.get(service_str) if service_str else None
+                cat_id = categories_map.get(cat_str) if cat_str else None
+
+                # Foreign Key Validations
+                if not type_id:
+                    failed_items.append(f"{name} (Unknown Asset Type: '{type_str}')")
+                    continue
+                if not country_id:
+                    failed_items.append(f"{name} (Unknown Country: '{country_str}')")
+                    continue
+
+                new_id = str(uuid.uuid4())
+
+                try:
+                    cursor.execute("""
+                        INSERT INTO raw_assets (
+                            id, name, description, business_critical, 
+                            confidentiality_rating, integrity_rating, availability_rating, 
+                            country_id, service_forecast_id, category_id, asset_type_id, facing_internet
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """, (new_id, name, desc, business_critical, c_val, i_val, a_val, country_id, service_id, cat_id,
+                          type_id, facing_internet))
+                    success_count += 1
+                except Exception as e:
+                    cursor.connection.rollback()
+                    failed_items.append(f"{name} (DB Error)")
+
+            cursor.connection.commit()
+
+            # Log failures to the Audit Log system
+            if failed_items:
+                log_audit_event(
+                    user_id=str(current_user["id"]),
+                    username=current_user["name"],
+                    action="IMPORT_WARNINGS",
+                    resource_type="ASSETS",
+                    details=f"Failed to import {len(failed_items)} rows: {', '.join(failed_items[:10])}{'...' if len(failed_items) > 10 else ''}"
                 )
+
+            return success_count, failed_items
+
         except Exception as e:
-            print(f"Import Failed: {e}")
+            return 0, [f"File formatting error: {str(e)}"]
 
 
 @router.post("/raw/import")
 async def import_assets(file: UploadFile = File(...), background_tasks: BackgroundTasks = BackgroundTasks(),
                         current_user: dict = Depends(require_admin)):
     contents = await file.read()
-    # Pass the filename so Pandas knows how to parse it
-    background_tasks.add_task(process_excel_import, contents, file.filename)
-    return {"message": "Standard format import started in the background."}
+    # Process synchronously to get the summary
+    success_count, failed_items = process_excel_import_sync(contents, file.filename, current_user)
+
+    # Broadcast to other clients that table updated
+    if success_count > 0:
+        background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
+
+    return {
+        "message": "Import processed",
+        "success": success_count,
+        "failed": failed_items
+    }
 
 
 # --- THE PROMOTION ENGINE ---
