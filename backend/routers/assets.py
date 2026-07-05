@@ -436,7 +436,7 @@ def get_active_asset_pool(current_user: dict = Depends(get_current_user), cursor
     if current_user['role'] == 'pentester':
         raise HTTPException(status_code=403, detail="Pentesters cannot view the unassigned asset inventory.")
     cursor.execute('''
-        SELECT a.id, a.name, c.name as country, s.name as service_forecast, cat.name as category_name, at.name as asset_type_name, a.is_assigned
+        SELECT a.id, a.raw_asset_id, a.name, c.name as country, s.name as service_forecast, cat.name as category_name, at.name as asset_type_name, a.is_assigned
         FROM assets a
         LEFT JOIN countries c ON a.country_id = c.id
         LEFT JOIN services_lanes s ON a.service_forecast_id = s.id
