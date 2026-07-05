@@ -4,6 +4,7 @@ import toast from "react-hot-toast";
 import type { DropResult } from '@hello-pangea/dnd';
 import PlannerView from "./PlannerView";
 import ConfirmModal from "../components/Modals/ConfirmModal";
+import EditTestModal from "../components/Modals/EditTestModal";
 import type { BoardData, Test } from "../types/board";
 
 export default function Planner() {
@@ -22,7 +23,8 @@ export default function Planner() {
   const [assignModalTest, setAssignModalTest] = useState<Test | null>(null);
   const [backlogFilter, setBacklogFilter] = useState("All");
 
-  // Confirm Modal State
+  // Modal States
+  const [editModalTest, setEditModalTest] = useState<Test | null>(null);
   const [confirmModal, setConfirmModal] = useState<{
     isOpen: boolean;
     title: string;
@@ -91,7 +93,6 @@ export default function Planner() {
   };
 
   // --- ACTION BUTTON HANDLERS ---
-
   const handleCompleteTest = async (testId: string) => {
     try {
       await axios.put(`/api/tests/${testId}/complete`);
@@ -108,7 +109,6 @@ export default function Planner() {
     } catch (error) { toast.error("Failed to unschedule test."); }
   };
 
-  // Triggers the Confirm Modal instead of window.confirm
   const handleMarkUnable = (testId: string) => {
     setConfirmModal({
       isOpen: true,
@@ -124,7 +124,6 @@ export default function Planner() {
     });
   };
 
-  // Triggers the Confirm Modal instead of window.confirm
   const handleDeleteTest = (testId: string) => {
     setConfirmModal({
       isOpen: true,
@@ -140,20 +139,44 @@ export default function Planner() {
     });
   };
 
-  // --- NEW: FULLY WIRED ASSIGNMENT LOGIC ---
   const handleAssignTeam = async (userId: string) => {
     if (!assignModalTest) return;
+
     try {
-      await axios.post('/api/tests/assignments', {
-        test_id: assignModalTest.id,
-        user_id: userId,
-        week_number: assignModalTest.startWeek || targetYear, // Fallback safely
-        year: assignModalTest.startYear || targetYear,
-        allocated_credits: 1.0 // Defaulting to 1 credit. Change this if your UI needs variable credits.
-      });
-      toast.success("Pentester Assigned!");
+      const startWk = assignModalTest.startWeek || 1;
+      const startYr = assignModalTest.startYear || targetYear;
+      const duration = assignModalTest.duration || 1;
+
+      const assignmentPromises = [];
+
+      // Loop through the duration and assign them to every week of the test
+      for (let i = 0; i < duration; i++) {
+        let assignWeek = startWk + i;
+        let assignYear = startYr;
+
+        // Safely handle Year Rollover (e.g., Week 52 -> Week 1)
+        if (assignWeek > 52) {
+          assignWeek -= 52;
+          assignYear += 1;
+        }
+
+        assignmentPromises.push(
+          axios.post('/api/tests/assignments', {
+            test_id: assignModalTest.id,
+            user_id: userId,
+            week_number: assignWeek,
+            year: assignYear,
+            allocated_credits: 1.0 // Adjust default credits here if needed
+          })
+        );
+      }
+
+      // Wait for all assignments to finish saving
+      await Promise.all(assignmentPromises);
+
+      toast.success("Pentester Assigned to all weeks!");
       fetchBoardData();
-      setAssignModalTest(null); // Close the modal
+      setAssignModalTest(null);
     } catch (error: any) {
       if (error.response?.data?.detail) {
         toast.error(error.response.data.detail);
@@ -187,7 +210,18 @@ export default function Planner() {
     } catch (error) { toast.error("Failed to revert status."); }
   };
 
-  const openEditModal = (test: Test) => console.log("Edit Settings Modal Triggered:", test);
+  const handleUpdateTest = async (testId: string, updatedData: any) => {
+    try {
+      await axios.put(`/api/tests/${testId}`, updatedData);
+      toast.success("Test settings updated!");
+      fetchBoardData();
+      setEditModalTest(null);
+    } catch (error) {
+      console.error(error);
+      toast.error("Failed to update test.");
+    }
+  };
+
   const handleDuplicateTest = (testId: string) => console.log("Duplicate Triggered:", testId);
 
   return (
@@ -209,7 +243,7 @@ export default function Planner() {
         handleUnassignPentester={handleUnassignPentester}
         handleDeleteTest={handleDeleteTest}
         handleDuplicateTest={handleDuplicateTest}
-        openEditModal={openEditModal}
+        openEditModal={(test) => setEditModalTest(test)}
         handleMarkUnable={handleMarkUnable}
         handleRevertComplete={revertTestStatus}
         handleRevertUnable={revertTestStatus}
@@ -219,7 +253,6 @@ export default function Planner() {
         setBacklogFilter={setBacklogFilter}
       />
 
-      {/* Renders the Beautiful Confirm Modal safely outside the dragging area */}
       <ConfirmModal
         isOpen={confirmModal.isOpen}
         title={confirmModal.title}
@@ -229,6 +262,14 @@ export default function Planner() {
           if (confirmModal.action) await confirmModal.action();
           setConfirmModal({ ...confirmModal, isOpen: false });
         }}
+      />
+
+      <EditTestModal
+        isOpen={!!editModalTest}
+        test={editModalTest}
+        boardData={boardData}
+        onClose={() => setEditModalTest(null)}
+        onSubmit={handleUpdateTest}
       />
     </>
   );

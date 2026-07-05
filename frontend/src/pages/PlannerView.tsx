@@ -89,7 +89,7 @@ export default function PlannerView({
         <TopNav />
 
         {/* Header Controls */}
-        <div className="flex justify-between items-center px-6 py-3 bg-white dark:bg-zinc-900 border-b border-slate-200 dark:border-zinc-800 z-20 shadow-sm shrink-0 pt-20">
+        <div className="flex justify-between items-center px-6 py-3 bg-white dark:bg-zinc-900 border-b border-slate-200 dark:border-zinc-800 z-20 shadow-sm shrink-0 pt-32">
           <div className="flex items-center bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-lg p-1">
             <button className="p-1.5 hover:bg-slate-200 dark:hover:bg-zinc-800 rounded-md text-slate-500 transition-colors" onClick={handlePrevQuarter}><ChevronLeft size={16} /></button>
             <strong className="mx-3 w-20 text-center text-sm text-slate-900 dark:text-zinc-100 font-bold">Q{targetQuarter} {targetYear}</strong>
@@ -245,6 +245,7 @@ export default function PlannerView({
                                                       <button className="px-2 py-1 text-[10px] font-bold bg-emerald-50 hover:bg-emerald-100 text-emerald-600 rounded transition-colors flex items-center gap-1" onClick={() => handleCompleteTest(test.id)}><CheckCircle size={10}/> Done</button>
                                                       <button className="px-2 py-1 text-[10px] font-bold bg-red-50 hover:bg-red-100 text-red-600 rounded transition-colors flex items-center gap-1" onClick={() => handleMarkUnable(test.id)}><XCircle size={10}/> Stop</button>
                                                       <button className="px-2 py-1 text-[10px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-600 rounded transition-colors" onClick={() => handleUnscheduleTest(test.id)}>Unsch</button>
+                                                      <button className="px-2 py-1 text-[10px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-600 rounded transition-colors flex items-center gap-1" onClick={() => openEditModal(test)}><Edit2 size={10}/> Edit</button>
                                                       <button className="px-2 py-1 text-[10px] font-bold bg-blue-50 hover:bg-blue-100 text-blue-600 rounded transition-colors flex items-center gap-1" onClick={() => setHistoryTest(test)}><History size={10}/> Hist</button>
                                                     </>
                                                   )}
@@ -339,6 +340,7 @@ export default function PlannerView({
                                   {currentUser?.role === 'admin' && (
                                      <div className="flex flex-col gap-1.5 shrink-0">
                                       <button title="History" className="p-1.5 bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded hover:bg-blue-100 dark:hover:bg-blue-500/20 transition-colors" onClick={() => setHistoryTest(test)}><History size={12} /></button>
+                                      <button title="Edit Settings" className="p-1.5 bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400 rounded hover:bg-slate-200 dark:hover:bg-zinc-700 transition-colors" onClick={() => openEditModal(test)}><Edit2 size={12} /></button>
                                       <button title="Delete Permanently" className="p-1.5 bg-red-50 dark:bg-red-500/10 text-red-600 dark:text-red-400 rounded hover:bg-red-100 dark:hover:bg-red-500/20 transition-colors" onClick={() => handleDeleteTest(test.id)}><Trash2 size={12} /></button>
                                     </div>
                                   )}
