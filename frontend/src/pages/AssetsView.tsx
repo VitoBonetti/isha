@@ -14,6 +14,7 @@ interface PoolAsset {
   country?: string;
   service_name?: string;
   is_assigned: boolean;
+  completed_count: number;
 }
 
 export default function AssetsView() {
@@ -281,17 +282,23 @@ export default function AssetsView() {
                           )}
                         </td>
                         <td className="px-6 py-4">
-                          {asset.is_assigned ? (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-100 dark:bg-emerald-900/30 text-emerald-800 dark:text-emerald-200">
-                              <div className="w-1.5 h-1.5 rounded-full bg-emerald-500"></div>
-                              Test Generated
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-400">
-                              <div className="w-1.5 h-1.5 rounded-full bg-amber-500"></div>
-                              Ready
-                            </span>
-                          )}
+                          <div className="flex flex-col gap-1.5 items-start">
+                            {asset.is_assigned ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200">
+                                <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></div> Active Test
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 dark:bg-emerald-900/30 text-emerald-800 dark:text-emerald-200 shadow-sm border border-emerald-200 dark:border-emerald-800">
+                                Ready
+                              </span>
+                            )}
+
+                            {asset.completed_count > 0 && (
+                              <span className="text-[10px] font-bold text-slate-500 dark:text-zinc-400 bg-slate-100 dark:bg-zinc-800 px-2 py-0.5 rounded-md">
+                                Tested {asset.completed_count} {asset.completed_count === 1 ? 'time' : 'times'}
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="px-6 py-4 text-right">
                           <button

@@ -471,7 +471,19 @@ def get_active_asset_pool(current_user: dict = Depends(get_current_user), cursor
                s.name as service_name, 
                cat.name as category_name, 
                at.name as asset_type_name, 
-               a.is_assigned
+               (
+                   SELECT COUNT(*) > 0 
+                   FROM test_assets ta 
+                   JOIN tests t ON ta.test_id = t.id 
+                   WHERE ta.asset_id = a.id 
+                     AND t.stages::text IN ('NOT_PLANNED', 'SCHEDULED', 'IN_PROGRESS')
+               ) as is_assigned,
+               (
+                   SELECT COUNT(*)
+                   FROM test_assets ta
+                   JOIN tests t ON ta.test_id = t.id
+                   WHERE ta.asset_id = a.id AND t.stages::text = 'COMPLETED'
+               ) as completed_count
         FROM assets a
         JOIN raw_assets r ON a.raw_asset_id = r.id
         LEFT JOIN countries c ON r.country_id = c.id

@@ -420,7 +420,7 @@ export default function SettingsView() {
               </div>
 
               {showForm === 'asset_types' && (
-                <form onSubmit={(e) => { e.preventDefault(); handleSave('/api/assets/types/', {name: catForm.name}, !!editCatId, editCatId).then(()=> setShowForm(null)); }} className="bg-slate-50 dark:bg-zinc-950/50 p-6 rounded-2xl border border-slate-200 dark:border-zinc-800 mb-8 shadow-inner">
+                <form onSubmit={(e) => { e.preventDefault(); handleSave('/api/assets/types', {name: catForm.name}, !!editCatId, editCatId).then(()=> setShowForm(null)); }} className="bg-slate-50 dark:bg-zinc-950/50 p-6 rounded-2xl border border-slate-200 dark:border-zinc-800 mb-8 shadow-inner">
                   <h3 className="font-bold text-lg text-slate-900 dark:text-zinc-100 mb-4">{editCatId ? 'Edit Asset Type' : 'Add Asset Type'}</h3>
                   <label className="text-sm font-bold text-slate-700 dark:text-zinc-300 block mb-6">Asset Type Name <input className={inputClasses} value={catForm.name} onChange={e => setCatForm({...catForm, name: e.target.value})} required placeholder="e.g. Mobile Application" /></label>
                   <div className="flex justify-end gap-3 border-t border-slate-200 dark:border-zinc-800 pt-4">
@@ -448,7 +448,7 @@ export default function SettingsView() {
                         <td className="p-4 text-right">
                           <div className="flex justify-end gap-2">
                             <button onClick={() => { setEditCatId(at.id); setCatForm({...catForm, name: at.name}); setShowForm('asset_types'); }} className="text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-500/10 p-2 rounded-lg transition-colors"><Edit2 size={18} /></button>
-                            <button onClick={() => confirmDelete('/api/assets/types/', at.id, `Asset Type "${at.name}" (WARNING: Deleting this will also delete all associated raw assets!)`)} className="text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 p-2 rounded-lg transition-colors"><Trash2 size={18} /></button>
+                            <button onClick={() => confirmDelete('/api/assets/types', at.id, `Asset Type "${at.name}" (WARNING: Deleting this will also delete all associated raw assets!)`)} className="text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 p-2 rounded-lg transition-colors"><Trash2 size={18} /></button>
                           </div>
                         </td>
                       </tr>

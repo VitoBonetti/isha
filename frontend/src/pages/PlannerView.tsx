@@ -36,6 +36,7 @@ interface PlannerViewProps {
   setAssignModalTest: (test: Test | null) => void;
   backlogFilter: string;
   setBacklogFilter: (filter: string) => void;
+  setTargetYear: (year: number) => void;
 }
 
 const getISOWeek = (date: Date) => {
@@ -57,7 +58,7 @@ export default function PlannerView({
   boardData, setNewTest, setShowTestForm,
   onDragEnd, handleAssignTeam, handleCompleteTest, handleUnscheduleTest, handleUnassignPentester,
   handleDeleteTest, handleDuplicateTest, openEditModal, handleMarkUnable, handleRevertComplete, handleRevertUnable,
-  assignModalTest, setAssignModalTest, backlogFilter, setBacklogFilter
+  assignModalTest, setAssignModalTest, backlogFilter, setBacklogFilter, setTargetYear
 }: PlannerViewProps) {
 
   const navigate = useNavigate();
@@ -102,7 +103,22 @@ export default function PlannerView({
           <div className="flex w-1/3 justify-start">
             <div className="flex items-center dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-lg p-1">
               <button className="p-1.5 hover:bg-slate-200 dark:hover:bg-zinc-800 rounded-md text-slate-500 transition-colors" onClick={handlePrevQuarter}><ChevronLeft size={16} /></button>
-              <strong className="mx-3 w-20 text-center text-sm text-slate-900 dark:text-zinc-100 font-bold">Q{targetQuarter} {targetYear}</strong>
+              <div className="mx-3 flex items-center gap-1.5 bg-slate-100 dark:bg-zinc-800/80 px-2 py-1 rounded-md shadow-inner">
+                <span className="text-sm text-slate-900 dark:text-zinc-100 font-extrabold">Q{targetQuarter}</span>
+                <select
+                  className="bg-transparent font-bold text-sm text-blue-600 dark:text-blue-400 outline-none cursor-pointer hover:text-blue-500 transition-colors appearance-none pr-2"
+                  value={targetYear}
+                  onChange={(e) => setTargetYear(parseInt(e.target.value))}
+                >
+                  <option value={2025}>2025</option>
+                  <option value={2026}>2026</option>
+                  <option value={2027}>2027</option>
+                  <option value={2028}>2028</option>
+                  <option value={2029}>2029</option>
+                  <option value={2030}>2030</option>
+                  <option value={2031}>2031</option>
+                </select>
+              </div>
               <button className="p-1.5 hover:bg-slate-200 dark:hover:bg-zinc-800 rounded-md text-slate-500 transition-colors" onClick={handleNextQuarter}><ChevronRight size={16} /></button>
               <div className="w-px h-5 bg-slate-300 dark:bg-zinc-700 mx-1"></div>
               <button className="ml-1 px-3 py-1 text-xs font-bold dark:bg-zinc-800 border border-slate-300 dark:border-zinc-700 rounded-md shadow-sm text-slate-600 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-700 transition-colors" onClick={handleCurrentQuarter}>Today</button>

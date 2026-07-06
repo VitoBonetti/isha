@@ -12,6 +12,7 @@ export default function TestsView() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [historyTest, setHistoryTest] = useState<Test | null>(null);
+  const [filterYear, setFilterYear] = useState<string>("All");
 
   // Pagination State
   const [page, setPage] = useState(1);
@@ -57,10 +58,14 @@ export default function TestsView() {
   };
 
   // 1. Filter
-  const filteredTests = tests.filter(test =>
-    test.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (test.assigned_pentesters && test.assigned_pentesters.toLowerCase().includes(searchTerm.toLowerCase()))
-  );
+  const filteredTests = tests.filter(test => {
+    const matchesSearch = test.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (test.assigned_pentesters && test.assigned_pentesters.toLowerCase().includes(searchTerm.toLowerCase()));
+
+    const matchesYear = filterYear === "All" || String(test.start_year) === filterYear;
+
+    return matchesSearch && matchesYear;
+  });
 
   // 2. Sort
   const sortedTests = [...filteredTests].sort((a, b) => {
@@ -109,12 +114,30 @@ export default function TestsView() {
         </h1>
         <p className="text-slate-500 dark:text-zinc-400 mb-8">Comprehensive read-only log of all tests, stages, and assignments.</p>
 
-        <div className="bg-white dark:bg-zinc-900 p-4 rounded-xl border border-slate-200 dark:border-zinc-800 shadow-sm mb-6 flex justify-between items-center">
+        <div className="bg-white dark:bg-zinc-900 p-4 rounded-xl border border-slate-200 dark:border-zinc-800 shadow-sm mb-6 flex justify-between items-center gap-4">
           <div className="relative w-full max-w-md">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
             <input type="text" placeholder="Search by test name or pentester..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2 rounded-lg border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 focus:ring-2 focus:ring-indigo-500 outline-none" />
           </div>
-          <div className="text-sm font-bold text-slate-500">{filteredTests.length} Tests Found</div>
+
+          <div className="flex items-center gap-4 shrink-0">
+            <select
+              value={filterYear}
+              onChange={e => setFilterYear(e.target.value)}
+              className="px-4 py-2 rounded-lg border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-sm font-bold text-slate-700 dark:text-zinc-300 outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+            >
+              <option value="All">All Years</option>
+              <option value="2025">2025</option>
+              <option value="2026">2026</option>
+              <option value="2027">2027</option>
+              <option value="2028">2028</option>
+              <option value="2029">2029</option>
+              <option value="2030">2030</option>
+              <option value="2031">2031</option>
+              <option value="null">Unscheduled</option>
+            </select>
+            <div className="text-sm font-bold text-slate-500 bg-slate-100 dark:bg-zinc-800 px-3 py-1.5 rounded-lg">{filteredTests.length} Tests Found</div>
+          </div>
         </div>
 
         <div className="bg-white dark:bg-zinc-900 rounded-xl border border-slate-200 dark:border-zinc-800 shadow-sm overflow-hidden flex flex-col">
