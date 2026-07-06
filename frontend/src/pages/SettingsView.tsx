@@ -3,12 +3,12 @@ import { useSettings } from '../hooks/useSettings';
 import TopNav from '../components/TopNav';
 import ConfirmModal from '../components/Modals/ConfirmModal';
 import { Toaster } from 'react-hot-toast';
-import { Users, MapPin, Activity, Tags, Globe, Flag, Server, Trash2, Download, AlertTriangle, Plus, Database, Terminal, Edit2 } from 'lucide-react';
+import { Users, MapPin, Activity, Tags, Globe, Flag, Server, Trash2, Download, AlertTriangle, Plus, Database, Terminal, Edit2, LayoutTemplate } from 'lucide-react';
 
 export default function SettingsView() {
   const {
     activeTab, setActiveTab,
-    users, locations, services, categories, regions, countries, logs, dbLatency, isLoading,
+    users, locations, services, categories, regions, countries, logs, dbLatency, isLoading, assetTypes,
     handleSave, handleDelete, downloadLog, handleWipeSystem
   } = useSettings();
 
@@ -43,6 +43,9 @@ export default function SettingsView() {
 
   const [nukeModalOpen, setNukeModalOpen] = useState(false);
   const [nukeText, setNukeText] = useState("");
+
+  const [assetTypePage, setAssetTypePage] = useState(1);
+  const ASSET_TYPES_PER_PAGE = 15;
 
   const confirmDelete = (endpoint: string, id: string, name: string) => {
     setDeleteModal({ isOpen: true, endpoint, id, name });
@@ -210,6 +213,7 @@ export default function SettingsView() {
             <nav className="flex flex-col gap-1">
               <button onClick={() => { setActiveTab('users'); setShowForm(null); }} className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors ${activeTab === 'users' ? 'bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-400' : 'text-slate-600 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800'}`}><Users size={18} /> Users</button>
               <button onClick={() => { setActiveTab('locations'); setShowForm(null); }} className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors ${activeTab === 'locations' ? 'bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-400' : 'text-slate-600 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800'}`}><MapPin size={18} /> Locations</button>
+              <button onClick={() => { setActiveTab('asset_types'); setShowForm(null); }} className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors ${activeTab === 'asset_types' ? 'bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-400' : 'text-slate-600 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800'}`}><LayoutTemplate size={18} /> Asset Types</button>
               <button onClick={() => { setActiveTab('services'); setShowForm(null); }} className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors ${activeTab === 'services' ? 'bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-400' : 'text-slate-600 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800'}`}><Activity size={18} /> Services</button>
               <button onClick={() => { setActiveTab('categories'); setShowForm(null); }} className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors ${activeTab === 'categories' ? 'bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-400' : 'text-slate-600 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800'}`}><Tags size={18} /> Categories</button>
               <button onClick={() => { setActiveTab('regions'); setShowForm(null); }} className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors ${activeTab === 'regions' ? 'bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-400' : 'text-slate-600 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800'}`}><Globe size={18} /> Regions</button>
@@ -398,6 +402,81 @@ export default function SettingsView() {
                   </tbody>
                 </table>
                 {(!locations || locations.length === 0) && <div className="p-12 text-center text-slate-500 dark:text-zinc-500 bg-slate-50/50 dark:bg-zinc-900/50">No locations found.</div>}
+              </div>
+            </div>
+          )}
+
+          {/* ASSET TYPES */}
+          {activeTab === 'asset_types' && (
+            <div className="fade-in">
+              <div className="flex justify-between items-center mb-6">
+                <div>
+                  <h2 className="text-xl font-bold text-slate-900 dark:text-zinc-100">Asset Types</h2>
+                  <p className="text-sm text-slate-500 dark:text-zinc-400">Manage categories of applications (APIs, Web, Mobile, etc.).</p>
+                </div>
+                <button onClick={() => { setEditCatId(null); setCatForm({name: '', target_goal: 0, service_lane_id: ''}); setShowForm('asset_types'); }} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors">
+                  <Plus size={16} /> Add Asset Type
+                </button>
+              </div>
+
+              {showForm === 'asset_types' && (
+                <form onSubmit={(e) => { e.preventDefault(); handleSave('/api/assets/types/', {name: catForm.name}, !!editCatId, editCatId).then(()=> setShowForm(null)); }} className="bg-slate-50 dark:bg-zinc-950/50 p-6 rounded-2xl border border-slate-200 dark:border-zinc-800 mb-8 shadow-inner">
+                  <h3 className="font-bold text-lg text-slate-900 dark:text-zinc-100 mb-4">{editCatId ? 'Edit Asset Type' : 'Add Asset Type'}</h3>
+                  <label className="text-sm font-bold text-slate-700 dark:text-zinc-300 block mb-6">Asset Type Name <input className={inputClasses} value={catForm.name} onChange={e => setCatForm({...catForm, name: e.target.value})} required placeholder="e.g. Mobile Application" /></label>
+                  <div className="flex justify-end gap-3 border-t border-slate-200 dark:border-zinc-800 pt-4">
+                    <button type="button" onClick={() => setShowForm(null)} className="px-5 py-2.5 text-sm font-medium bg-slate-200 hover:bg-slate-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-300 rounded-lg transition-colors">Cancel</button>
+                    <button type="submit" className="px-5 py-2.5 text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-sm transition-colors">Save</button>
+                  </div>
+                </form>
+              )}
+
+              <div className="border border-slate-200 dark:border-zinc-800 rounded-2xl overflow-hidden shadow-sm">
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-slate-50 dark:bg-zinc-900/50 border-b border-slate-200 dark:border-zinc-800">
+                    <tr>
+                      <th className="p-4 font-bold text-slate-600 dark:text-zinc-400">Type Name</th>
+                      <th className="p-4 font-bold text-slate-600 dark:text-zinc-400 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-zinc-800">
+                    {/* Pagination Math applied here! */}
+                    {(assetTypes || [])
+                      .slice((assetTypePage - 1) * ASSET_TYPES_PER_PAGE, assetTypePage * ASSET_TYPES_PER_PAGE)
+                      .map((at: any) => (
+                      <tr key={at.id} className="hover:bg-slate-50 dark:hover:bg-zinc-800/50 transition-colors">
+                        <td className="p-4 font-bold text-base text-slate-900 dark:text-zinc-100">{at.name}</td>
+                        <td className="p-4 text-right">
+                          <div className="flex justify-end gap-2">
+                            <button onClick={() => { setEditCatId(at.id); setCatForm({...catForm, name: at.name}); setShowForm('asset_types'); }} className="text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-500/10 p-2 rounded-lg transition-colors"><Edit2 size={18} /></button>
+                            <button onClick={() => confirmDelete('/api/assets/types/', at.id, `Asset Type "${at.name}" (WARNING: Deleting this will also delete all associated raw assets!)`)} className="text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 p-2 rounded-lg transition-colors"><Trash2 size={18} /></button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {(!assetTypes || assetTypes.length === 0) && <div className="p-12 text-center text-slate-500 dark:text-zinc-500 bg-slate-50/50 dark:bg-zinc-900/50">No asset types found.</div>}
+                {assetTypes && assetTypes.length > 0 && (
+                  <div className="px-6 py-4 border-t border-slate-200 dark:border-zinc-700 flex justify-between items-center bg-slate-50 dark:bg-zinc-950/50">
+                    <span className="text-sm text-slate-500">Page {assetTypePage} of {Math.ceil((assetTypes?.length || 0) / ASSET_TYPES_PER_PAGE) || 1}</span>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setAssetTypePage(p => Math.max(1, p - 1))}
+                        disabled={assetTypePage === 1}
+                        className="px-4 py-1.5 border border-slate-300 dark:border-zinc-700 rounded-lg hover:bg-slate-100 dark:hover:bg-zinc-800 disabled:opacity-50 text-sm font-medium transition-colors"
+                      >
+                        Prev
+                      </button>
+                      <button
+                        onClick={() => setAssetTypePage(p => p + 1)}
+                        disabled={assetTypePage >= Math.ceil((assetTypes?.length || 0) / ASSET_TYPES_PER_PAGE)}
+                        className="px-4 py-1.5 border border-slate-300 dark:border-zinc-700 rounded-lg hover:bg-slate-100 dark:hover:bg-zinc-800 disabled:opacity-50 text-sm font-medium transition-colors"
+                      >
+                        Next
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}

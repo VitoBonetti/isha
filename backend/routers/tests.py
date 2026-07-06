@@ -55,6 +55,26 @@ def create_test(t: TestCreate, background_tasks: BackgroundTasks,
     return {"message": "Test created successfully", "id": new_id}
 
 
+@router.get("/")
+def get_all_tests(current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+    cursor.execute('''
+        SELECT t.id, t.name, t.start_week, t.start_year, t.duration_weeks, t.stages::text as status,
+               s.name as service_lane_name,
+               COALESCE(
+                   (SELECT string_agg(DISTINCT u.name, ', ') 
+                    FROM assignments a 
+                    JOIN users u ON a.user_id = u.id 
+                    WHERE a.test_id = t.id), 
+                   'Unassigned'
+               ) as assigned_pentesters
+        FROM tests t
+        LEFT JOIN services_lanes s ON t.service_lane_id = s.id
+        ORDER BY t.start_year DESC NULLS LAST, t.start_week DESC NULLS LAST, t.name ASC
+    ''')
+    columns = [col[0] for col in cursor.description]
+    return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+
 @router.put("/{test_id}")
 def update_test(test_id: str, t: TestBase, background_tasks: BackgroundTasks,
                 current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):

@@ -6,7 +6,7 @@ import uuid
 import anyio
 from database import get_db_cursor, db_cursor_context
 from routers.auth import get_current_user, require_admin
-from schema import RawAssetCreate, AssetBase, PromoteAssetRequest, BulkAssetRequest
+from schema import RawAssetCreate, AssetBase, PromoteAssetRequest, BulkAssetRequest, AssetTypeBase
 from websockets_manager import manager
 from audit_logger import log_audit_event
 
@@ -19,6 +19,33 @@ def get_asset_types(current_user: dict = Depends(get_current_user), cursor=Depen
     cursor.execute("SELECT id, name FROM asset_types ORDER BY name ASC")
     columns = [col[0] for col in cursor.description]
     return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+
+@router.post("/types")
+def create_asset_type(at: AssetTypeBase, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    new_id = str(uuid.uuid4())
+    try:
+        cursor.execute("INSERT INTO asset_types (id, name) VALUES (%s, %s)", (new_id, at.name))
+        cursor.connection.commit()
+        return {"id": new_id, "message": "Asset Type created."}
+    except Exception as e:
+        cursor.connection.rollback()
+        raise HTTPException(status_code=400, detail="Asset type name might already exist.")
+
+
+@router.put("/types/{type_id}")
+def update_asset_type(type_id: str, at: AssetTypeBase, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    cursor.execute("UPDATE asset_types SET name=%s WHERE id=%s", (at.name, type_id))
+    cursor.connection.commit()
+    return {"message": "Asset Type updated."}
+
+
+@router.delete("/types/{type_id}")
+def delete_asset_type(type_id: str, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    # Note: Because of CASCADE rules in DB, this will delete all associated Raw Assets.
+    cursor.execute("DELETE FROM asset_types WHERE id = %s", (type_id,))
+    cursor.connection.commit()
+    return {"message": "Asset Type deleted."}
 
 
 # --- RAW ASSETS ---

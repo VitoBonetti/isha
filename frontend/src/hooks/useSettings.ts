@@ -12,6 +12,7 @@ export function useSettings() {
   const [regions, setRegions] = useState<any[]>([]);
   const [countries, setCountries] = useState<any[]>([]);
   const [logs, setLogs] = useState<string[]>([]);
+  const [assetTypes, setAssetTypes] = useState<any[]>([]);
   const [dbLatency, setDbLatency] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -20,7 +21,7 @@ export function useSettings() {
     try {
       const [
         resUsers, resLocations, resServices,
-        resCategories, resRegions, resCountries, resLogs, resPing
+        resCategories, resRegions, resCountries, resLogs, resPing, resAssetTypes
       ] = await Promise.all([
         axios.get('/api/users/').catch(() => ({ data: [] })),
         axios.get('/api/locations/').catch(() => ({ data: [] })),
@@ -29,7 +30,8 @@ export function useSettings() {
         axios.get('/api/regions/').catch(() => ({ data: [] })),
         axios.get('/api/countries/').catch(() => ({ data: [] })),
         axios.get('/api/system/logs/').catch(() => ({ data: { files: [] } })),
-        axios.get('/api/system/ping').catch(() => ({ data: { latency_ms: null } }))
+        axios.get('/api/system/ping').catch(() => ({ data: { latency_ms: null } })),
+        axios.get('/api/assets/types').catch(() => ({ data: [] }))
       ]);
 
       setUsers(resUsers.data || []);
@@ -39,7 +41,8 @@ export function useSettings() {
       setRegions(resRegions.data || []);
       setCountries(resCountries.data || []);
       setLogs(resLogs.data.files || []);
-      setDbLatency(resPing.data.latency_ms); // Grab latency here
+      setDbLatency(resPing.data.latency_ms);
+      setAssetTypes(resAssetTypes.data || []);
 
     } catch (error) {
       toast.error('Failed to load settings data');
@@ -99,5 +102,5 @@ export function useSettings() {
   };
 
   // MUST return dbLatency here
-  return { activeTab, setActiveTab, users, locations, services, categories, regions, countries, logs, dbLatency, isLoading, handleSave, handleDelete, downloadLog, handleWipeSystem };
+  return { activeTab, setActiveTab, users, locations, services, categories, regions, countries, logs, dbLatency, isLoading, assetTypes, handleSave, handleDelete, downloadLog, handleWipeSystem };
 }
