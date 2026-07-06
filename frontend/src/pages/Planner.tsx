@@ -264,7 +264,7 @@ export default function Planner() {
   return (
     <>
       <PlannerView
-        onlineUsers={onlineUsers} // <--- WIRED TO LIVE DATA
+        onlineUsers={onlineUsers}
         targetYear={targetYear}
         targetQuarter={targetQuarter}
         handlePrevQuarter={handlePrevQuarter}
