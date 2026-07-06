@@ -183,11 +183,32 @@ export default function PlannerView({
                   {displayWeeks.map(week => {
                     const isCurrent = week === currentRealWeek && targetYear === currentRealYear;
                     const totalWeekCap = boardData.pentesters.reduce((sum, p) => sum + (boardData.capacities?.[p.id]?.[week] || 0), 0);
+
                     return (
                       <th key={week} className={`p-4 border-b-2 border-r border-slate-200 dark:border-zinc-800 sticky top-0 z-[20] min-w-[240px] bg-slate-50/90 dark:bg-zinc-900/90 backdrop-blur-xl ${isCurrent ? 'border-l-2 border-r-2 border-l-blue-500 border-r-blue-500' : ''}`}>
                         <div className={`text-sm font-bold ${isCurrent ? 'text-blue-700 dark:text-blue-400' : 'text-slate-900 dark:text-zinc-100'}`}>Week {week} {isCurrent && '(Current)'}</div>
                         <div className="text-xs font-normal text-slate-500 dark:text-zinc-400 mt-0.5">{getWeekDateRange(targetYear, week)}</div>
-                        <div className={`text-xs font-bold mt-1 ${totalWeekCap >= 1 ? 'text-emerald-600' : 'text-red-500'}`}>Avail: {totalWeekCap.toFixed(1)} cr</div>
+
+                        {/* NEW: Hover Tooltip for Available Users */}
+                        <div className="relative group w-fit cursor-help">
+                          <div className={`text-xs font-bold mt-1.5 ${totalWeekCap >= 1 ? 'text-emerald-600' : 'text-red-500'}`}>
+                            Avail: {totalWeekCap.toFixed(1)} cr
+                          </div>
+
+                          {/* Tooltip Popup */}
+                          <div className="absolute top-full left-0 mt-2 w-48 bg-white dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-xl shadow-xl py-2 opacity-0 group-hover:opacity-100 transition-opacity z-[100] pointer-events-none">
+                             <div className="px-3 pb-1 mb-1 border-b border-slate-100 dark:border-zinc-700/50 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Available Staff</div>
+                             {boardData.pentesters.filter(p => (boardData.capacities[p.id]?.[week] || 0) > 0).map(p => (
+                                 <div key={p.id} className="px-3 py-1 flex justify-between text-xs items-center">
+                                    <span className="font-medium text-slate-700 dark:text-zinc-300 truncate max-w-[120px]">{p.name}</span>
+                                    <span className="text-emerald-600 dark:text-emerald-400 font-bold bg-emerald-50 dark:bg-emerald-500/10 px-1.5 rounded">{(boardData.capacities[p.id]?.[week] || 0).toFixed(1)}</span>
+                                 </div>
+                             ))}
+                             {boardData.pentesters.filter(p => (boardData.capacities[p.id]?.[week] || 0) > 0).length === 0 && (
+                                 <div className="px-3 py-2 text-xs text-slate-500 italic text-center">No available staff</div>
+                             )}
+                          </div>
+                        </div>
                       </th>
                     );
                   })}
@@ -241,14 +262,14 @@ export default function PlannerView({
                                   // DIM LOGIC: Dim if "My Tests" is active and I'm not on it, OR if it fails the search query
                                   const shouldDim = (highlightMine && !isAssignedToMe) || !testMatchesSearch;
 
-                                  const percentage = test.credits > 0 ? Math.min(100, (totalProvided / test.credits) * 100) : 0;
-                                  const isOver = totalProvided > test.credits;
-                                  const progressColor = isOver ? 'bg-amber-500' : percentage === 100 ? 'bg-emerald-500' : 'bg-blue-500';
+                                  const percentage = test.credits > 0 ? (totalProvided / test.credits) * 100 : 0;
+                                  const uiPercentage = Math.min(100, percentage); // Caps the visual bar at 100%
+                                  const progressColor = percentage >= 100 ? 'bg-emerald-500' : percentage > 70 ? 'bg-blue-500' : 'bg-orange-500';
 
                                   const renderQualityAndTeam = () => (
                                     <div className="mt-2.5 flex flex-col gap-2">
                                       <div className="w-full bg-slate-100 dark:bg-zinc-800 rounded-full h-1.5 flex overflow-hidden">
-                                        <div className={`h-full ${progressColor} transition-all duration-300`} style={{ width: `${percentage}%` }} />
+                                        <div className={`h-full ${progressColor} transition-all duration-300`} style={{ width: `${uiPercentage}%` }} />
                                       </div>
                                       <div className="flex justify-between items-center text-[9px] font-bold text-slate-500 dark:text-zinc-400">
                                         <span>{totalProvided.toFixed(1)} / {test.credits} cr</span>

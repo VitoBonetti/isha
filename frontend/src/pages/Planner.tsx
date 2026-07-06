@@ -180,7 +180,7 @@ export default function Planner() {
   };
 
   const handleAssignTeam = async (userId: string) => {
-    if (!assignModalTest) return;
+    if (!assignModalTest || !boardData) return;
 
     try {
       const startWk = assignModalTest.startWeek || 1;
@@ -188,6 +188,7 @@ export default function Planner() {
       const duration = assignModalTest.duration || 1;
 
       const assignmentPromises = [];
+      let totalAssignedCredits = 0;
 
       for (let i = 0; i < duration; i++) {
         let assignWeek = startWk + i;
@@ -198,20 +199,31 @@ export default function Planner() {
           assignYear += 1;
         }
 
-        assignmentPromises.push(
-          axios.post('/api/tests/assignments', {
-            test_id: assignModalTest.id,
-            user_id: userId,
-            week_number: assignWeek,
-            year: assignYear,
-            allocated_credits: 1.0
-          })
-        );
+        // --- NEW: Grab the REAL available capacity from the board data ---
+        const realCapacity = boardData.capacities[userId]?.[assignWeek] || 0;
+
+        // Only assign them to the week if they actually have capacity > 0
+        if (realCapacity > 0) {
+          totalAssignedCredits += realCapacity;
+          assignmentPromises.push(
+            axios.post('/api/tests/assignments', {
+              test_id: assignModalTest.id,
+              user_id: userId,
+              week_number: assignWeek,
+              year: assignYear,
+              allocated_credits: realCapacity // <-- Dynamic Assignment!
+            })
+          );
+        }
+      }
+
+      if (assignmentPromises.length === 0) {
+        toast.error("User has no available capacity for the selected weeks.");
+        return;
       }
 
       await Promise.all(assignmentPromises);
-
-      toast.success("Pentester Assigned to all weeks!");
+      toast.success(`Assigned with ${totalAssignedCredits.toFixed(1)} total credits!`);
       setAssignModalTest(null);
     } catch (error: any) {
       if (error.response?.data?.detail) {

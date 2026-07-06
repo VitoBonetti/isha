@@ -21,7 +21,14 @@ export default function AssignTeamModal({
 
   const safeStartYear = assignModalTest.startYear || targetYear;
   const safeStartWeek = assignModalTest.startWeek || 1;
+  const duration = assignModalTest.duration || 1;
   const testStartVal = safeStartYear * 100 + safeStartWeek;
+
+  // Generate an array of all the weeks this test spans
+  const testWeeks = Array.from({ length: duration }, (_, i) => {
+    let w = safeStartWeek + i;
+    return w > 52 ? w - 52 : w;
+  });
 
   const activePentesters = boardData.pentesters.filter(p => {
     if (p.role === 'read_only') return false;
@@ -58,19 +65,28 @@ export default function AssignTeamModal({
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-zinc-800/50">
               {activePentesters.map(p => {
-                const availCapacity = boardData.capacities[p.id]?.[safeStartWeek] || 0;
-                const isAvail = availCapacity > 0;
+                // Check if they have capacity in ANY of the required weeks
+                const hasAnyCapacity = testWeeks.some(w => (boardData.capacities[p.id]?.[w] || 0) > 0);
 
                 return (
                   <tr key={p.id} className="hover:bg-slate-50 dark:hover:bg-zinc-800/30 transition-colors">
                     <td className="py-3 px-2">
                       <div className="font-bold text-slate-900 dark:text-zinc-100">{p.name}</div>
-                      <div className={`text-xs mt-1 font-medium ${isAvail ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
-                        Avail Wk {safeStartWeek}: {availCapacity.toFixed(1)} cr
+
+                      {/* NEW: Show exact capacity per week */}
+                      <div className="flex flex-wrap gap-1.5 mt-1.5">
+                        {testWeeks.map(w => {
+                          const cap = boardData.capacities[p.id]?.[w] || 0;
+                          return (
+                            <span key={w} className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${cap > 0 ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/20' : 'bg-red-50 text-red-700 border-red-200 dark:bg-red-500/10 dark:text-red-400 dark:border-red-500/20'}`}>
+                              W{w}: {cap.toFixed(1)}
+                            </span>
+                          );
+                        })}
                       </div>
                     </td>
                     <td className="py-3 px-2 text-right align-middle">
-                      {isAvail ? (
+                      {hasAnyCapacity ? (
                         <button
                           onClick={() => handleAssignTeam(p.id)}
                           className="px-4 py-1.5 bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-500/30 rounded-lg font-bold hover:bg-blue-100 dark:hover:bg-blue-500/20 transition-colors text-xs"
@@ -79,7 +95,7 @@ export default function AssignTeamModal({
                         </button>
                       ) : (
                         <span className="text-xs text-slate-400 dark:text-zinc-500 italic font-medium px-4">
-                          Unavailable
+                          No Capacity
                         </span>
                       )}
                     </td>
