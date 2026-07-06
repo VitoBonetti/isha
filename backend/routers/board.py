@@ -12,7 +12,6 @@ router = APIRouter(prefix="/api/board", tags=["Board & Events"])
 
 
 # --- 1. CAPACITY & SCHEDULING ENGINE ---
-
 def get_user_provision_internal(cursor, user_id, year, week_number):
     """Calculates exact capacity accounting for holidays, start dates, and locations."""
     cursor.execute(
@@ -84,7 +83,6 @@ def calculate_weekly_capacity(cursor, user_id, year, week_number):
 
 
 # --- 2. THE MAIN BOARD PAYLOAD ---
-
 @router.get("/{year}/Q{quarter}")
 def get_quarterly_board(year: int, quarter: int, response: Response,
                         current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
@@ -94,53 +92,82 @@ def get_quarterly_board(year: int, quarter: int, response: Response,
     # 1. Services & Categories
     cursor.execute(
         'SELECT id, name, theme_color, display_order FROM services_lanes WHERE is_active = TRUE ORDER BY display_order ASC')
-    services = [{"id": r[0], "name": r[1], "theme_color": r[2]} for r in cursor.fetchall()]
+    services = [{"id": str(r[0]), "name": r[1], "theme_color": r[2]} for r in cursor.fetchall()]
 
     cursor.execute('SELECT id, name, target_goal, service_lane_id FROM service_categories ORDER BY name ASC')
-    categories = [{"id": r[0], "name": r[1], "target_goal": r[2], "service_lane_id": r[3]} for r in cursor.fetchall()]
+    categories = [{"id": str(r[0]), "name": r[1], "target_goal": r[2], "service_lane_id": str(r[3]) if r[3] else None}
+                  for r in cursor.fetchall()]
 
     # 2. Users (Pentesters) & Capacity Matrix
-    cursor.execute('SELECT id, name, role, email, base_capacity, location_id FROM users')
-    pentesters = [{"id": r[0], "name": r[1], "role": r[2], "email": r[3], "capacity": r[4], "location_id": r[5]} for r
-                  in cursor.fetchall()]
+    cursor.execute('SELECT id, name, role, email, base_capacity, location_id, avatar_url FROM users')
+    pentesters = [{"id": str(r[0]), "name": r[1], "role": r[2], "email": r[3], "capacity": r[4],
+                   "location_id": str(r[5]) if r[5] else None, "avatar_url": r[6]} for r in cursor.fetchall()]
 
     cap_matrix = {p["id"]: {w: calculate_weekly_capacity(cursor, p["id"], year, w) for w in weeks} for p in pentesters}
 
-    # 3. Tests (Backlog & Scheduled)
+    # Map DB ENUM keys back to Frontend Strings
+    enum_map = {
+        "NOT_PLANNED": "Not Planned",
+        "SCHEDULED": "Scheduled",
+        "IN_PROGRESS": "In Progress",
+        "STOPPED": "Stopped",
+        "DELETED": "Deleted",
+        "COMPLETED": "Completed",
+        "ARCHIVED": "Archived"
+    }
+
+    # 3. Tests (Backlog) - Force stages::text to prevent serialization errors
     cursor.execute('''
-        SELECT t.id, t.name, t.service_lane_id, t.category_id, t.credits_per_week, t.duration_weeks, 
-               t.start_week, t.start_year, t.stages as status,  -- FIX: Aliased stages as status
-               (SELECT COUNT(*) FROM test_assets WHERE test_id = t.id) as asset_count
+        SELECT t.id, t.name, t.service_lane_id, t.category_id, 
+               t.credits_per_week, t.duration_weeks, t.stages::text,
+               (SELECT COUNT(*) FROM test_assets WHERE test_id = t.id)
         FROM tests t
-        WHERE t.start_week IS NULL OR t.start_year = %s
-    ''', (year,))
-
-    backlog, scheduled = [], []
+        WHERE t.stages::text = 'NOT_PLANNED'
+    ''')
+    backlog = []
     for r in cursor.fetchall():
-        t_obj = {
-            "id": r[0], "name": r[1], "service_lane_id": r[2], "category_id": r[3],
-            "credits": r[4], "duration": r[5], "startWeek": r[6], "startYear": r[7],
-            "status": r[8], "asset_count": r[9]
-        }
-        if r[6] is None:
-            backlog.append(t_obj)
-        else:
-            scheduled.append(t_obj)
+        backlog.append({
+            "id": str(r[0]), "name": r[1], "service_lane_id": str(r[2]) if r[2] else None,
+            "category_id": str(r[3]) if r[3] else None,
+            "credits": r[4], "duration": r[5], "status": enum_map.get(str(r[6]), str(r[6])), "asset_count": r[7]
+        })
 
-    # 4. Assignments
+    # 4. Tests (Scheduled) - Force stages::text to prevent serialization errors
+    cursor.execute('''
+        SELECT t.id, t.name, t.service_lane_id, t.category_id, 
+               t.credits_per_week, t.duration_weeks, t.start_week, t.start_year, t.stages::text,
+               (SELECT COUNT(*) FROM test_assets WHERE test_id = t.id)
+        FROM tests t
+        WHERE t.stages::text IN ('SCHEDULED', 'IN_PROGRESS', 'STOPPED', 'COMPLETED') 
+          AND t.start_year = %s 
+          AND (t.start_week + t.duration_weeks - 1) >= %s 
+          AND t.start_week <= %s
+    ''', (year, weeks[0], weeks[-1]))
+
+    scheduled = []
+    for r in cursor.fetchall():
+        scheduled.append({
+            "id": str(r[0]), "name": r[1], "service_lane_id": str(r[2]) if r[2] else None,
+            "category_id": str(r[3]) if r[3] else None,
+            "credits": r[4], "duration": r[5], "startWeek": r[6], "startYear": r[7],
+            "status": enum_map.get(str(r[8]), str(r[8])), "asset_count": r[9]
+        })
+
+    # 5. Assignments
     cursor.execute('''
         SELECT a.test_id, a.user_id, a.week_number, u.name, a.allocated_credits 
         FROM assignments a 
         JOIN users u ON a.user_id = u.id
-        WHERE a.year = %s
-    ''', (year,))
-    assignments = [{"test_id": r[0], "user_id": r[1], "week_number": r[2], "user_name": r[3], "allocated_credits": r[4]}
-                   for r in cursor.fetchall()]
+        WHERE a.year = %s AND a.week_number = ANY(%s)
+    ''', (year, weeks))
+    assignments = [
+        {"test_id": str(r[0]), "user_id": str(r[1]), "week_number": r[2], "user_name": r[3], "allocated_credits": r[4]}
+        for r in cursor.fetchall()]
 
-    # 5. Events
+    # 6. Events
     cursor.execute('SELECT id, user_id, event_type, location_id, start_date, end_date FROM events')
-    events = [{"id": r[0], "user_id": r[1], "type": r[2], "location_id": r[3], "start": r[4], "end": r[5]} for r in
-              cursor.fetchall()]
+    events = [{"id": str(r[0]), "user_id": str(r[1]) if r[1] else None, "type": r[2],
+               "location_id": str(r[3]) if r[3] else None, "start": r[4], "end": r[5]} for r in cursor.fetchall()]
 
     return {
         "year": year, "quarter": quarter, "weeks": weeks,
@@ -149,7 +176,6 @@ def get_quarterly_board(year: int, quarter: int, response: Response,
         "backlog": backlog, "scheduled": scheduled,
         "assignments": assignments, "events": events
     }
-
 
 # --- 3. UNIVERSAL CATEGORIES ---
 @router.get("/categories/")
@@ -232,7 +258,6 @@ def delete_category(cat_id: str, background_tasks: BackgroundTasks,
 
 
 # --- 4. EVENTS ---
-
 @router.post("/events")
 def create_event(e: EventCreate, background_tasks: BackgroundTasks,
                  current_user: dict = Depends(require_write_access), cursor=Depends(get_db_cursor)):

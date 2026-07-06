@@ -6,7 +6,7 @@ import uuid
 import anyio
 from database import get_db_cursor, db_cursor_context
 from routers.auth import get_current_user, require_admin
-from schema import RawAssetCreate, AssetBase, PromoteAssetRequest, BulkAssetRequest
+from schema import RawAssetCreate, AssetBase, PromoteAssetRequest, BulkAssetRequest, AssetTypeBase
 from websockets_manager import manager
 from audit_logger import log_audit_event
 
@@ -19,6 +19,33 @@ def get_asset_types(current_user: dict = Depends(get_current_user), cursor=Depen
     cursor.execute("SELECT id, name FROM asset_types ORDER BY name ASC")
     columns = [col[0] for col in cursor.description]
     return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+
+@router.post("/types")
+def create_asset_type(at: AssetTypeBase, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    new_id = str(uuid.uuid4())
+    try:
+        cursor.execute("INSERT INTO asset_types (id, name) VALUES (%s, %s)", (new_id, at.name))
+        cursor.connection.commit()
+        return {"id": new_id, "message": "Asset Type created."}
+    except Exception as e:
+        cursor.connection.rollback()
+        raise HTTPException(status_code=400, detail="Asset type name might already exist.")
+
+
+@router.put("/types/{type_id}")
+def update_asset_type(type_id: str, at: AssetTypeBase, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    cursor.execute("UPDATE asset_types SET name=%s WHERE id=%s", (at.name, type_id))
+    cursor.connection.commit()
+    return {"message": "Asset Type updated."}
+
+
+@router.delete("/types/{type_id}")
+def delete_asset_type(type_id: str, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    # Note: Because of CASCADE rules in DB, this will delete all associated Raw Assets.
+    cursor.execute("DELETE FROM asset_types WHERE id = %s", (type_id,))
+    cursor.connection.commit()
+    return {"message": "Asset Type deleted."}
 
 
 # --- RAW ASSETS ---
@@ -345,8 +372,8 @@ def process_excel_import_sync(contents: bytes, filename: str, current_user: dict
                             confidentiality_rating=%s, integrity_rating=%s, availability_rating=%s, 
                             service_forecast_id=%s, category_id=%s, asset_type_id=%s, facing_internet=%s
                             WHERE id=%s
-                        """, (desc, business_critical, c_val, i_val, a_val, service_id, cat_id, type_id,
-                              facing_internet, existing_id))
+                        """,
+                        (desc, business_critical, c_val, i_val, a_val, service_id, cat_id, type_id, facing_internet, existing_id))
                     else:
                         new_id = str(uuid.uuid4())
                         cursor.execute("""
@@ -435,14 +462,23 @@ def promote_raw_assets_to_pool(req: BulkAssetRequest, background_tasks: Backgrou
 def get_active_asset_pool(current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
     if current_user['role'] == 'pentester':
         raise HTTPException(status_code=403, detail="Pentesters cannot view the unassigned asset inventory.")
+
     cursor.execute('''
-        SELECT a.id, a.raw_asset_id, a.name, c.name as country, s.name as service_forecast, cat.name as category_name, at.name as asset_type_name, a.is_assigned
+        SELECT a.id, 
+               a.raw_asset_id, 
+               r.name, 
+               c.name as country, 
+               s.name as service_name, 
+               cat.name as category_name, 
+               at.name as asset_type_name, 
+               a.is_assigned
         FROM assets a
-        LEFT JOIN countries c ON a.country_id = c.id
-        LEFT JOIN services_lanes s ON a.service_forecast_id = s.id
-        LEFT JOIN service_categories cat ON a.category_id = cat.id
-        LEFT JOIN asset_types at ON a.asset_type_id = at.id
-        ORDER BY a.name ASC
+        JOIN raw_assets r ON a.raw_asset_id = r.id
+        LEFT JOIN countries c ON r.country_id = c.id
+        LEFT JOIN services_lanes s ON r.service_forecast_id = s.id
+        LEFT JOIN service_categories cat ON r.category_id = cat.id
+        LEFT JOIN asset_types at ON r.asset_type_id = at.id
+        ORDER BY r.name ASC
     ''')
     columns = [col[0] for col in cursor.description]
     return [dict(zip(columns, row)) for row in cursor.fetchall()]

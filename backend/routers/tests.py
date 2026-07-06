@@ -5,145 +5,166 @@ from pydantic import BaseModel, UUID4
 from database import get_db_cursor, db_cursor_context
 from routers.auth import get_current_user, require_admin
 from websockets_manager import manager
-from schema import TestCreate, TestBase, AssignmentBase
+from schema import TestCreate, TestBase, AssignmentBase, TestSchedule, BulkTestCreate, AssignmentCreate
 
 router = APIRouter(prefix="/api/tests", tags=["Tests & Assignments"])
 
+# --- HELPER: ENUM MAPPING ---
+FRONTEND_TO_DB_STAGES = {
+    "Not Planned": "NOT_PLANNED",
+    "Scheduled": "SCHEDULED",
+    "In Progress": "IN_PROGRESS",
+    "Stopped": "STOPPED",
+    "Deleted": "DELETED",
+    "Completed": "COMPLETED",
+    "Archived": "ARCHIVED"
+}
 
-# --- SCHEMAS FOR SCHEDULING ---
-class TestSchedule(BaseModel):
-    start_week: int
-    start_year: int
 
-
-class BulkTestCreate(BaseModel):
-    asset_ids: List[UUID4]
-
-
-class AssignmentCreate(BaseModel):
-    test_id: UUID4
-    user_id: UUID4
-    week_number: int
-    year: int
-    allocated_credits: float
+# --- HELPER: TEST HISTORY LOGGER ---
+def log_test_history(cursor, test_id: str, user_id: str, action: str, details: str = None):
+    new_id = str(uuid.uuid4())
+    cursor.execute('''
+        INSERT INTO test_history (id, test_id, user_id, action, details, timestamp)
+        VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+    ''', (new_id, test_id, str(user_id) if user_id else None, action, details))
 
 
 # --- 1. CORE TEST MANAGEMENT ---
-
 @router.post("/")
 def create_test(t: TestCreate, background_tasks: BackgroundTasks,
                 current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     new_test_id = str(uuid.uuid4())
-    cursor.execute('''
-        INSERT INTO tests (id, name, service_lane_id, credits_per_week, duration_weeks, status) 
-        VALUES (%s, %s, %s, %s, %s, 'Not Planned') RETURNING id
-    ''', (new_test_id, t.name, t.service_lane_id, t.credits_per_week, t.duration_weeks))
 
+    cursor.execute('''
+        INSERT INTO tests (id, name, service_lane_id, credits_per_week, duration_weeks, stages) 
+        VALUES (%s, %s, %s, %s, %s, 'NOT_PLANNED') RETURNING id
+    ''', (new_test_id, t.name, str(t.service_lane_id), t.credits_per_week, t.duration_weeks))
     new_id = cursor.fetchone()[0]
 
-    # Link selected assets and mark them as assigned in the active pool
     if t.asset_ids:
         for asset_id in t.asset_ids:
-            cursor.execute('INSERT INTO test_assets (test_id, asset_id) VALUES (%s, %s)', (new_id, asset_id))
-            cursor.execute('UPDATE assets SET is_assigned = TRUE WHERE id = %s', (asset_id,))
+            cursor.execute('INSERT INTO test_assets (test_id, asset_id) VALUES (%s, %s)', (new_id, str(asset_id)))
+            cursor.execute('UPDATE assets SET is_assigned = TRUE WHERE id = %s', (str(asset_id),))
 
+    log_test_history(cursor, new_id, current_user['id'], "CREATED", f"Test manually created.")
     cursor.connection.commit()
+
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
-
     return {"message": "Test created successfully", "id": new_id}
+
+
+@router.get("/")
+def get_all_tests(current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+    cursor.execute('''
+        SELECT t.id, t.name, t.start_week, t.start_year, t.duration_weeks, t.stages::text as status,
+               s.name as service_lane_name,
+               COALESCE(
+                   (SELECT string_agg(DISTINCT u.name, ', ') 
+                    FROM assignments a 
+                    JOIN users u ON a.user_id = u.id 
+                    WHERE a.test_id = t.id), 
+                   'Unassigned'
+               ) as assigned_pentesters
+        FROM tests t
+        LEFT JOIN services_lanes s ON t.service_lane_id = s.id
+        ORDER BY t.start_year DESC NULLS LAST, t.start_week DESC NULLS LAST, t.name ASC
+    ''')
+    columns = [col[0] for col in cursor.description]
+    return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
 
 @router.put("/{test_id}")
 def update_test(test_id: str, t: TestBase, background_tasks: BackgroundTasks,
                 current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
-    # If a test is moved back to Not Planned, wipe its schedule and assignments
-    if t.status == 'Not Planned':
+    db_stage = FRONTEND_TO_DB_STAGES.get(t.status, "NOT_PLANNED")
+
+    if db_stage == 'NOT_PLANNED':
         cursor.execute('DELETE FROM assignments WHERE test_id = %s', (test_id,))
         cursor.execute('UPDATE tests SET start_week = NULL, start_year = NULL WHERE id = %s', (test_id,))
 
+    cat_id = str(t.category_id) if hasattr(t, 'category_id') and t.category_id else None
+
     cursor.execute('''
         UPDATE tests 
-        SET name=%s, service_lane_id=%s, credits_per_week=%s, duration_weeks=%s, status=%s
+        SET name=%s, service_lane_id=%s, category_id=%s, credits_per_week=%s, duration_weeks=%s, stages=%s
         WHERE id=%s
-    ''', (t.name, t.service_lane_id, t.credits_per_week, t.duration_weeks, t.status, test_id))
+    ''', (t.name, str(t.service_lane_id), cat_id, t.credits_per_week, t.duration_weeks, db_stage, test_id))
 
+    log_test_history(cursor, test_id, current_user['id'], "UPDATED", f"Test settings updated.")
     cursor.connection.commit()
-    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
 
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Test updated successfully."}
 
 
 @router.delete("/{test_id}")
 def delete_test(test_id: str, background_tasks: BackgroundTasks,
                 current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
-    # Free up the assets back to the active pool
     cursor.execute('SELECT asset_id FROM test_assets WHERE test_id = %s', (test_id,))
     for (asset_id,) in cursor.fetchall():
-        cursor.execute('UPDATE assets SET is_assigned = FALSE WHERE id = %s', (asset_id,))
+        cursor.execute('UPDATE assets SET is_assigned = FALSE WHERE id = %s', (str(asset_id),))
 
-    # Cascade deletes
     cursor.execute('DELETE FROM test_assets WHERE test_id = %s', (test_id,))
     cursor.execute('DELETE FROM assignments WHERE test_id = %s', (test_id,))
     cursor.execute('DELETE FROM tests WHERE id = %s', (test_id,))
-
     cursor.connection.commit()
+
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
-
     return {"message": "Test permanently deleted and assets freed."}
 
 
 # --- 2. BULK GENERATION ---
-
-def process_bulk_tests_background(asset_ids: List[UUID4]):
+def process_bulk_tests_background(asset_ids: List[UUID4], user_id: str):
     with db_cursor_context() as cursor:
         if not cursor: return
-
         for asset_id in asset_ids:
-            # Look up the asset's pre-assigned service lane (Forecast)
             cursor.execute('''
-                SELECT a.name, a.service_forecast_id, s.default_credits, s.default_duration_weeks 
+                SELECT r.name, r.service_forecast_id
                 FROM assets a
-                LEFT JOIN service_lanes s ON a.service_forecast_id = s.id
-                WHERE a.id = %s AND a.is_assigned = FALSE
+                JOIN raw_assets r ON a.raw_asset_id = r.id
+                WHERE a.id = %s AND (a.is_assigned = FALSE OR a.is_assigned IS NULL)
             ''', (str(asset_id),))
 
             asset_data = cursor.fetchone()
-            if not asset_data or not asset_data[1]:
-                continue  # Skip if already assigned or lacks a forecast lane
+            if not asset_data or not asset_data[1]: continue
 
-            asset_name, service_lane_id, def_credits, def_duration = asset_data
+            asset_name, service_lane_id = asset_data
             new_test_id = str(uuid.uuid4())
 
-            # Create the test using the lane's defaults
             cursor.execute('''
-                INSERT INTO tests (id, name, service_lane_id, credits_per_week, duration_weeks, status) 
-                VALUES (%s, %s, %s, %s, %s, 'Not Planned')
-            ''', (new_test_id, asset_name, service_lane_id, def_credits, def_duration))
+                INSERT INTO tests (id, name, service_lane_id, credits_per_week, duration_weeks, stages) 
+                VALUES (%s, %s, %s, %s, %s, 'NOT_PLANNED') RETURNING id
+            ''', (new_test_id, asset_name, str(service_lane_id), 2.0, 1))
 
-            # Link it
             cursor.execute('INSERT INTO test_assets (test_id, asset_id) VALUES (%s, %s)', (new_test_id, str(asset_id)))
             cursor.execute('UPDATE assets SET is_assigned = TRUE WHERE id = %s', (str(asset_id),))
+            log_test_history(cursor, new_test_id, user_id, "GENERATED", f"Test generated from Asset Pool.")
+
+        cursor.connection.commit()
 
 
 @router.post("/bulk")
 def bulk_create_tests(req: BulkTestCreate, background_tasks: BackgroundTasks,
                       current_user: dict = Depends(require_admin)):
-    background_tasks.add_task(process_bulk_tests_background, req.asset_ids)
+    background_tasks.add_task(process_bulk_tests_background, req.asset_ids, str(current_user['id']))
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": f"Generating {len(req.asset_ids)} tests from active pool."}
 
 
 # --- 3. SCHEDULING & STATUS LIFECYCLE ---
-
 @router.put("/{test_id}/schedule")
 def schedule_test(test_id: str, schedule: TestSchedule, background_tasks: BackgroundTasks,
                   current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
-    cursor.execute('UPDATE tests SET start_week = %s, start_year = %s, status = %s WHERE id = %s',
-                   (schedule.start_week, schedule.start_year, "Planned", test_id))
+    cursor.execute('UPDATE tests SET start_week = %s, start_year = %s, stages = %s WHERE id = %s',
+                   (schedule.start_week, schedule.start_year, "SCHEDULED", test_id))
 
+    log_test_history(cursor, test_id, current_user['id'], "SCHEDULED",
+                     f"Scheduled for Week {schedule.start_week}, {schedule.start_year}.")
     cursor.connection.commit()
+
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Test scheduled on the board."}
 
@@ -151,23 +172,25 @@ def schedule_test(test_id: str, schedule: TestSchedule, background_tasks: Backgr
 @router.put("/{test_id}/unschedule")
 def unschedule_test(test_id: str, background_tasks: BackgroundTasks,
                     current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
-    # Notify users they were dropped
     cursor.execute('SELECT user_id FROM assignments WHERE test_id = %s', (test_id,))
     assigned_users = cursor.fetchall()
-
     cursor.execute("SELECT name FROM tests WHERE id = %s", (test_id,))
     test_row = cursor.fetchone()
 
     if test_row:
         for (user_id,) in assigned_users:
-            cursor.execute("INSERT INTO notifications (user_id, message, type) VALUES (%s, %s, %s)",
-                           (user_id, f"You were removed from {test_row[0]} because it was unscheduled.", "REMOVAL"))
+            cursor.execute("INSERT INTO notifications (id, user_id, message, type, created_at) VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)",
+                           (str(uuid.uuid4()), str(user_id), f"You were removed from {test_row[0]} because it was unscheduled.",
+                            "REMOVAL"))
 
     cursor.execute('DELETE FROM assignments WHERE test_id = %s', (test_id,))
-    cursor.execute('UPDATE tests SET start_week = NULL, start_year = NULL, status = %s WHERE id = %s',
-                   ("Not Planned", test_id,))
+    cursor.execute('UPDATE tests SET start_week = NULL, start_year = NULL, stages = %s WHERE id = %s',
+                   ("NOT_PLANNED", test_id,))
 
+    log_test_history(cursor, test_id, current_user['id'], "UNSCHEDULED",
+                     "Test removed from calendar and returned to backlog.")
     cursor.connection.commit()
+
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Test returned to backlog."}
 
@@ -175,8 +198,11 @@ def unschedule_test(test_id: str, background_tasks: BackgroundTasks,
 @router.put("/{test_id}/complete")
 def complete_test(test_id: str, background_tasks: BackgroundTasks,
                   current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
-    cursor.execute("UPDATE tests SET status = 'Completed' WHERE id = %s", (test_id,))
+    cursor.execute("UPDATE tests SET stages = 'COMPLETED' WHERE id = %s", (test_id,))
+
+    log_test_history(cursor, test_id, current_user['id'], "COMPLETED", "Test marked as completed.")
     cursor.connection.commit()
+
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Test marked as Completed."}
 
@@ -184,47 +210,115 @@ def complete_test(test_id: str, background_tasks: BackgroundTasks,
 @router.put("/{test_id}/unable")
 def mark_test_unable(test_id: str, background_tasks: BackgroundTasks,
                      current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
-    """
-    Creates a tombstone record on the board for tracking, but returns the
-    original test back to the 'Not Planned' backlog.
-    """
-    cursor.execute('''
-        SELECT name, service_lane_id, credits_per_week, duration_weeks, start_week, start_year 
-        FROM tests WHERE id = %s
-    ''', (test_id,))
+    # 1. Fetch Original Test Details
+    cursor.execute('SELECT name, service_lane_id, credits_per_week, duration_weeks FROM tests WHERE id = %s',
+                   (test_id,))
     row = cursor.fetchone()
     if not row: raise HTTPException(status_code=404, detail="Test not found.")
-    name, service_lane_id, credits, duration, start_week, start_year = row
+    name, service_lane_id, credits, duration = row
 
-    # 1. Create Tombstone
+    # 2. Keep the Original Test on the board, but mark it as STOPPED and add [BLOCKED]
+    cursor.execute("UPDATE tests SET stages = 'STOPPED', name = %s WHERE id = %s", (f"[BLOCKED] {name}", test_id))
+
+    # 3. Release the pentester's credits by deleting assignments!
+    cursor.execute('DELETE FROM assignments WHERE test_id = %s', (test_id,))
+
+    # 4. Create a fresh Clone in the Backlog (Clean Name)
+    clone_id = str(uuid.uuid4())
     cursor.execute('''
-        INSERT INTO tests (name, service_lane_id, credits_per_week, duration_weeks, start_week, start_year, status) 
-        VALUES (%s, %s, %s, %s, %s, %s, 'Unable') RETURNING id
-    ''', (name, service_lane_id, credits, duration, start_week, start_year))
-    tombstone_id = cursor.fetchone()[0]
+        INSERT INTO tests (id, name, service_lane_id, credits_per_week, duration_weeks, stages) 
+        VALUES (%s, %s, %s, %s, %s, 'NOT_PLANNED')
+    ''', (clone_id, name, str(service_lane_id), credits, duration))
 
-    # 2. Shift assignments and assets to the tombstone so history is preserved
-    cursor.execute('UPDATE assignments SET test_id = %s WHERE test_id = %s', (tombstone_id, test_id))
-
+    # 5. Attach the same assets to the Clone
     cursor.execute('SELECT asset_id FROM test_assets WHERE test_id = %s', (test_id,))
     for (asset_id,) in cursor.fetchall():
-        cursor.execute('INSERT INTO test_assets (test_id, asset_id) VALUES (%s, %s)', (tombstone_id, asset_id))
+        cursor.execute('INSERT INTO test_assets (test_id, asset_id) VALUES (%s, %s)', (clone_id, str(asset_id)))
 
-    # 3. Reset the original test
-    cursor.execute("UPDATE tests SET start_week = NULL, start_year = NULL, status = 'Not Planned' WHERE id = %s",
-                   (test_id,))
+    # --- NEW: COPY THE ENTIRE HISTORY TO THE CLONE! ---
+    cursor.execute("SELECT user_id, action, details, timestamp FROM test_history WHERE test_id = %s", (test_id,))
+    old_history = cursor.fetchall()
+    for h_user, h_action, h_details, h_time in old_history:
+        new_h_id = str(uuid.uuid4())
+        cursor.execute('''
+            INSERT INTO test_history (id, test_id, user_id, action, details, timestamp)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        ''', (new_h_id, clone_id, str(h_user) if h_user else None, h_action, h_details, h_time))
+
+    # 6. Log the split event for both tests
+    log_test_history(cursor, clone_id, current_user['id'], "CLONED", "Test resumed in backlog from stopped original.")
+    log_test_history(cursor, test_id, current_user['id'], "STOPPED",
+                     f"Test stopped. Clone generated in backlog: {clone_id}")
 
     cursor.connection.commit()
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
-    return {"message": "Test marked as Unable. Original preserved in backlog."}
+    return {"message": "Test marked as Stopped."}
+
+@router.put("/{test_id}/unstop")
+def unstop_test(test_id: str, background_tasks: BackgroundTasks,
+                current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    # 1. Get the Original test
+    cursor.execute("SELECT name FROM tests WHERE id = %s AND stages = 'STOPPED'", (test_id,))
+    row = cursor.fetchone()
+    if not row: raise HTTPException(status_code=404, detail="Stopped test not found.")
+
+    # Strip the [BLOCKED] tag for good
+    name = row[0]
+    original_name = name.replace("[BLOCKED] ", "") if name.startswith("[BLOCKED] ") else name
+
+    # 2. Find the Clone ID from history
+    cursor.execute("""
+        SELECT details FROM test_history 
+        WHERE test_id = %s AND action = 'STOPPED' 
+        ORDER BY timestamp DESC LIMIT 1
+    """, (test_id,))
+    hist_row = cursor.fetchone()
+
+    if hist_row and "Clone generated in backlog: " in hist_row[0]:
+        # Extract the secret UUID!
+        clone_id = hist_row[0].split("Clone generated in backlog: ")[1].strip()
+
+        # Check if clone is STILL in the backlog (NOT_PLANNED)
+        cursor.execute("SELECT stages FROM tests WHERE id = %s", (clone_id,))
+        clone_stage_row = cursor.fetchone()
+
+        if clone_stage_row:
+            if clone_stage_row[0] == 'NOT_PLANNED':
+                # Safe to delete: It's still in the backlog
+                cursor.execute("DELETE FROM test_assets WHERE test_id = %s", (clone_id,))
+                cursor.execute("DELETE FROM tests WHERE id = %s", (clone_id,))
+            else:
+                # DANGER: The clone is already scheduled on the board! Block the unstop.
+                raise HTTPException(
+                    status_code=400,
+                    detail="Cannot Undo Stop: The remaining work for this test has already been rescheduled."
+                )
+
+    # 3. Revert Original test back to SCHEDULED and restore its clean name
+    cursor.execute("UPDATE tests SET name = %s, stages = 'SCHEDULED' WHERE id = %s", (original_name, test_id))
+
+    log_test_history(cursor, test_id, current_user['id'], "UNSTOPPED", "Test unblocked and clone removed.")
+    cursor.connection.commit()
+
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+    return {"message": "Test unstopped successfully."}
+
+
+# Make un-completing a test cleaner on the backend
+@router.put("/{test_id}/uncomplete")
+def uncomplete_test(test_id: str, background_tasks: BackgroundTasks,
+                    current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    cursor.execute("UPDATE tests SET stages = 'SCHEDULED' WHERE id = %s", (test_id,))
+    log_test_history(cursor, test_id, current_user['id'], "UNCOMPLETED", "Test reverted to Scheduled.")
+    cursor.connection.commit()
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+    return {"message": "Test uncompleted."}
 
 
 # --- 4. ASSIGNMENTS ---
-
 @router.post("/assignments")
 def create_assignment(assign: AssignmentCreate, background_tasks: BackgroundTasks,
                       current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
-    # Prevent double assignment on the exact same week
     cursor.execute('''
         SELECT a.id FROM assignments a
         WHERE a.user_id = %s AND a.week_number = %s AND a.year = %s AND a.test_id = %s
@@ -232,19 +326,20 @@ def create_assignment(assign: AssignmentCreate, background_tasks: BackgroundTask
 
     if cursor.fetchone():
         raise HTTPException(status_code=400, detail="Pentester is already assigned to this test for this week!")
+
     new_assignment_id = str(uuid.uuid4())
     cursor.execute('''
         INSERT INTO assignments (id, test_id, user_id, week_number, year, allocated_credits) 
         VALUES (%s, %s, %s, %s, %s, %s)
-    ''', (new_assignment_id, str(assign.test_id), str(assign.user_id), assign.week_number, assign.year, assign.allocated_credits))
+    ''', (new_assignment_id, str(assign.test_id), str(assign.user_id), assign.week_number, assign.year,
+          assign.allocated_credits))
 
     cursor.execute("SELECT name FROM tests WHERE id = %s", (str(assign.test_id),))
     test_row = cursor.fetchone()
 
     if test_row:
-        new_notification_id = str(uuid.uuid4())
-        cursor.execute("INSERT INTO notifications (id, user_id, message, type) VALUES (%s, %s, %s, %s)",
-                       (new_notification_id, str(assign.user_id), f"You were assigned to {test_row[0]} for Week {assign.week_number}.",
+        cursor.execute("INSERT INTO notifications (id, user_id, message, type, created_at) VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)",
+                       (str(uuid.uuid4()), str(assign.user_id), f"You were assigned to {test_row[0]} for Week {assign.week_number}.",
                         "ASSIGNMENT"))
 
     cursor.connection.commit()
@@ -259,11 +354,24 @@ def remove_assignment(test_id: str, user_id: str, background_tasks: BackgroundTa
     test_row = cursor.fetchone()
 
     if test_row:
-        cursor.execute("INSERT INTO notifications (user_id, message, type) VALUES (%s, %s, %s)",
-                       (user_id, f"You were removed from {test_row[0]}.", "REMOVAL"))
+        cursor.execute("INSERT INTO notifications (id, user_id, message, type, created_at) VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)",
+                       (str(uuid.uuid4()), str(user_id), f"You were removed from {test_row[0]}.", "REMOVAL"))
 
     cursor.execute('DELETE FROM assignments WHERE test_id = %s AND user_id = %s', (test_id, user_id))
-
     cursor.connection.commit()
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Successfully Unassigned"}
+
+
+# --- 5. HISTORY ROUTE ---
+@router.get("/{test_id}/history")
+def get_test_history(test_id: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+    cursor.execute('''
+        SELECT th.id, th.action, th.details, th.timestamp as created_at, u.name as user_name
+        FROM test_history th
+        LEFT JOIN users u ON th.user_id = u.id
+        WHERE th.test_id = %s
+        ORDER BY th.timestamp DESC
+    ''', (test_id,))
+    columns = [col[0] for col in cursor.description]
+    return [dict(zip(columns, row)) for row in cursor.fetchall()]

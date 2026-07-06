@@ -9,7 +9,8 @@ import {
 } from 'lucide-react';
 
 export default function TopNav() {
-  const { currentUser, handleLogout, notifications, showNotifications, setShowNotifications, markNotificationsRead, wsStatus } = useAppContext();
+  // --- ADDED fetchNotifications HERE ---
+  const { currentUser, handleLogout, notifications, showNotifications, setShowNotifications, markNotificationsRead, wsStatus, fetchNotifications } = useAppContext();
   const { setTheme } = useTheme();
   const location = useLocation();
   const currentPath = location.pathname;
@@ -21,22 +22,41 @@ export default function TopNav() {
   const themeRef = useRef<HTMLDivElement>(null);
   const userRef = useRef<HTMLDivElement>(null);
   const settingsRef = useRef<HTMLDivElement>(null);
+  const notificationRef = useRef<HTMLDivElement>(null);
 
   // Rotating Logo Icons Logic
-  const logoIcons = [SprayCan, Snail, SunMoon, Fingerprint, Rabbit, Cat, Shell, Turtle, Radar, HandMetal, Drum, TentTree];
+  const logoIcons = [SprayCan, Snail, SunMoon, Fingerprint, Rabbit, Cat, Shell, Turtle, Radar, HandMetal, Drum, TentTree, Wifi, WifiOff];
   const ICON_ROTATION_TIME = 1000 * 60 * 5;
   const iconIndex = Math.floor(Date.now() / ICON_ROTATION_TIME) % logoIcons.length;
   const LogoIcon = logoIcons[iconIndex];
 
   useEffect(() => {
+    // 1. Click Outside Logic
     const handleClickOutside = (event: MouseEvent) => {
       if (themeRef.current && !themeRef.current.contains(event.target as Node)) setIsThemeOpen(false);
       if (userRef.current && !userRef.current.contains(event.target as Node)) setIsUserOpen(false);
       if (settingsRef.current && !settingsRef.current.contains(event.target as Node)) setIsSettingsOpen(false);
+      if (notificationRef.current && !notificationRef.current.contains(event.target as Node)) setShowNotifications(false);
     };
+
     document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+
+    // 2. --- NEW: WEBSOCKET NOTIFICATION LISTENER ---
+    const handleRefreshNotifications = () => {
+      if (typeof fetchNotifications === 'function') {
+        fetchNotifications();
+      }
+    };
+
+    // Listen for the custom event dispatched by our Planner's WebSocket
+    window.addEventListener('refresh_notifications', handleRefreshNotifications);
+
+    // Cleanup listeners on unmount
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      window.removeEventListener('refresh_notifications', handleRefreshNotifications);
+    };
+  }, [fetchNotifications]);
 
   const navClass = (path: string) => {
     const isActive = currentPath === path;
@@ -100,14 +120,13 @@ export default function TopNav() {
             <WifiOff className="h-4 w-4 text-red-500 animate-pulse" />
           )}
 
-          {/* Tooltip */}
           <div className="absolute top-full mt-3 left-1/2 -translate-x-1/2 px-2.5 py-1 bg-slate-900 dark:bg-zinc-100 text-white dark:text-slate-900 text-[10px] font-bold uppercase tracking-wider rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none shadow-lg">
             Live Sync: {wsStatus}
           </div>
         </div>
 
         {/* Notifications */}
-        <div className="relative">
+        <div className="relative" ref={notificationRef}>
           <button
             onClick={() => setShowNotifications(!showNotifications)}
             className="text-slate-500 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-100 transition-colors relative flex items-center"
