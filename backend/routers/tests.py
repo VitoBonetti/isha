@@ -190,37 +190,99 @@ def complete_test(test_id: str, background_tasks: BackgroundTasks,
 @router.put("/{test_id}/unable")
 def mark_test_unable(test_id: str, background_tasks: BackgroundTasks,
                      current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
-    cursor.execute(
-        'SELECT name, service_lane_id, credits_per_week, duration_weeks, start_week, start_year FROM tests WHERE id = %s',
-        (test_id,))
+    # 1. Fetch Original Test Details
+    cursor.execute('SELECT name, service_lane_id, credits_per_week, duration_weeks FROM tests WHERE id = %s',
+                   (test_id,))
     row = cursor.fetchone()
     if not row: raise HTTPException(status_code=404, detail="Test not found.")
-    name, service_lane_id, credits, duration, start_week, start_year = row
+    name, service_lane_id, credits, duration = row
 
-    new_tombstone_id = str(uuid.uuid4())
+    # 2. Keep the Original Test on the board, but mark it as STOPPED and add [BLOCKED]
+    cursor.execute("UPDATE tests SET stages = 'STOPPED', name = %s WHERE id = %s", (f"[BLOCKED] {name}", test_id))
 
-    # Create Tombstone
+    # 3. FIX BUG #3: Release the pentester's credits by deleting assignments!
+    cursor.execute('DELETE FROM assignments WHERE test_id = %s', (test_id,))
+
+    # 4. Create a fresh Clone in the Backlog (Clean Name)
+    clone_id = str(uuid.uuid4())
     cursor.execute('''
-        INSERT INTO tests (id, name, service_lane_id, credits_per_week, duration_weeks, start_week, start_year, stages) 
-        VALUES (%s, %s, %s, %s, %s, %s, %s, 'STOPPED') RETURNING id
-    ''', (new_tombstone_id, f"[BLOCKED] {name}", str(service_lane_id), credits, duration, start_week, start_year))
+        INSERT INTO tests (id, name, service_lane_id, credits_per_week, duration_weeks, stages) 
+        VALUES (%s, %s, %s, %s, %s, 'NOT_PLANNED')
+    ''', (clone_id, name, str(service_lane_id), credits, duration))
 
-    # Move assignments & clone assets
-    cursor.execute('UPDATE assignments SET test_id = %s WHERE test_id = %s', (new_tombstone_id, test_id))
+    # 5. Attach the same assets to the Clone
     cursor.execute('SELECT asset_id FROM test_assets WHERE test_id = %s', (test_id,))
     for (asset_id,) in cursor.fetchall():
-        cursor.execute('INSERT INTO test_assets (test_id, asset_id) VALUES (%s, %s)', (new_tombstone_id, str(asset_id)))
+        cursor.execute('INSERT INTO test_assets (test_id, asset_id) VALUES (%s, %s)', (clone_id, str(asset_id)))
 
-    # Revert original
-    cursor.execute("UPDATE tests SET start_week = NULL, start_year = NULL, stages = 'NOT_PLANNED' WHERE id = %s",
-                   (test_id,))
-
+    # 6. THE MAGIC LINK: Log history AND store the clone's ID so we can find it if we Undo!
     log_test_history(cursor, test_id, current_user['id'], "STOPPED",
-                     "Test halted. Tombstone dropped on calendar, original returned to backlog.")
+                     f"Test stopped. Clone generated in backlog: {clone_id}")
     cursor.connection.commit()
 
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Test marked as Stopped."}
+
+
+@router.put("/{test_id}/unstop")
+def unstop_test(test_id: str, background_tasks: BackgroundTasks,
+                current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    # 1. Get the Original test
+    cursor.execute("SELECT name FROM tests WHERE id = %s AND stages = 'STOPPED'", (test_id,))
+    row = cursor.fetchone()
+    if not row: raise HTTPException(status_code=404, detail="Stopped test not found.")
+
+    # Strip the [BLOCKED] tag for good
+    name = row[0]
+    original_name = name.replace("[BLOCKED] ", "") if name.startswith("[BLOCKED] ") else name
+
+    # 2. Find the Clone ID from history
+    cursor.execute("""
+        SELECT details FROM test_history 
+        WHERE test_id = %s AND action = 'STOPPED' 
+        ORDER BY timestamp DESC LIMIT 1
+    """, (test_id,))
+    hist_row = cursor.fetchone()
+
+    if hist_row and "Clone generated in backlog: " in hist_row[0]:
+        # Extract the secret UUID!
+        clone_id = hist_row[0].split("Clone generated in backlog: ")[1].strip()
+
+        # Check if clone is STILL in the backlog (NOT_PLANNED)
+        cursor.execute("SELECT stages FROM tests WHERE id = %s", (clone_id,))
+        clone_stage_row = cursor.fetchone()
+
+        if clone_stage_row:
+            if clone_stage_row[0] == 'NOT_PLANNED':
+                # Safe to delete: It's still in the backlog
+                cursor.execute("DELETE FROM test_assets WHERE test_id = %s", (clone_id,))
+                cursor.execute("DELETE FROM tests WHERE id = %s", (clone_id,))
+            else:
+                # DANGER: The clone is already scheduled on the board! Block the unstop.
+                raise HTTPException(
+                    status_code=400,
+                    detail="Cannot Undo Stop: The remaining work for this test has already been rescheduled."
+                )
+
+    # 3. Revert Original test back to SCHEDULED and restore its clean name
+    cursor.execute("UPDATE tests SET name = %s, stages = 'SCHEDULED' WHERE id = %s", (original_name, test_id))
+
+    log_test_history(cursor, test_id, current_user['id'], "UNSTOPPED", "Test unblocked and clone removed.")
+    cursor.connection.commit()
+
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+    return {"message": "Test unstopped successfully."}
+
+
+# Make un-completing a test cleaner on the backend
+@router.put("/{test_id}/uncomplete")
+def uncomplete_test(test_id: str, background_tasks: BackgroundTasks,
+                    current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    cursor.execute("UPDATE tests SET stages = 'SCHEDULED' WHERE id = %s", (test_id,))
+    log_test_history(cursor, test_id, current_user['id'], "UNCOMPLETED", "Test reverted to Scheduled.")
+    cursor.connection.commit()
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+    return {"message": "Test uncompleted."}
 
 
 # --- 4. ASSIGNMENTS ---

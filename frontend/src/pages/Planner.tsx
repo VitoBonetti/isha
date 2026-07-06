@@ -229,20 +229,20 @@ export default function Planner() {
     } catch (error) { toast.error("Failed to remove pentester."); }
   };
 
-  const revertTestStatus = async (testId: string) => {
-    const test = boardData?.scheduled.find(t => t.id === testId);
-    if (!test) return;
+  // --- REVERT BUTTONS ---
+  const handleRevertComplete = async (testId: string) => {
     try {
-      await axios.put(`/api/tests/${testId}`, {
-        name: test.name,
-        service_lane_id: test.service_lane_id,
-        credits_per_week: test.credits,
-        duration_weeks: test.duration,
-        status: 'Scheduled'
-      });
-      toast.success("Test status reverted.");
+      await axios.put(`/api/tests/${testId}/uncomplete`);
+      toast.success("Test reverted to Scheduled.");
     } catch (error) { toast.error("Failed to revert status."); }
   };
+
+  const handleRevertUnable = async (testId: string) => {
+    try {
+      await axios.put(`/api/tests/${testId}/unstop`);
+      toast.success("Test unblocked!");
+    } catch (error) { toast.error("Failed to unblock test."); }
+  };;
 
   const handleUpdateTest = async (testId: string, updatedData: any) => {
     try {
@@ -278,8 +278,8 @@ export default function Planner() {
         handleDuplicateTest={handleDuplicateTest}
         openEditModal={(test) => setEditModalTest(test)}
         handleMarkUnable={handleMarkUnable}
-        handleRevertComplete={revertTestStatus}
-        handleRevertUnable={revertTestStatus}
+        handleRevertComplete={handleRevertComplete}
+        handleRevertUnable={handleRevertUnable}
         assignModalTest={assignModalTest}
         setAssignModalTest={setAssignModalTest}
         backlogFilter={backlogFilter}
