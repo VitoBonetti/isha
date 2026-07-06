@@ -117,7 +117,7 @@ export default function AssetsView() {
   const validUnassigned = filteredAssets.filter(a => !a.is_assigned && a.service_name);
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-zinc-950 text-slate-900 dark:text-zinc-100">
+    <div className="min-h-screen text-slate-900 dark:text-zinc-100">
       <TopNav />
       <Toaster position="bottom-right" />
 

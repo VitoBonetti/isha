@@ -60,7 +60,7 @@ export default function Dashboard() {
   if (isLoading) return null;
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-[#09090b] text-slate-900 dark:text-zinc-100 flex flex-col relative overflow-hidden transition-colors duration-300">
+    <div className="min-h-screen text-slate-900 dark:text-zinc-100 flex flex-col relative overflow-hidden transition-colors duration-300">
       <TopNav />
 
       <main className="flex-1 pt-36 pb-12 px-6 md:px-12 relative z-10">

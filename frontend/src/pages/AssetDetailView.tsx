@@ -103,7 +103,7 @@ export default function AssetDetailView() {
     : "w-full mt-1 p-2 border border-transparent rounded-lg bg-slate-100 dark:bg-zinc-900 text-sm text-slate-900 dark:text-zinc-100 outline-none cursor-default font-bold";
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-zinc-950 text-slate-900 dark:text-zinc-100">
+    <div className="min-h-screen text-slate-900 dark:text-zinc-100">
       <TopNav />
       <Toaster position="bottom-right" />
       <ConfirmModal isOpen={deleteModalOpen} title="Delete Asset" message="Are you sure you want to permanently delete this asset? If it is currently in the active pool, it will be removed." onConfirm={handleDelete} onCancel={() => setDeleteModalOpen(false)} />

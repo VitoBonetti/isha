@@ -91,13 +91,11 @@ export default function PlannerView({
 
   return (
     <DragDropContext onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-      <div className="flex flex-col h-screen bg-slate-50 dark:bg-zinc-950 text-sm text-slate-700 dark:text-zinc-300 overflow-hidden font-sans">
+      <div className="flex flex-col h-screen dark:bg-zinc-950 text-sm text-slate-700 dark:text-zinc-300 overflow-hidden font-sans">
         <TopNav />
 
-        {/* --- REBUILT HEADER LAYOUT --- */}
-        <div className="flex justify-between items-center px-6 py-3 bg-white dark:bg-zinc-900 border-b border-slate-200 dark:border-zinc-800 z-20 shadow-sm shrink-0 pt-32">
+        <div className="flex justify-between items-center px-6 py-3 dark:bg-zinc-900 border-b border-slate-200 dark:border-zinc-800 z-20 shadow-sm shrink-0 pt-32">
 
-          {/* 1. LEFT: Quarter Controls */}
           <div className="flex w-1/3 justify-start">
             <div className="flex items-center bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-lg p-1">
               <button className="p-1.5 hover:bg-slate-200 dark:hover:bg-zinc-800 rounded-md text-slate-500 transition-colors" onClick={handlePrevQuarter}><ChevronLeft size={16} /></button>
@@ -108,7 +106,6 @@ export default function PlannerView({
             </div>
           </div>
 
-          {/* 2. CENTER: Search Bar */}
           <div className="flex justify-center w-1/3">
             <div className="relative w-full max-w-md">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -116,20 +113,14 @@ export default function PlannerView({
             </div>
           </div>
 
-          {/* 3. RIGHT: Online Users & Actions */}
           <div className="flex items-center justify-end gap-4 w-1/3">
-
-            {/* AVATARS (Now visible to everyone, regardless of role!) */}
             <div className="flex items-center gap-3 pr-4 border-r border-slate-200 dark:border-zinc-800">
-
-              {/* Pulsing Green Dot */}
               <div className="flex items-center gap-1.5" title="Live Sync Active">
                 <span className="relative flex h-2.5 w-2.5">
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                   <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
                 </span>
               </div>
-
               <div className="flex -space-x-2">
                 <div title="You" className="w-7 h-7 rounded-full bg-blue-500 text-white flex items-center justify-center text-xs font-bold border-2 border-white dark:border-zinc-900 z-10 shadow-sm overflow-hidden">
                   {currentUser?.avatar_url ? (
@@ -154,7 +145,6 @@ export default function PlannerView({
               </div>
             </div>
 
-            {/* ADMIN-ONLY ACTION BUTTONS */}
             {currentUser?.role === 'admin' && (
               <div className="flex items-center gap-2">
                 {!isBacklogOpen && (
@@ -170,7 +160,6 @@ export default function PlannerView({
           </div>
         </div>
 
-        {/* Main Workspace */}
         <div className="flex flex-1 overflow-hidden w-full relative">
 
           <div className="flex-1 min-w-0 overflow-auto bg-slate-50 dark:bg-zinc-950/50 transition-all p-6">
@@ -254,45 +243,45 @@ export default function PlannerView({
                                     return (
                                       <Draggable key={test.id} draggableId={test.id} index={index} isDragDisabled={currentUser?.role === 'pentester' || test.status === 'Completed' || test.status === 'Stopped'}>
                                         {(provided) => (
-                                          <div ref={provided.innerRef} {...provided.draggableProps} {...provided.dragHandleProps}
-                                            className={`p-3 bg-white dark:bg-zinc-800 rounded-lg shadow-sm border mb-2 transition-all group ${test.status === 'Stopped' ? 'border-red-300 bg-red-50/50 dark:border-red-900/50 dark:bg-red-900/10' : isAssignedToMe ? 'border-blue-300 shadow-[0_0_10px_rgba(59,130,246,0.1)]' : 'border-slate-200 dark:border-zinc-700'} ${testMatchesSearch ? 'opacity-100' : 'opacity-20 grayscale'}`}
-                                            style={{ ...provided.draggableProps.style, borderLeftWidth: '4px', borderLeftColor: test.status === 'Stopped' ? '#ef4444' : test.status === 'Completed' ? '#10b981' : service.theme_color }}
-                                          >
-                                            <div className="flex justify-between items-start mb-1">
-                                              <div className="font-bold text-xs text-slate-900 dark:text-zinc-100 leading-tight">
-                                                {test.name}
+                                            <div ref={provided.innerRef} {...provided.draggableProps} {...provided.dragHandleProps}
+                                              className={`p-3 bg-white dark:bg-zinc-800 rounded-lg shadow-sm border mb-2 transition-all group ${test.status === 'Stopped' ? 'border-red-300 bg-red-50/50 dark:border-red-900/50 dark:bg-red-900/10' : isAssignedToMe ? 'border-blue-300 shadow-[0_0_10px_rgba(59,130,246,0.1)]' : 'border-slate-200 dark:border-zinc-700'} ${testMatchesSearch ? 'opacity-100' : 'opacity-20 grayscale'}`}
+                                              style={{ ...provided.draggableProps.style, borderLeftWidth: '4px', borderLeftColor: test.status === 'Stopped' ? '#ef4444' : test.status === 'Completed' ? '#10b981' : service.theme_color }}
+                                            >
+                                              <div className="flex justify-between items-start mb-1">
+                                                <div className="font-bold text-xs text-slate-900 dark:text-zinc-100 leading-tight">
+                                                  {test.name}
+                                                </div>
+                                                {test.status === 'Completed' && <span className="ml-2 text-[9px] font-black bg-emerald-100 text-emerald-700 px-1 rounded uppercase tracking-wide">Done</span>}
+                                                {test.status === 'Stopped' && <span className="ml-2 text-[9px] font-black bg-red-100 text-red-700 px-1 rounded uppercase tracking-wide">Stop</span>}
                                               </div>
-                                              {test.status === 'Completed' && <span className="ml-2 text-[9px] font-black bg-emerald-100 text-emerald-700 px-1 rounded uppercase tracking-wide">Done</span>}
-                                              {test.status === 'Stopped' && <span className="ml-2 text-[9px] font-black bg-red-100 text-red-700 px-1 rounded uppercase tracking-wide">Stop</span>}
+
+                                              {renderQualityAndTeam()}
+
+                                              {currentUser?.role === 'admin' && (
+                                                <div className="mt-3 pt-2 border-t border-slate-100 dark:border-zinc-700/50 flex flex-wrap gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                  {test.status === 'Completed' ? (
+                                                    <>
+                                                      <button className="px-2 py-1 text-[10px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded transition-colors" onClick={() => handleRevertComplete(test.id)}>Undo Done</button>
+                                                      <button className="px-2 py-1 text-[10px] font-bold bg-blue-50 hover:bg-blue-100 text-blue-600 rounded transition-colors flex items-center gap-1" onClick={() => setHistoryTest(test)}><History size={10}/> Hist</button>
+                                                    </>
+                                                  ) : test.status === 'Stopped' ? (
+                                                    <>
+                                                      <button className="px-2 py-1 text-[10px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded transition-colors" onClick={() => handleRevertUnable(test.id)}>Undo Stop</button>
+                                                      <button className="px-2 py-1 text-[10px] font-bold bg-blue-50 hover:bg-blue-100 text-blue-600 rounded transition-colors flex items-center gap-1" onClick={() => setHistoryTest(test)}><History size={10}/> Hist</button>
+                                                    </>
+                                                  ) : (
+                                                    <>
+                                                      <button className="px-2 py-1 text-[10px] font-bold bg-blue-50 hover:bg-blue-100 text-blue-600 rounded transition-colors flex items-center gap-1" onClick={() => setAssignModalTest(test)}><Users size={10}/> Staff</button>
+                                                      <button className="px-2 py-1 text-[10px] font-bold bg-emerald-50 hover:bg-emerald-100 text-emerald-600 rounded transition-colors flex items-center gap-1" onClick={() => handleCompleteTest(test.id)}><CheckCircle size={10}/> Done</button>
+                                                      <button className="px-2 py-1 text-[10px] font-bold bg-red-50 hover:bg-red-100 text-red-600 rounded transition-colors flex items-center gap-1" onClick={() => handleMarkUnable(test.id)}><XCircle size={10}/> Stop</button>
+                                                      <button className="px-2 py-1 text-[10px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-600 rounded transition-colors" onClick={() => handleUnscheduleTest(test.id)}>Unsch</button>
+                                                      <button className="px-2 py-1 text-[10px] font-bold bg-blue-50 hover:bg-blue-100 text-blue-600 rounded transition-colors flex items-center gap-1" onClick={() => setHistoryTest(test)}><History size={10}/> Hist</button>
+                                                      <button className="px-2 py-1 text-[10px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-600 rounded transition-colors flex items-center gap-1" onClick={() => openEditModal(test)}><Edit2 size={10}/> Edit</button>
+                                                    </>
+                                                  )}
+                                                </div>
+                                              )}
                                             </div>
-
-                                            {renderQualityAndTeam()}
-
-                                            {currentUser?.role === 'admin' && (
-                                              <div className="mt-3 pt-2 border-t border-slate-100 dark:border-zinc-700/50 flex flex-wrap gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                {test.status === 'Completed' ? (
-                                                  <>
-                                                    <button className="px-2 py-1 text-[10px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded transition-colors" onClick={() => handleRevertComplete(test.id)}>Undo Done</button>
-                                                    <button className="px-2 py-1 text-[10px] font-bold bg-blue-50 hover:bg-blue-100 text-blue-600 rounded transition-colors flex items-center gap-1" onClick={() => setHistoryTest(test)}><History size={10}/> Hist</button>
-                                                  </>
-                                                ) : test.status === 'Stopped' ? (
-                                                  <>
-                                                    <button className="px-2 py-1 text-[10px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded transition-colors" onClick={() => handleRevertUnable(test.id)}>Undo Stop</button>
-                                                    <button className="px-2 py-1 text-[10px] font-bold bg-blue-50 hover:bg-blue-100 text-blue-600 rounded transition-colors flex items-center gap-1" onClick={() => setHistoryTest(test)}><History size={10}/> Hist</button>
-                                                  </>
-                                                ) : (
-                                                  <>
-                                                    <button className="px-2 py-1 text-[10px] font-bold bg-blue-50 hover:bg-blue-100 text-blue-600 rounded transition-colors flex items-center gap-1" onClick={() => setAssignModalTest(test)}><Users size={10}/> Staff</button>
-                                                    <button className="px-2 py-1 text-[10px] font-bold bg-emerald-50 hover:bg-emerald-100 text-emerald-600 rounded transition-colors flex items-center gap-1" onClick={() => handleCompleteTest(test.id)}><CheckCircle size={10}/> Done</button>
-                                                    <button className="px-2 py-1 text-[10px] font-bold bg-red-50 hover:bg-red-100 text-red-600 rounded transition-colors flex items-center gap-1" onClick={() => handleMarkUnable(test.id)}><XCircle size={10}/> Stop</button>
-                                                    <button className="px-2 py-1 text-[10px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-600 rounded transition-colors" onClick={() => handleUnscheduleTest(test.id)}>Unsch</button>
-                                                    <button className="px-2 py-1 text-[10px] font-bold bg-blue-50 hover:bg-blue-100 text-blue-600 rounded transition-colors flex items-center gap-1" onClick={() => setHistoryTest(test)}><History size={10}/> Hist</button>
-                                                    <button className="px-2 py-1 text-[10px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-600 rounded transition-colors flex items-center gap-1" onClick={() => openEditModal(test)}><Edit2 size={10}/> Edit</button>
-                                                  </>
-                                                )}
-                                              </div>
-                                            )}
-                                          </div>
                                         )}
                                       </Draggable>
                                     );

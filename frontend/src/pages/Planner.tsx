@@ -234,15 +234,19 @@ export default function Planner() {
     try {
       await axios.put(`/api/tests/${testId}/uncomplete`);
       toast.success("Test reverted to Scheduled.");
-    } catch (error) { toast.error("Failed to revert status."); }
+    } catch (error: any) {
+      toast.error(error.response?.data?.detail || "Failed to revert status.");
+    }
   };
 
   const handleRevertUnable = async (testId: string) => {
     try {
       await axios.put(`/api/tests/${testId}/unstop`);
       toast.success("Test unblocked!");
-    } catch (error) { toast.error("Failed to unblock test."); }
-  };;
+    } catch (error: any) {
+      toast.error(error.response?.data?.detail || "Failed to unblock test.");
+    }
+  };
 
   const handleUpdateTest = async (testId: string, updatedData: any) => {
     try {

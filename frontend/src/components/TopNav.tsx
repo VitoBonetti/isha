@@ -22,6 +22,7 @@ export default function TopNav() {
   const themeRef = useRef<HTMLDivElement>(null);
   const userRef = useRef<HTMLDivElement>(null);
   const settingsRef = useRef<HTMLDivElement>(null);
+  const notificationRef = useRef<HTMLDivElement>(null);
 
   // Rotating Logo Icons Logic
   const logoIcons = [SprayCan, Snail, SunMoon, Fingerprint, Rabbit, Cat, Shell, Turtle, Radar, HandMetal, Drum, TentTree, Wifi, WifiOff];
@@ -35,6 +36,7 @@ export default function TopNav() {
       if (themeRef.current && !themeRef.current.contains(event.target as Node)) setIsThemeOpen(false);
       if (userRef.current && !userRef.current.contains(event.target as Node)) setIsUserOpen(false);
       if (settingsRef.current && !settingsRef.current.contains(event.target as Node)) setIsSettingsOpen(false);
+      if (notificationRef.current && !notificationRef.current.contains(event.target as Node)) setShowNotifications(false);
     };
 
     document.addEventListener('mousedown', handleClickOutside);
@@ -124,7 +126,7 @@ export default function TopNav() {
         </div>
 
         {/* Notifications */}
-        <div className="relative">
+        <div className="relative" ref={notificationRef}>
           <button
             onClick={() => setShowNotifications(!showNotifications)}
             className="text-slate-500 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-100 transition-colors relative flex items-center"

@@ -187,7 +187,7 @@ export default function RawAssetsView() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 pb-12">
+    <div className="min-h-screen text-slate-900 dark:text-zinc-100 pb-12">
       <TopNav />
       <Toaster position="bottom-right" />
 

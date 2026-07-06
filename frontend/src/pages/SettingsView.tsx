@@ -154,7 +154,7 @@ export default function SettingsView() {
   ];
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-[#09090b] text-slate-900 dark:text-zinc-100 flex flex-col transition-colors duration-300">
+    <div className="min-h-screen text-slate-900 dark:text-zinc-100 flex flex-col transition-colors duration-300">
       <TopNav />
       <Toaster position="bottom-right" />
 

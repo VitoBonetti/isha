@@ -159,7 +159,7 @@ def unschedule_test(test_id: str, background_tasks: BackgroundTasks,
 
     if test_row:
         for (user_id,) in assigned_users:
-            cursor.execute("INSERT INTO notifications (id, user_id, message, type) VALUES (%s, %s, %s, %s)",
+            cursor.execute("INSERT INTO notifications (id, user_id, message, type, created_at) VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)",
                            (str(uuid.uuid4()), str(user_id), f"You were removed from {test_row[0]} because it was unscheduled.",
                             "REMOVAL"))
 
@@ -200,7 +200,7 @@ def mark_test_unable(test_id: str, background_tasks: BackgroundTasks,
     # 2. Keep the Original Test on the board, but mark it as STOPPED and add [BLOCKED]
     cursor.execute("UPDATE tests SET stages = 'STOPPED', name = %s WHERE id = %s", (f"[BLOCKED] {name}", test_id))
 
-    # 3. FIX BUG #3: Release the pentester's credits by deleting assignments!
+    # 3. Release the pentester's credits by deleting assignments!
     cursor.execute('DELETE FROM assignments WHERE test_id = %s', (test_id,))
 
     # 4. Create a fresh Clone in the Backlog (Clean Name)
@@ -215,14 +215,24 @@ def mark_test_unable(test_id: str, background_tasks: BackgroundTasks,
     for (asset_id,) in cursor.fetchall():
         cursor.execute('INSERT INTO test_assets (test_id, asset_id) VALUES (%s, %s)', (clone_id, str(asset_id)))
 
-    # 6. THE MAGIC LINK: Log history AND store the clone's ID so we can find it if we Undo!
+    # --- NEW: COPY THE ENTIRE HISTORY TO THE CLONE! ---
+    cursor.execute("SELECT user_id, action, details, timestamp FROM test_history WHERE test_id = %s", (test_id,))
+    old_history = cursor.fetchall()
+    for h_user, h_action, h_details, h_time in old_history:
+        new_h_id = str(uuid.uuid4())
+        cursor.execute('''
+            INSERT INTO test_history (id, test_id, user_id, action, details, timestamp)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        ''', (new_h_id, clone_id, str(h_user) if h_user else None, h_action, h_details, h_time))
+
+    # 6. Log the split event for both tests
+    log_test_history(cursor, clone_id, current_user['id'], "CLONED", "Test resumed in backlog from stopped original.")
     log_test_history(cursor, test_id, current_user['id'], "STOPPED",
                      f"Test stopped. Clone generated in backlog: {clone_id}")
-    cursor.connection.commit()
 
+    cursor.connection.commit()
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Test marked as Stopped."}
-
 
 @router.put("/{test_id}/unstop")
 def unstop_test(test_id: str, background_tasks: BackgroundTasks,
@@ -308,7 +318,7 @@ def create_assignment(assign: AssignmentCreate, background_tasks: BackgroundTask
     test_row = cursor.fetchone()
 
     if test_row:
-        cursor.execute("INSERT INTO notifications (id, user_id, message, type) VALUES (%s, %s, %s, %s)",
+        cursor.execute("INSERT INTO notifications (id, user_id, message, type, created_at) VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)",
                        (str(uuid.uuid4()), str(assign.user_id), f"You were assigned to {test_row[0]} for Week {assign.week_number}.",
                         "ASSIGNMENT"))
 
@@ -324,7 +334,7 @@ def remove_assignment(test_id: str, user_id: str, background_tasks: BackgroundTa
     test_row = cursor.fetchone()
 
     if test_row:
-        cursor.execute("INSERT INTO notifications (id, user_id, message, type) VALUES (%s, %s, %s, %s)",
+        cursor.execute("INSERT INTO notifications (id, user_id, message, type, created_at) VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)",
                        (str(uuid.uuid4()), str(user_id), f"You were removed from {test_row[0]}.", "REMOVAL"))
 
     cursor.execute('DELETE FROM assignments WHERE test_id = %s AND user_id = %s', (test_id, user_id))
