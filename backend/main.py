@@ -14,7 +14,8 @@ from audit_logger import log_audit_event
 app = FastAPI(
     title="Isha Core API",
     description="Backend engine for pentest planning and asset management.",
-    version="1.0.0"
+    version="1.1.0",
+    swagger_ui_parameters={"defaultModelsExpandDepth": -1}
 )
 
 # CORS configuration for local React development
@@ -93,7 +94,7 @@ async def websocket_endpoint(websocket: WebSocket):
         await manager.disconnect(websocket)
 
 
-@app.get("/api/system/ping")
+@app.get("/api/system/ping", include_in_schema=False)
 def ping_database(current_user: dict = Depends(require_admin)):
     """Measures actual round-trip latency to the PostgreSQL database."""
     start_time = time.time()
@@ -114,6 +115,6 @@ def ping_database(current_user: dict = Depends(require_admin)):
     return {"status": "online", "latency_ms": latency}
 
 
-@app.get("/api/health")
+@app.get("/api/health", include_in_schema=False)
 def health_check():
     return {"status": "online", "system": "Isha"}

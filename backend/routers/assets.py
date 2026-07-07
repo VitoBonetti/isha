@@ -6,7 +6,7 @@ import uuid
 import anyio
 from database import get_db_cursor, db_cursor_context
 from routers.auth import get_current_user, require_admin
-from schema import RawAssetCreate, AssetBase, PromoteAssetRequest, BulkAssetRequest, AssetTypeBase
+from schema import RawAssetCreate, AssetBase, PromoteAssetRequest, BulkAssetRequest, AssetTypeBase, BulkServiceUpdateRequest
 from websockets_manager import manager
 from audit_logger import log_audit_event
 
@@ -457,6 +457,39 @@ def promote_raw_assets_to_pool(req: BulkAssetRequest, background_tasks: Backgrou
     cursor.connection.commit()
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
     return {"message": f"Successfully promoted {promoted} assets to the Active Pool."}
+
+
+@router.put("/bulk-service")
+def bulk_update_service_lane(req: BulkServiceUpdateRequest, background_tasks: BackgroundTasks,
+                             current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    service_id = str(req.service_lane_id)
+
+    # Fetch new service name for logging
+    cursor.execute("SELECT name FROM services_lanes WHERE id = %s", (service_id,))
+    s_row = cursor.fetchone()
+    s_name = s_row[0] if s_row else "Unknown"
+
+    for asset_id in req.asset_ids:
+        # Get raw_asset_id linked to this pool asset
+        cursor.execute("SELECT raw_asset_id FROM assets WHERE id = %s", (str(asset_id),))
+        row = cursor.fetchone()
+        if not row: continue
+        raw_asset_id = str(row[0])
+
+        # 1. Update the Active Pool record
+        cursor.execute("UPDATE assets SET service_forecast_id = %s WHERE id = %s", (service_id, str(asset_id)))
+
+        # 2. Update the Source Raw record permanently
+        cursor.execute("UPDATE raw_assets SET service_forecast_id = %s, update_date = CURRENT_TIMESTAMP WHERE id = %s",
+                       (service_id, raw_asset_id))
+
+        # 3. Log it in the Asset's History
+        insert_asset_history(cursor, raw_asset_id, str(current_user["id"]), "UPDATED",
+                             f"Service Lane bulk updated to '{s_name}'.")
+
+    cursor.connection.commit()
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
+    return {"message": f"Successfully updated service lane for {len(req.asset_ids)} assets."}
 
 
 # --- ACTIVE ASSET POOL ---

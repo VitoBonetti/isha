@@ -5,7 +5,7 @@ import axios from "axios";
 import TopNav from "../components/TopNav";
 import ConfirmModal from "../components/Modals/ConfirmModal";
 import toast, { Toaster } from "react-hot-toast";
-import { Search, Filter, MoveRight, Server, ChevronDown, Activity } from "lucide-react";
+import { Search, Filter, MoveRight, Server, ChevronDown, Activity, Layers } from "lucide-react";
 
 interface PoolAsset {
   id: string;
@@ -21,6 +21,7 @@ interface PoolAsset {
 
 export default function AssetsView() {
   const [assets, setAssets] = useState<PoolAsset[]>([]);
+  const [services, setServices] = useState<any[]>([]); // NEW: Fetch services for the dropdown
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState<"all" | "assigned" | "unassigned">("unassigned");
@@ -34,8 +35,13 @@ export default function AssetsView() {
     isOpen: false, title: "", message: "", action: null
   });
 
+  // NEW: Bulk Service Lane Modal State
+  const [serviceModal, setServiceModal] = useState({ isOpen: false, selectedServiceId: "" });
+
   useEffect(() => {
     fetchPoolAssets();
+    // Fetch Services for the new Bulk Update Modal
+    axios.get('/api/services/').then(res => setServices(res.data)).catch(console.error);
 
     const handleClickOutside = (e: MouseEvent) => {
       if (bulkActionsRef.current && !bulkActionsRef.current.contains(e.target as Node)) {
@@ -52,7 +58,6 @@ export default function AssetsView() {
       const res = await axios.get("/api/assets/");
       setAssets(res.data);
     } catch (error) {
-      console.error("Failed to fetch pool assets:", error);
       if (axios.isAxiosError(error) && error.response?.status === 403) {
         toast.error("You don't have permission to view the asset pool");
       }
@@ -74,6 +79,46 @@ export default function AssetsView() {
     }
   };
 
+  const executeBulkAction = async () => {
+    if (selectedAssets.length === 0 || !confirmModal.action) return;
+
+    try {
+      if (confirmModal.action === 'generate') {
+        const toastId = toast.loading("Generating tests...");
+        await axios.post("/api/tests/bulk", { asset_ids: selectedAssets });
+        toast.dismiss(toastId);
+        toast.success(`Generated tests for ${selectedAssets.length} assets! Check the Planner Backlog.`);
+      }
+      setSelectedAssets([]);
+      fetchPoolAssets();
+    } catch (error) {
+      toast.error("Failed to process bulk action");
+    } finally {
+      setConfirmModal({ ...confirmModal, isOpen: false });
+    }
+  };
+
+  // NEW: Handle Bulk Service Lane Update
+  const handleBulkServiceUpdate = async () => {
+    if (!serviceModal.selectedServiceId || selectedAssets.length === 0) return;
+    const toastId = toast.loading("Updating service lanes...");
+
+    try {
+      await axios.put('/api/assets/bulk-service', {
+        asset_ids: selectedAssets,
+        service_lane_id: serviceModal.selectedServiceId
+      });
+      toast.dismiss(toastId);
+      toast.success("Service lanes updated successfully!");
+      setServiceModal({ isOpen: false, selectedServiceId: "" });
+      setSelectedAssets([]);
+      fetchPoolAssets();
+    } catch (err) {
+      toast.dismiss(toastId);
+      toast.error("Failed to update service lanes.");
+    }
+  };
+
   const handleGenerateSingleTest = async (assetId: string) => {
     const toastId = toast.loading("Generating test...");
     try {
@@ -87,36 +132,15 @@ export default function AssetsView() {
     }
   };
 
-  const executeBulkAction = async () => {
-    if (selectedAssets.length === 0 || !confirmModal.action) return;
-
-    try {
-      if (confirmModal.action === 'generate') {
-        const toastId = toast.loading("Generating tests...");
-        await axios.post("/api/tests/bulk", { asset_ids: selectedAssets });
-        toast.dismiss(toastId);
-        toast.success(`Generated tests for ${selectedAssets.length} assets! Check the Planner Backlog.`);
-      }
-      setSelectedAssets([]);
-      fetchPoolAssets(); // Refresh to show them as assigned
-    } catch (error) {
-      toast.error("Failed to process bulk action");
-    } finally {
-      setConfirmModal({ ...confirmModal, isOpen: false });
-    }
-  };
-
   const toggleAssetSelection = (assetId: string) => {
     setSelectedAssets(prev => prev.includes(assetId) ? prev.filter(id => id !== assetId) : [...prev, assetId]);
   };
 
-  // --- UPDATED FILTER LOGIC ---
   const filteredAssets = assets.filter(asset => {
     const matchesSearch = !searchTerm ||
       asset.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (asset.country && asset.country.toLowerCase().includes(searchTerm.toLowerCase()));
 
-    // If an asset allows duplicates, it is ALWAYS considered "Ready to be assigned"
     const isAvailableForTest = !asset.is_assigned || asset.duplicate_allowed;
 
     if (filterStatus === "assigned") return matchesSearch && asset.is_assigned;
@@ -124,15 +148,14 @@ export default function AssetsView() {
     return matchesSearch;
   });
 
-  // --- UPDATED STATS LOGIC ---
   const stats = {
     total: assets.length,
     assigned: assets.filter(a => a.is_assigned).length,
     unassigned: assets.filter(a => !a.is_assigned || a.duplicate_allowed).length
   };
 
-  // Only allow assets that are purely unassigned OR allow duplicates
-  const validUnassigned = filteredAssets.filter(a => (!a.is_assigned || a.duplicate_allowed) && a.service_name);
+  // UNLOCKED: Users can now select unassigned assets even if they are missing a Service Lane!
+  const validForSelection = filteredAssets.filter(a => !a.is_assigned || a.duplicate_allowed);
 
   return (
     <div className="min-h-screen text-slate-900 dark:text-zinc-100">
@@ -147,6 +170,36 @@ export default function AssetsView() {
         onConfirm={executeBulkAction}
         onCancel={() => setConfirmModal({ ...confirmModal, isOpen: false })}
       />
+
+      {/* NEW: Bulk Service Lane Modal */}
+      {serviceModal.isOpen && (
+        <div className="fixed inset-0 bg-slate-900/50 dark:bg-zinc-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-2xl p-6 w-full max-w-sm shadow-2xl animate-in zoom-in-95">
+            <h3 className="text-lg font-bold text-slate-900 dark:text-zinc-100 flex items-center gap-2">
+              <Layers size={20} className="text-purple-500" /> Set Service Lane
+            </h3>
+            <p className="text-sm text-slate-500 dark:text-zinc-400 mt-1">Assign a service lane to {selectedAssets.length} selected assets.</p>
+            <select
+              className="w-full mt-4 p-2.5 border border-slate-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 focus:ring-2 focus:ring-blue-500 outline-none"
+              value={serviceModal.selectedServiceId}
+              onChange={e => setServiceModal({...serviceModal, selectedServiceId: e.target.value})}
+            >
+              <option value="" disabled>-- Select Lane --</option>
+              {services.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+            <div className="flex justify-end gap-3 mt-6">
+              <button onClick={() => setServiceModal({isOpen: false, selectedServiceId: ""})} className="px-4 py-2 text-sm font-medium bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-300 rounded-lg transition-colors">Cancel</button>
+              <button
+                onClick={handleBulkServiceUpdate}
+                disabled={!serviceModal.selectedServiceId}
+                className="px-4 py-2 text-sm font-medium bg-purple-600 hover:bg-purple-700 disabled:bg-slate-300 dark:disabled:bg-zinc-800 text-white rounded-lg shadow-sm transition-colors"
+              >
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Header */}
       <div className="pt-32 pb-8 px-6 max-w-7xl mx-auto">
@@ -206,12 +259,31 @@ export default function AssetsView() {
                   Actions ({selectedAssets.length}) <ChevronDown size={16}/>
                 </button>
                 {showBulkActions && (
-                  <div className="absolute top-full right-0 mt-2 w-56 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-xl shadow-xl py-2 z-30 animate-in fade-in zoom-in-95">
+                  <div className="absolute top-full right-0 mt-2 w-56 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-xl shadow-xl py-2 z-30 animate-in fade-in zoom-in-95 overflow-hidden">
                     <button
-                      onClick={() => { setShowBulkActions(false); setConfirmModal({isOpen: true, action: 'generate', title: "Generate Tests", message: `Are you sure you want to generate Planner Tests for these ${selectedAssets.length} assets? This will move them to the Planner Backlog.`}); }}
-                      className="w-full flex items-center gap-2 px-4 py-2 text-sm font-bold hover:bg-slate-50 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300"
+                      onClick={() => {
+                        setShowBulkActions(false);
+                        // PROTECTION: Check if any selected asset is missing a lane!
+                        const missingLanes = selectedAssets.filter(id => !assets.find(a => a.id === id)?.service_name);
+                        if (missingLanes.length > 0) {
+                          toast.error(`${missingLanes.length} selected assets are missing a Service Lane! Please assign one first.`);
+                          return;
+                        }
+                        setConfirmModal({isOpen: true, action: 'generate', title: "Generate Tests", message: `Are you sure you want to generate Planner Tests for these ${selectedAssets.length} assets? This will move them to the Planner Backlog.`});
+                      }}
+                      className="w-full flex items-center gap-2 px-4 py-2.5 text-sm font-bold hover:bg-slate-50 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300 transition-colors"
                     >
                       <Activity size={16} className="text-blue-500" /> Generate Tests
+                    </button>
+                    <div className="h-px bg-slate-100 dark:bg-zinc-800 my-0.5"></div>
+                    <button
+                      onClick={() => {
+                        setShowBulkActions(false);
+                        setServiceModal({ isOpen: true, selectedServiceId: "" });
+                      }}
+                      className="w-full flex items-center gap-2 px-4 py-2.5 text-sm font-bold hover:bg-slate-50 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300 transition-colors"
+                    >
+                      <Layers size={16} className="text-purple-500" /> Set Service Lane
                     </button>
                   </div>
                 )}
@@ -240,11 +312,11 @@ export default function AssetsView() {
                         type="checkbox"
                         className="h-4 w-4 rounded text-blue-600 border-slate-300 disabled:opacity-50"
                         onChange={(e) => {
-                          if(e.target.checked) setSelectedAssets(validUnassigned.map(a => a.id));
+                          if(e.target.checked) setSelectedAssets(validForSelection.map(a => a.id));
                           else setSelectedAssets([]);
                         }}
-                        checked={selectedAssets.length === validUnassigned.length && validUnassigned.length > 0}
-                        disabled={validUnassigned.length === 0}
+                        checked={selectedAssets.length === validForSelection.length && validForSelection.length > 0}
+                        disabled={validForSelection.length === 0}
                       />
                     </th>
                     <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Asset Name</th>
@@ -263,8 +335,7 @@ export default function AssetsView() {
                         <td className="p-4 text-center">
                           <input
                             type="checkbox"
-                            // --- CRITICAL FIX: The checkbox is now clickable if duplicate_allowed is true! ---
-                            disabled={(asset.is_assigned && !asset.duplicate_allowed) || !asset.service_name}
+                            disabled={(asset.is_assigned && !asset.duplicate_allowed)}
                             checked={isSelected}
                             onChange={() => toggleAssetSelection(asset.id)}
                             className="h-4 w-4 text-blue-600 rounded border-slate-300 disabled:opacity-40"
@@ -326,7 +397,6 @@ export default function AssetsView() {
                         </td>
                         <td className="px-6 py-4 text-right">
                           <div className="flex items-center justify-end gap-2">
-                            {/* Inline Generate Button (Only shows if it can be tested) */}
                             {((!asset.is_assigned || asset.duplicate_allowed) && asset.service_name) && (
                               <button
                                 onClick={() => handleGenerateSingleTest(asset.id)}
@@ -340,9 +410,9 @@ export default function AssetsView() {
                             <button
                               onClick={() => handleRemoveFromPool(asset.id, asset.name)}
                               className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 text-slate-500 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors text-sm"
+                              title="Return to Raw Pool"
                             >
                               <MoveRight className="h-3.5 w-3.5" />
-                              Return
                             </button>
                           </div>
                         </td>

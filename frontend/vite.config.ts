@@ -19,6 +19,14 @@ export default defineConfig({
       '/ws': {
         target: 'ws://isha-backend:8000',
         ws: true,
+      },
+      '/docs': {
+        target: 'http://isha-backend:8000',
+        changeOrigin: true,
+      },
+      '/openapi.json': {
+        target: 'http://isha-backend:8000',
+        changeOrigin: true,
       }
     }
   },

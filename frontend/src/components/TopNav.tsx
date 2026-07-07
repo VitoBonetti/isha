@@ -2,10 +2,11 @@ import { useState, useRef, useEffect } from 'react';
 import { Link, useLocation } from "react-router-dom";
 import { useAppContext } from '../context/AppContext';
 import { useTheme } from './ThemeProvider';
+import ApiKeysModal from './Modals/ApiKeysModal';
 import {
   Sun, Moon, Laptop, LogOut, User as UserIcon, Bell,
   SprayCan, Snail, SunMoon, Fingerprint, Rabbit, Cat, Shell, Turtle, Radar, HandMetal, Drum, TentTree,
-  Wifi, WifiOff, Loader2, ChevronDown
+  Wifi, WifiOff, Loader2, ChevronDown, Key
 } from 'lucide-react';
 
 export default function TopNav() {
@@ -18,6 +19,7 @@ export default function TopNav() {
   const [isThemeOpen, setIsThemeOpen] = useState(false);
   const [isUserOpen, setIsUserOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isApiModalOpen, setIsApiModalOpen] = useState(false);
 
   const themeRef = useRef<HTMLDivElement>(null);
   const userRef = useRef<HTMLDivElement>(null);
@@ -68,6 +70,7 @@ export default function TopNav() {
   const unreadCount = notifications?.length || 0;
 
   return (
+    <>
     <nav className="fixed top-6 left-1/2 -translate-x-1/2 z-50 flex items-center justify-between w-[95%] max-w-5xl px-6 py-3 bg-white/70 dark:bg-zinc-950/60 backdrop-blur-xl border border-slate-200 dark:border-zinc-800/80 rounded-full shadow-xl dark:shadow-2xl transition-colors">
 
       {/* Logo */}
@@ -204,6 +207,10 @@ export default function TopNav() {
                   {currentUser?.role}
                 </span>
               </div>
+              <button onClick={() => { setIsUserOpen(false); setIsApiModalOpen(true); }} className="w-full flex items-center px-4 py-2 text-sm text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors">
+                <Key className="mr-2 h-4 w-4" /> Developer API
+              </button>
+              <div className="h-px bg-slate-100 dark:bg-zinc-800 my-1"></div>
               <button onClick={handleLogout} className="w-full flex items-center px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors">
                 <LogOut className="mr-2 h-4 w-4" /> Log out
               </button>
@@ -212,5 +219,10 @@ export default function TopNav() {
         </div>
       </div>
     </nav>
+    <ApiKeysModal
+        isOpen={isApiModalOpen}
+        onClose={() => setIsApiModalOpen(false)}
+    />
+  </>
   );
 }

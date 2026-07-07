@@ -73,6 +73,9 @@ class NotificationResponse(BaseModel):
     type: str
     created_at: datetime
 
+class ApiKeyCreate(BaseModel):
+    name: str
+
 # --- ASSETS ---
 class AssetBase(BaseModel):
     name: str
@@ -103,6 +106,10 @@ class BulkAssetRequest(BaseModel):
 
 class AssetTypeBase(BaseModel):
     name: str
+
+class BulkServiceUpdateRequest(BaseModel):
+    asset_ids: List[UUID4]
+    service_lane_id: UUID4
 
 # --- TESTS & ASSIGNMENTS ---
 class TestBase(BaseModel):
