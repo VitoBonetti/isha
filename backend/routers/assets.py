@@ -21,7 +21,7 @@ def get_asset_types(current_user: dict = Depends(get_current_user), cursor=Depen
     return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
 
-@router.post("/types")
+@router.post("/types/")
 def create_asset_type(at: AssetTypeBase, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     new_id = str(uuid.uuid4())
     try:
@@ -139,13 +139,13 @@ def create_manual_raw_asset(asset: RawAssetCreate, background_tasks: BackgroundT
         INSERT INTO raw_assets (
             id, name, description, business_critical, 
             confidentiality_rating, integrity_rating, availability_rating, 
-            country_id, service_forecast_id, category_id, asset_type_id, facing_internet, create_date
+            country_id, service_forecast_id, category_id, asset_type_id, facing_internet, duplicate_allowed, create_date
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP) RETURNING id
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP) RETURNING id
     """, (
         new_raw_assets_id, asset.name, asset.description, asset.business_critical,
         asset.confidentiality_rating, asset.integrity_rating, asset.availability_rating,
-        c_id, s_id, cat_id, at_id, asset.facing_internet
+        c_id, s_id, cat_id, at_id, asset.facing_internet, asset.duplicate_allowed
     ))
     new_id = cursor.fetchone()[0]
 
@@ -162,7 +162,7 @@ def get_single_raw_asset(raw_id: str, current_user: dict = Depends(get_current_u
     cursor.execute("""
         SELECT r.id, r.name, r.description, r.business_critical, r.confidentiality_rating, 
                r.integrity_rating, r.availability_rating, r.country_id, r.service_forecast_id, 
-               r.category_id, r.asset_type_id, r.facing_internet, r.create_date, r.update_date,
+               r.category_id, r.asset_type_id, r.facing_internet, r.duplicate_allowed, r.create_date, r.update_date,
                CASE WHEN a.id IS NOT NULL THEN true ELSE false END as is_promoted
         FROM raw_assets r
         LEFT JOIN assets a ON r.id = a.raw_asset_id
@@ -193,7 +193,7 @@ def update_raw_asset(raw_id: str, asset: RawAssetCreate, background_tasks: Backg
                      current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     # 1. Fetch the OLD state (including relational names via JOINs)
     cursor.execute("""
-        SELECT r.name, r.facing_internet, r.confidentiality_rating, r.integrity_rating, r.availability_rating,
+        SELECT r.name, r.facing_internet, r.duplicate_allowed, r.confidentiality_rating, r.integrity_rating, r.availability_rating,
                c.name as country_name, s.name as service_name, cat.name as category_name, at.name as type_name
         FROM raw_assets r
         LEFT JOIN countries c ON r.country_id = c.id
@@ -207,7 +207,7 @@ def update_raw_asset(raw_id: str, asset: RawAssetCreate, background_tasks: Backg
         raise HTTPException(status_code=404, detail="Asset not found")
 
     # Unpack old state and handle NULLs gracefully
-    old_name, old_internet, old_c, old_i, old_a, old_country, old_service, old_category, old_type = old_state
+    old_name, old_internet, old_duplicate_allowed, old_c, old_i, old_a, old_country, old_service, old_category, old_type = old_state
     old_country = old_country or "None"
     old_service = old_service or "None"
     old_category = old_category or "None"
@@ -243,13 +243,13 @@ def update_raw_asset(raw_id: str, asset: RawAssetCreate, background_tasks: Backg
         UPDATE raw_assets 
         SET name=%s, description=%s, business_critical=%s, 
             confidentiality_rating=%s, integrity_rating=%s, availability_rating=%s, 
-            country_id=%s, service_forecast_id=%s, category_id=%s, asset_type_id=%s, facing_internet=%s,
+            country_id=%s, service_forecast_id=%s, category_id=%s, asset_type_id=%s, facing_internet=%s, duplicate_allowed=%s,
             update_date=CURRENT_TIMESTAMP
         WHERE id=%s
     """, (
         asset.name, asset.description, asset.business_critical,
         asset.confidentiality_rating, asset.integrity_rating, asset.availability_rating,
-        c_id, s_id, cat_id, at_id, asset.facing_internet, raw_id
+        c_id, s_id, cat_id, at_id, asset.facing_internet, asset.duplicate_allowed, raw_id
     ))
 
     # 4. Supercharged Diff Engine
@@ -261,6 +261,8 @@ def update_raw_asset(raw_id: str, asset: RawAssetCreate, background_tasks: Backg
     if old_category != new_category: changes.append(f"Category: '{old_category}' ➔ '{new_category}'")
     if old_internet != asset.facing_internet: changes.append(
         f"Internet Facing: {old_internet} ➔ {asset.facing_internet}")
+    if old_duplicate_allowed != asset.duplicate_allowed: changes.append(
+        f"Allow Duplicates: {old_duplicate_allowed} ➔ {asset.duplicate_allowed}")
     if old_c != asset.confidentiality_rating: changes.append(f"C-Rating: {old_c} ➔ {asset.confidentiality_rating}")
     if old_i != asset.integrity_rating: changes.append(f"I-Rating: {old_i} ➔ {asset.integrity_rating}")
     if old_a != asset.availability_rating: changes.append(f"A-Rating: {old_a} ➔ {asset.availability_rating}")
@@ -471,6 +473,7 @@ def get_active_asset_pool(current_user: dict = Depends(get_current_user), cursor
                s.name as service_name, 
                cat.name as category_name, 
                at.name as asset_type_name, 
+               r.duplicate_allowed,
                (
                    SELECT COUNT(*) > 0 
                    FROM test_assets ta 

@@ -101,6 +101,13 @@ export default function AddRawAssetModal({ isOpen, onClose, onSuccess, countries
               <span className="text-xs text-slate-500">Asset is accessible externally without VPN.</span>
             </div>
           </label>
+          <label className="flex items-center gap-3 p-3 bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-lg cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800/50 transition-colors">
+            <input type="checkbox" className="h-4 w-4 rounded text-blue-500 border-slate-300" checked={newAsset.duplicate_allowed} onChange={e => setNewAsset({...newAsset, duplicate_allowed: e.target.checked})} />
+            <div className="flex flex-col">
+              <span className="text-sm font-bold text-slate-700 dark:text-zinc-300 flex items-center gap-2">Allow Duplicates</span>
+              <span className="text-xs text-slate-500">Permit concurrent active tests.</span>
+            </div>
+          </label>
 
           {/* Ratings (CIA Triad & Business Criticality) */}
           <div className="bg-slate-50 dark:bg-zinc-950/50 p-4 rounded-xl border border-slate-200 dark:border-zinc-800">

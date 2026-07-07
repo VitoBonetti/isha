@@ -1,4 +1,3 @@
-// frontend/src/pages/PlannerView.tsx
 import React, { useState } from 'react';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import type { DropResult, DragStart } from '@hello-pangea/dnd';
@@ -49,7 +48,7 @@ const getISOWeek = (date: Date) => {
 
 const getTintedBg = (hexColor?: string) => {
   if (!hexColor) return 'transparent';
-  if (hexColor.startsWith('#') && hexColor.length === 7) return `${hexColor}10`; // Very subtle 6% opacity wash
+  if (hexColor.startsWith('#') && hexColor.length === 7) return `${hexColor}10`;
   return hexColor;
 };
 
@@ -70,7 +69,6 @@ export default function PlannerView({
   const [historyTest, setHistoryTest] = useState<Test | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
 
-  // NEW: "My Tests" toggle state
   const [highlightMine, setHighlightMine] = useState(false);
 
   const currentRealWeek = getISOWeek(new Date());
@@ -105,8 +103,9 @@ export default function PlannerView({
               <button className="p-1.5 hover:bg-slate-200 dark:hover:bg-zinc-800 rounded-md text-slate-500 transition-colors" onClick={handlePrevQuarter}><ChevronLeft size={16} /></button>
               <div className="mx-3 flex items-center gap-1.5 bg-slate-100 dark:bg-zinc-800/80 px-2 py-1 rounded-md shadow-inner">
                 <span className="text-sm text-slate-900 dark:text-zinc-100 font-extrabold">Q{targetQuarter}</span>
+                {/* 1. FIXED HOVER COLOR ON NAVIGATOR */}
                 <select
-                  className="bg-transparent font-bold text-sm text-blue-600 dark:text-blue-400 outline-none cursor-pointer hover:text-blue-500 transition-colors appearance-none pr-2"
+                  className="bg-transparent font-bold text-sm text-slate-900 dark:text-zinc-100 outline-none cursor-pointer hover:opacity-70 transition-opacity appearance-none pr-2"
                   value={targetYear}
                   onChange={(e) => setTargetYear(parseInt(e.target.value))}
                 >
@@ -134,17 +133,13 @@ export default function PlannerView({
 
           <div className="flex items-center justify-end gap-4 w-1/3">
             <div className="flex items-center gap-3 pr-4 border-r border-slate-200 dark:border-zinc-800">
-
-              {/* Highlight My Tests Toggle */}
               <button
                 onClick={() => setHighlightMine(!highlightMine)}
                 className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors flex items-center gap-1.5 shadow-sm ${highlightMine ? 'bg-blue-600 text-white border-transparent' : 'bg-white dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 border border-slate-200 dark:border-zinc-700 hover:bg-slate-50 dark:hover:bg-zinc-700'}`}
               >
-                <User size={14} /> My Tests
+                <User size={14} /> My Schedule
               </button>
-
               <div className="w-px h-5 bg-slate-200 dark:bg-zinc-800 mx-1"></div>
-
               <div className="flex -space-x-2">
                 <div title="You" className="w-7 h-7 rounded-full bg-blue-500 text-white flex items-center justify-center text-xs font-bold border-2 border-white dark:border-zinc-900 z-10 shadow-sm overflow-hidden">
                   {currentUser?.avatar_url ? (
@@ -185,15 +180,11 @@ export default function PlannerView({
         </div>
 
         <div className="flex flex-1 overflow-hidden w-full relative">
-
-          {/* REMOVED p-6 from this container so sticky corners hit the edge perfectly */}
           <div className="flex-1 min-w-0 overflow-auto bg-slate-50 dark:bg-zinc-950/50 transition-all">
-
-            {/* CHANGED to border-separate border-spacing-0 for flawless sticky behavior */}
             <table className="w-max min-w-full border-separate border-spacing-0">
-              <thead className="bg-slate-50/80 dark:bg-zinc-900/80 backdrop-blur-md z-20">
+              <thead className="bg-slate-50/90 dark:bg-zinc-900/90 backdrop-blur-md relative z-[40]">
                 <tr>
-                  <th className="p-4 border-b-2 border-r-2 border-slate-300 dark:border-zinc-700 text-left sticky top-0 left-0 z-[30] bg-slate-50/90 dark:bg-zinc-900/90 backdrop-blur-xl shadow-[2px_0_5px_rgba(0,0,0,0.05)] min-w-[200px]">
+                  <th className="p-4 border-b-2 border-r-2 border-slate-300 dark:border-zinc-700 text-left sticky top-0 left-0 z-[50] bg-slate-50/95 dark:bg-zinc-900/95 backdrop-blur-xl shadow-[2px_0_5px_rgba(0,0,0,0.05)] min-w-[200px]">
                     <span className="font-bold text-slate-700 dark:text-zinc-300">Service Lanes</span>
                   </th>
                   {displayWeeks.map(week => {
@@ -201,17 +192,15 @@ export default function PlannerView({
                     const totalWeekCap = boardData.pentesters.reduce((sum, p) => sum + (boardData.capacities?.[p.id]?.[week] || 0), 0);
 
                     return (
-                      <th key={week} className={`p-4 border-b-2 border-r border-slate-200 dark:border-zinc-800 sticky top-0 z-[20] min-w-[240px] bg-slate-50/90 dark:bg-zinc-900/90 backdrop-blur-xl ${isCurrent ? 'border-l-2 border-r-2 border-l-blue-500 border-r-blue-500' : ''}`}>
+                      <th key={week} className={`p-4 border-b-2 border-r border-slate-200 dark:border-zinc-800 sticky top-0 z-[40] min-w-[240px] bg-slate-50/95 dark:bg-zinc-900/95 backdrop-blur-xl ${isCurrent ? 'border-l-2 border-r-2 border-l-blue-500 border-r-blue-500' : ''}`}>
                         <div className={`text-sm font-bold ${isCurrent ? 'text-blue-700 dark:text-blue-400' : 'text-slate-900 dark:text-zinc-100'}`}>Week {week} {isCurrent && '(Current)'}</div>
                         <div className="text-xs font-normal text-slate-500 dark:text-zinc-400 mt-0.5">{getWeekDateRange(targetYear, week)}</div>
 
-                        {/* NEW: Hover Tooltip for Available Users */}
                         <div className="relative group w-fit cursor-help">
                           <div className={`text-xs font-bold mt-1.5 ${totalWeekCap >= 1 ? 'text-emerald-600' : 'text-red-500'}`}>
                             Avail: {totalWeekCap.toFixed(1)} cr
                           </div>
 
-                          {/* Tooltip Popup */}
                           <div className="absolute top-full left-0 mt-2 w-48 bg-white dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-xl shadow-xl py-2 opacity-0 group-hover:opacity-100 transition-opacity z-[100] pointer-events-none">
                              <div className="px-3 pb-1 mb-1 border-b border-slate-100 dark:border-zinc-700/50 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Available Staff</div>
                              {boardData.pentesters.filter(p => (boardData.capacities[p.id]?.[week] || 0) > 0).map(p => (
@@ -234,7 +223,8 @@ export default function PlannerView({
                 {boardData.services.map(service => (
                   <tr key={service.id} style={{ backgroundColor: getTintedBg(service.theme_color) }}>
 
-                    <td className="px-4 py-3 font-bold text-slate-900 dark:text-zinc-100 border-b border-r-2 border-slate-300 dark:border-zinc-700 sticky left-0 z-[15] bg-slate-50/95 dark:bg-zinc-900/95 backdrop-blur-xl shadow-[2px_0_5px_rgba(0,0,0,0.05)]">
+                    {/* 2. FIXED Z-INDEX: Side Column is z-[30] */}
+                    <td className="px-4 py-3 font-bold text-slate-900 dark:text-zinc-100 border-b border-r-2 border-slate-300 dark:border-zinc-700 sticky left-0 z-[30] bg-slate-50/95 dark:bg-zinc-900/95 backdrop-blur-xl shadow-[2px_0_5px_rgba(0,0,0,0.05)]">
                       <div className="flex items-center gap-3">
                         <div className="w-3 h-3 rounded-full shadow-sm shrink-0" style={{ backgroundColor: service.theme_color }} />
                         <span className="truncate max-w-[160px]" title={service.name}>{service.name}</span>
@@ -252,7 +242,6 @@ export default function PlannerView({
                         <td key={cellId} className={`p-1.5 border-b border-r border-slate-200/70 dark:border-zinc-800/70 align-top min-h-[120px] transition-colors ${
                           isInvalidDropTarget ? 'bg-slate-100/50 dark:bg-zinc-950/80' :
                           isValidDropTarget ? 'bg-blue-50/30 dark:bg-blue-900/10' :
-                          /* 2. Thicker blue border for current week, and transparent backgrounds so the row color shows! */
                           isCurrent ? 'bg-black/[0.01] dark:bg-white/[0.01] border-l-[3px] border-r-[3px] border-l-blue-400/50 border-r-blue-400/50' : 'bg-transparent'
                         }`}>
                           <Droppable droppableId={cellId} isDropDisabled={!!isInvalidDropTarget}>
@@ -275,11 +264,10 @@ export default function PlannerView({
                                   const searchLower = searchQuery.toLowerCase();
                                   const testMatchesSearch = !isSearchActive || (test.name || '').toLowerCase().includes(searchLower) || weekAssignments.some(a => (a.user_name || '').toLowerCase().includes(searchLower));
 
-                                  // DIM LOGIC: Dim if "My Tests" is active and I'm not on it, OR if it fails the search query
                                   const shouldDim = (highlightMine && !isAssignedToMe) || !testMatchesSearch;
 
                                   const percentage = test.credits > 0 ? (totalProvided / test.credits) * 100 : 0;
-                                  const uiPercentage = Math.min(100, percentage); // Caps the visual bar at 100%
+                                  const uiPercentage = Math.min(100, percentage);
                                   const progressColor = percentage >= 100 ? 'bg-emerald-500' : percentage > 70 ? 'bg-blue-500' : 'bg-orange-500';
 
                                   const renderQualityAndTeam = () => (
@@ -312,7 +300,6 @@ export default function PlannerView({
                                       <Draggable key={test.id} draggableId={test.id} index={index} isDragDisabled={currentUser?.role === 'pentester' || test.status === 'Completed' || test.status === 'Stopped'}>
                                         {(provided) => (
                                             <div ref={provided.innerRef} {...provided.draggableProps} {...provided.dragHandleProps}
-                                              /* 3. Added shadow-md, hover:shadow-xl, hover:-translate-y-0.5 for 3D effect. Thicker border-2 for 'My Tests' */
                                               className={`p-3.5 bg-white dark:bg-zinc-900 rounded-xl shadow-md hover:shadow-xl hover:-translate-y-0.5 mb-2.5 transition-all duration-200 group relative overflow-hidden ${
                                                 test.status === 'Stopped' ? 'border border-red-200 bg-red-50/30 dark:border-red-900/50 dark:bg-red-950/20' :
                                                 isAssignedToMe ? 'border-2 border-blue-400 dark:border-blue-500 shadow-[0_4px_12px_rgba(59,130,246,0.2)]' :
@@ -332,7 +319,7 @@ export default function PlannerView({
                                               {renderQualityAndTeam()}
 
                                               {currentUser?.role === 'admin' && (
-                                                <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity bg-white/90 dark:bg-zinc-800/90 backdrop-blur-sm rounded-lg shadow-sm border border-slate-100 dark:border-zinc-700 flex items-center p-0.5">
+                                                <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity bg-white/90 dark:bg-zinc-800/90 backdrop-blur-sm rounded-lg shadow-sm border border-slate-100 dark:border-zinc-700 flex items-center p-0.5 z-[100]">
                                                   {test.status === 'Completed' ? (
                                                     <>
                                                       <button title="Undo Done" className="p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-zinc-300 transition-colors" onClick={() => handleRevertComplete(test.id)}><XCircle size={14}/></button>
@@ -384,9 +371,8 @@ export default function PlannerView({
             </table>
           </div>
 
-          {/* REDESIGNED BACKLOG PANEL */}
           {isBacklogOpen && currentUser?.role !== 'pentester' && (
-            <div className="w-[320px] shrink-0 bg-white/90 dark:bg-zinc-900/90 backdrop-blur-md border-l border-slate-200 dark:border-zinc-800 flex flex-col z-15 shadow-[-4px_0_15px_rgba(0,0,0,0.03)] animate-in slide-in-from-right-8">
+            <div className="w-[320px] shrink-0 bg-white/90 dark:bg-zinc-900/90 backdrop-blur-md border-l border-slate-200 dark:border-zinc-800 flex flex-col z-[50] shadow-[-4px_0_15px_rgba(0,0,0,0.03)] animate-in slide-in-from-right-8">
               <div className="p-4 bg-slate-50/50 dark:bg-zinc-950/50 border-b border-slate-200 dark:border-zinc-800 flex flex-col gap-3 shrink-0">
                 <div className="flex justify-between items-center">
                   <div className="flex items-center gap-2">

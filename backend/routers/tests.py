@@ -123,12 +123,12 @@ def process_bulk_tests_background(asset_ids: List[UUID4], user_id: str):
                 FROM assets a
                 JOIN raw_assets r ON a.raw_asset_id = r.id
                 WHERE a.id = %s 
-                   AND NOT EXISTS (
+                   AND (r.duplicate_allowed = TRUE OR NOT EXISTS (
                       SELECT 1 FROM test_assets ta 
                       JOIN tests t ON ta.test_id = t.id 
                       WHERE ta.asset_id = a.id 
                         AND t.stages::text IN ('NOT_PLANNED', 'SCHEDULED', 'IN_PROGRESS')
-                   )
+                  ))
             ''', (str(asset_id),))
 
             asset_data = cursor.fetchone()
