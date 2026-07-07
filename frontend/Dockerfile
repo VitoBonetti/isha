@@ -1,17 +1,22 @@
-# frontend/Dockerfile
-FROM node:20-alpine
-
+# Build Stage
+FROM node:20-alpine AS build
 WORKDIR /app
-
-# Copy package files and install dependencies
 COPY package*.json ./
 RUN npm install
-
-# Copy the rest of the application
 COPY . .
 
-# Expose the Vite default port
-EXPOSE 5173
+# 1. Catch the argument passed from docker-compose.prod.yml
+ARG VITE_GITHUB_CLIENT_ID
 
-# Start Vite, binding to all network interfaces so it's accessible outside the container
-CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
+# 2. Set it as an environment variable so Vite can use it during the build
+ENV VITE_GITHUB_CLIENT_ID=$VITE_GITHUB_CLIENT_ID
+
+# 3. Build the app (Vite will now bake the ID into the frontend code)
+RUN npm run build
+
+# Production Serving Stage
+FROM nginx:alpine
+COPY --from=build /app/dist /usr/share/nginx/html
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+EXPOSE 80
+CMD ["nginx", "-g", "daemon off;"]
