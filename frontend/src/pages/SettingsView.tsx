@@ -1,9 +1,22 @@
+// frontend/src/pages/SettingsView.tsx
 import { useState } from 'react';
 import { useSettings } from '../hooks/useSettings';
 import TopNav from '../components/TopNav';
 import ConfirmModal from '../components/Modals/ConfirmModal';
 import { Toaster } from 'react-hot-toast';
 import { Users, MapPin, Activity, Tags, Globe, Flag, Server, Trash2, Download, AlertTriangle, Plus, Database, Terminal, Edit2, LayoutTemplate } from 'lucide-react';
+
+// Sleek Custom Toggle Component
+const Toggle = ({ checked, onChange, label, disabled = false }: { checked: boolean, onChange: (c: boolean) => void, label: string, disabled?: boolean }) => (
+  <label className={`flex items-center gap-3 select-none ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}>
+    <div className="relative flex items-center">
+      <input type="checkbox" className="sr-only" checked={checked} disabled={disabled} onChange={e => onChange(e.target.checked)} />
+      <div className={`block w-10 h-6 rounded-full transition-colors duration-300 ${checked ? 'bg-blue-500' : 'bg-slate-300 dark:bg-zinc-700'}`}></div>
+      <div className={`absolute left-1 bg-white w-4 h-4 rounded-full transition-transform duration-300 shadow-sm ${checked ? 'transform translate-x-4' : ''}`}></div>
+    </div>
+    <span className="text-sm font-bold text-slate-700 dark:text-zinc-300">{label}</span>
+  </label>
+);
 
 export default function SettingsView() {
   const {
@@ -13,10 +26,22 @@ export default function SettingsView() {
   } = useSettings();
 
   const [showForm, setShowForm] = useState<string | null>(null);
-
-  // Global Delete Confirmation State
   const [deleteModal, setDeleteModal] = useState<{ isOpen: boolean; endpoint: string; id: string; name: string } | null>(null);
 
+  // Pagination & Sub-Tab States
+  const ITEMS_PER_PAGE = 15;
+  const [userTab, setUserTab] = useState<'active' | 'offboarded'>('active');
+  const [userPage, setUserPage] = useState(1);
+
+  const [regionTab, setRegionTab] = useState<'active' | 'disabled'>('active');
+  const [regionPage, setRegionPage] = useState(1);
+
+  const [countryTab, setCountryTab] = useState<'active' | 'disabled'>('active');
+  const [countryPage, setCountryPage] = useState(1);
+
+  const [assetTypePage, setAssetTypePage] = useState(1);
+
+  // Forms
   const defaultUserForm = { email: '', name: '', role: 'read_only', base_capacity: 1.0, location_id: '', start_week: 1, start_year: new Date().getFullYear(), end_week: '', end_year: '' };
   const [userForm, setUserForm] = useState(defaultUserForm);
   const [editUserId, setEditUserId] = useState<string | null>(null);
@@ -39,122 +64,34 @@ export default function SettingsView() {
 
   const defaultCountryForm = { code: '', name: '', region_id: '', is_active: true };
   const [countryForm, setCountryForm] = useState(defaultCountryForm);
-  const [editCountryId, setEditCountryId] = useState<string | null>(null);;
+  const [editCountryId, setEditCountryId] = useState<string | null>(null);
 
   const [nukeModalOpen, setNukeModalOpen] = useState(false);
   const [nukeText, setNukeText] = useState("");
 
-  const [assetTypePage, setAssetTypePage] = useState(1);
-  const ASSET_TYPES_PER_PAGE = 15;
-
-  const confirmDelete = (endpoint: string, id: string, name: string) => {
-    setDeleteModal({ isOpen: true, endpoint, id, name });
-  };
-
-  const executeDelete = async () => {
-    if (!deleteModal) return;
-    await handleDelete(deleteModal.endpoint, deleteModal.id);
-    setDeleteModal(null);
-  };
+  const confirmDelete = (endpoint: string, id: string, name: string) => setDeleteModal({ isOpen: true, endpoint, id, name });
+  const executeDelete = async () => { if (deleteModal) { await handleDelete(deleteModal.endpoint, deleteModal.id); setDeleteModal(null); }};
 
   const submitUser = async (e: React.FormEvent) => {
     e.preventDefault();
     const payload = { ...userForm, location_id: userForm.location_id === '' ? null : userForm.location_id, end_week: userForm.end_week === '' ? null : parseInt(userForm.end_week as string), end_year: userForm.end_year === '' ? null : parseInt(userForm.end_year as string) };
     if (await handleSave('/api/users/', payload, !!editUserId, editUserId)) { setShowForm(null); setEditUserId(null); setUserForm(defaultUserForm); }
   };
-
-  const submitLocation = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (await handleSave('/api/locations/', locForm, !!editLocId, editLocId)) { setShowForm(null); setEditLocId(null); setLocForm(defaultLocForm); }
-  };
-
-  const submitService = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const payload = {
-      ...serviceForm,
-      match_keywords: typeof serviceForm.match_keywords === 'string' ? serviceForm.match_keywords.split(',').map(s => s.trim()) : serviceForm.match_keywords
-    };
-    if (await handleSave('/api/services/', payload, !!editServiceId, editServiceId)) { setShowForm(null); setEditServiceId(null); setServiceForm(defaultServiceForm); }
-  };
-
-  const submitCategory = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const payload = { ...catForm, service_lane_id: catForm.service_lane_id === '' ? null : catForm.service_lane_id };
-    if (await handleSave('/api/board/categories/', payload, !!editCatId, editCatId)) { setShowForm(null); setEditCatId(null); setCatForm(defaultCatForm); }
-  };
-
-  const submitRegion = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (await handleSave('/api/regions/', regionForm, !!editRegionId, editRegionId)) { setShowForm(null); setEditRegionId(null); setRegionForm(defaultRegionForm); }
-  };
-
-  const submitCountry = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const payload = { ...countryForm, region_id: countryForm.region_id === '' ? null : countryForm.region_id };
-    if (await handleSave('/api/countries/', payload, !!editCountryId, editCountryId)) { setShowForm(null); setEditCountryId(null); setCountryForm(defaultCountryForm); }
-  };
+  const submitLocation = async (e: React.FormEvent) => { e.preventDefault(); if (await handleSave('/api/locations/', locForm, !!editLocId, editLocId)) { setShowForm(null); setEditLocId(null); setLocForm(defaultLocForm); }};
+  const submitService = async (e: React.FormEvent) => { e.preventDefault(); const payload = { ...serviceForm, match_keywords: typeof serviceForm.match_keywords === 'string' ? serviceForm.match_keywords.split(',').map(s => s.trim()) : serviceForm.match_keywords }; if (await handleSave('/api/services/', payload, !!editServiceId, editServiceId)) { setShowForm(null); setEditServiceId(null); setServiceForm(defaultServiceForm); }};
+  const submitCategory = async (e: React.FormEvent) => { e.preventDefault(); const payload = { ...catForm, service_lane_id: catForm.service_lane_id === '' ? null : catForm.service_lane_id }; if (await handleSave('/api/board/categories/', payload, !!editCatId, editCatId)) { setShowForm(null); setEditCatId(null); setCatForm(defaultCatForm); }};
+  const submitRegion = async (e: React.FormEvent) => { e.preventDefault(); if (await handleSave('/api/regions/', regionForm, !!editRegionId, editRegionId)) { setShowForm(null); setEditRegionId(null); setRegionForm(defaultRegionForm); }};
+  const submitCountry = async (e: React.FormEvent) => { e.preventDefault(); const payload = { ...countryForm, region_id: countryForm.region_id === '' ? null : countryForm.region_id }; if (await handleSave('/api/countries/', payload, !!editCountryId, editCountryId)) { setShowForm(null); setEditCountryId(null); setCountryForm(defaultCountryForm); }};
 
   if (isLoading) return <div className="min-h-screen bg-slate-50 dark:bg-[#09090b] flex items-center justify-center text-slate-500 dark:text-zinc-500">Loading settings...</div>;
 
   const inputClasses = "w-full mt-1 p-2.5 border border-slate-200 dark:border-zinc-800 rounded-lg bg-white dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 focus:ring-2 focus:ring-blue-500 outline-none";
+  const PREDEFINED_COLORS = ['#ef4444', '#f97316', '#f59e0b', '#84cc16', '#10b981', '#14b8a6', '#06b6d4', '#3b82f6', '#6366f1', '#8b5cf6', '#a855f7', '#ec4899', '#f43f5e', '#64748b', '#000000', '#ffffff', '#cccccc', '#eeeeee'];
 
-  const renderSimpleList = (title: string, desc: string, data: any[], endpoint: string, formType: string, onEdit?: (item: any) => void) => (
-    <div className="fade-in">
-      <div className="flex justify-between items-center mb-6">
-        <div>
-          <h2 className="text-xl font-bold text-slate-900 dark:text-zinc-100">{title}</h2>
-          <p className="text-sm text-slate-500 dark:text-zinc-400">{desc}</p>
-        </div>
-        <button onClick={() => { setShowForm(formType); onEdit && onEdit(null); }} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors">
-          <Plus size={16} /> Add {title.split(' ')[0]}
-        </button>
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {data?.map((item: any) => (
-          <div key={item.id} className="border border-slate-200 dark:border-zinc-800 p-5 rounded-2xl flex justify-between items-start hover:border-blue-500 dark:hover:border-blue-500 transition-colors bg-white dark:bg-zinc-900 shadow-sm hover:shadow-md">
-            <div>
-              <div className="font-bold text-lg text-slate-900 dark:text-zinc-100 flex items-center gap-2">
-                {item.theme_color && <div className="w-4 h-4 rounded-full shadow-sm" style={{backgroundColor: item.theme_color}}></div>}
-                {item.name || item.code || item.regions}
-              </div>
-
-              <div className="mt-2 space-y-1">
-                {item.region_name && <div className="text-sm text-slate-500 dark:text-zinc-400 font-medium">Region: <span className="text-slate-900 dark:text-zinc-200">{item.region_name}</span></div>}
-                {item.target_goal !== undefined && <div className="text-sm text-slate-500 dark:text-zinc-400 font-medium">Target Goal: <span className="text-slate-900 dark:text-zinc-200">{item.target_goal}</span></div>}
-                {item.default_credits !== undefined && <div className="text-sm text-slate-500 dark:text-zinc-400 font-medium">Credits: <span className="text-slate-900 dark:text-zinc-200">{item.default_credits}cr</span> / Duration: <span className="text-slate-900 dark:text-zinc-200">{item.default_duration_weeks}w</span></div>}
-              </div>
-
-              <div className="mt-4 px-2.5 py-1 rounded-full bg-emerald-100 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/20 text-emerald-800 dark:text-emerald-400 text-[10px] font-extrabold uppercase tracking-wider w-fit shadow-sm">
-                {item.is_active !== false ? 'Active' : 'Inactive'}
-              </div>
-            </div>
-            <div className="flex flex-col gap-1">
-              {onEdit && (
-                <button onClick={() => onEdit(item)} className="text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-500/10 p-2 rounded-lg transition-colors">
-                  <Edit2 size={18} />
-                </button>
-              )}
-              <button onClick={() => confirmDelete(endpoint, item.id, item.name || item.code)} className="text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 p-2 rounded-lg transition-colors">
-                <Trash2 size={18} />
-              </button>
-            </div>
-          </div>
-        ))}
-        {(!data || data.length === 0) && (
-          <div className="col-span-full p-12 text-center text-slate-500 dark:text-zinc-500 border-2 border-dashed border-slate-200 dark:border-zinc-800 rounded-2xl bg-slate-50/50 dark:bg-zinc-900/50">
-            No records found. Click the button above to add one.
-          </div>
-        )}
-      </div>
-    </div>
-  );
-
-  const PREDEFINED_COLORS = [
-    '#ef4444', '#f97316', '#f59e0b', '#84cc16', '#10b981', '#14b8a6',
-    '#06b6d4', '#3b82f6', '#6366f1', '#8b5cf6', '#a855f7', '#ec4899',
-    '#f43f5e', '#64748b', '#000000', '#ffffff', '#cccccc', '#eeeeee'
-  ];
+  // FILTERED LISTS
+  const displayUsers = users?.filter(u => userTab === 'active' ? !u.end_year : !!u.end_year) || [];
+  const displayRegions = regions?.filter(r => regionTab === 'active' ? r.is_active : !r.is_active) || [];
+  const displayCountries = countries?.filter(c => countryTab === 'active' ? c.is_active : !c.is_active) || [];
 
   return (
     <div className="min-h-screen text-slate-900 dark:text-zinc-100 flex flex-col transition-colors duration-300">
@@ -169,13 +106,12 @@ export default function SettingsView() {
         onCancel={() => setDeleteModal(null)}
       />
 
+      {/* Nuke Modal */}
       {nukeModalOpen && (
         <div className="fixed inset-0 bg-slate-900/50 dark:bg-zinc-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in">
           <div className="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-2xl p-6 w-full max-w-md shadow-2xl animate-in zoom-in-95">
             <div className="flex items-start gap-4">
-              <div className="bg-red-100 dark:bg-red-500/10 text-red-600 dark:text-red-400 p-3 rounded-full shrink-0 border border-red-200 dark:border-red-500/20">
-                <AlertTriangle size={24} />
-              </div>
+              <div className="bg-red-100 dark:bg-red-500/10 text-red-600 dark:text-red-400 p-3 rounded-full shrink-0 border border-red-200 dark:border-red-500/20"><AlertTriangle size={24} /></div>
               <div>
                 <h3 className="text-lg font-bold text-slate-900 dark:text-zinc-100">Factory Reset</h3>
                 <p className="text-sm text-slate-500 dark:text-zinc-400 mt-1">This will permanently delete all tests, assets, events, and assignments. Configurations and users will be kept.</p>
@@ -183,30 +119,17 @@ export default function SettingsView() {
             </div>
             <div className="mt-6">
               <label className="block text-sm font-bold text-slate-700 dark:text-zinc-300 mb-2">Type "NUKE" to confirm:</label>
-              <input
-                type="text"
-                className={inputClasses}
-                value={nukeText}
-                onChange={(e) => setNukeText(e.target.value)}
-                placeholder="NUKE"
-              />
+              <input type="text" className={inputClasses} value={nukeText} onChange={(e) => setNukeText(e.target.value)} placeholder="NUKE" />
             </div>
             <div className="flex justify-end gap-3 mt-6">
               <button onClick={() => {setNukeModalOpen(false); setNukeText("");}} className="px-4 py-2 text-sm font-medium bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-300 rounded-lg transition-colors">Cancel</button>
-              <button
-                onClick={() => { if(nukeText === 'NUKE') { handleWipeSystem(); setNukeModalOpen(false); setNukeText(""); } }}
-                disabled={nukeText !== 'NUKE'}
-                className="px-4 py-2 text-sm font-medium bg-red-600 hover:bg-red-700 disabled:bg-slate-300 dark:disabled:bg-zinc-800 text-white rounded-lg shadow-sm transition-colors"
-              >
-                Execute Reset
-              </button>
+              <button onClick={() => { if(nukeText === 'NUKE') { handleWipeSystem(); setNukeModalOpen(false); setNukeText(""); } }} disabled={nukeText !== 'NUKE'} className="px-4 py-2 text-sm font-medium bg-red-600 hover:bg-red-700 disabled:bg-slate-300 dark:disabled:bg-zinc-800 text-white rounded-lg shadow-sm transition-colors">Execute Reset</button>
             </div>
           </div>
         </div>
       )}
 
       <main className="flex-1 pt-32 pb-12 px-6 max-w-7xl mx-auto w-full flex flex-col md:flex-row gap-8">
-        {/* Sidebar */}
         <aside className="w-full md:w-64 shrink-0">
           <div className="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-2xl p-3 shadow-sm sticky top-32">
             <h3 className="text-xs font-bold uppercase text-slate-400 dark:text-zinc-500 mb-3 px-3">Platform Settings</h3>
@@ -223,12 +146,11 @@ export default function SettingsView() {
           </div>
         </aside>
 
-        {/* Content */}
-        <section className="flex-1 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-2xl p-8 shadow-sm min-h-[600px]">
+        <section className="flex-1 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-2xl p-8 shadow-sm min-h-[600px] flex flex-col">
 
           {/* USERS */}
           {activeTab === 'users' && (
-            <div className="fade-in">
+            <div className="fade-in flex-1 flex flex-col">
               <div className="flex justify-between items-center mb-6">
                 <div>
                   <h2 className="text-xl font-bold text-slate-900 dark:text-zinc-100">User Management</h2>
@@ -245,7 +167,6 @@ export default function SettingsView() {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                     <label className="text-sm font-bold text-slate-700 dark:text-zinc-300">Name <input className={inputClasses} value={userForm.name} onChange={e => setUserForm({...userForm, name: e.target.value})} required /></label>
                     <label className="text-sm font-bold text-slate-700 dark:text-zinc-300">Email <input type="email" disabled={!!editUserId} className={`${inputClasses} disabled:opacity-50`} value={userForm.email} onChange={e => setUserForm({...userForm, email: e.target.value})} required /></label>
-
                     <label className="text-sm font-bold text-slate-700 dark:text-zinc-300">Role
                       <select className={inputClasses} value={userForm.role} onChange={e => setUserForm({...userForm, role: e.target.value})}>
                         <option value="read_only">Read Only</option>
@@ -253,24 +174,20 @@ export default function SettingsView() {
                         <option value="admin">Admin</option>
                       </select>
                     </label>
-
                     <label className="text-sm font-bold text-slate-700 dark:text-zinc-300">Location
                       <select className={inputClasses} value={userForm.location_id} onChange={e => setUserForm({...userForm, location_id: e.target.value})} required>
                         <option value="">-- Select Location --</option>
                         {locations?.map(loc => <option key={loc.id} value={loc.id}>{loc.name}</option>)}
                       </select>
                     </label>
-
                     <label className="text-sm font-bold text-slate-700 dark:text-zinc-300">Capacity <input type="number" step="0.1" className={inputClasses} value={userForm.base_capacity} onChange={e => setUserForm({...userForm, base_capacity: parseFloat(e.target.value)})} required /></label>
-
                     <div className="flex gap-4">
                       <label className="text-sm font-bold text-slate-700 dark:text-zinc-300 w-1/2">Start Year <input type="number" className={inputClasses} value={userForm.start_year} onChange={e => setUserForm({...userForm, start_year: parseInt(e.target.value)})} required /></label>
                       <label className="text-sm font-bold text-slate-700 dark:text-zinc-300 w-1/2">Start Wk <input type="number" className={inputClasses} value={userForm.start_week} onChange={e => setUserForm({...userForm, start_week: parseInt(e.target.value)})} required /></label>
                     </div>
-
-                    <div className="flex gap-4 col-span-1 md:col-span-2 bg-red-50/50 dark:bg-red-500/10 p-4 rounded-xl border border-red-100 dark:border-red-500/20">
-                      <label className="text-sm font-bold w-1/2 text-red-800 dark:text-red-400">Offboard Year (Optional) <input type="number" className="w-full mt-1 p-2.5 border border-red-200 dark:border-red-500/30 rounded-lg bg-white dark:bg-zinc-950 focus:ring-2 focus:ring-red-500 outline-none" value={userForm.end_year} onChange={e => setUserForm({...userForm, end_year: e.target.value})} placeholder="Leave blank if active"/></label>
-                      <label className="text-sm font-bold w-1/2 text-red-800 dark:text-red-400">Offboard Wk (Optional) <input type="number" className="w-full mt-1 p-2.5 border border-red-200 dark:border-red-500/30 rounded-lg bg-white dark:bg-zinc-950 focus:ring-2 focus:ring-red-500 outline-none" value={userForm.end_week} onChange={e => setUserForm({...userForm, end_week: e.target.value})} placeholder="Leave blank if active"/></label>
+                    <div className="flex gap-4 col-span-1 md:col-span-2 bg-slate-100/50 dark:bg-zinc-800/20 p-4 rounded-xl border border-slate-200 dark:border-zinc-700/50">
+                      <label className="text-sm font-bold w-1/2 text-slate-700 dark:text-zinc-300">Offboard Year (Optional) <input type="number" className="w-full mt-1 p-2.5 border border-slate-300 dark:border-zinc-600 rounded-lg bg-white dark:bg-zinc-950 focus:ring-2 focus:ring-blue-500 outline-none" value={userForm.end_year} onChange={e => setUserForm({...userForm, end_year: e.target.value})} placeholder="Leave blank if active"/></label>
+                      <label className="text-sm font-bold w-1/2 text-slate-700 dark:text-zinc-300">Offboard Wk (Optional) <input type="number" className="w-full mt-1 p-2.5 border border-slate-300 dark:border-zinc-600 rounded-lg bg-white dark:bg-zinc-950 focus:ring-2 focus:ring-blue-500 outline-none" value={userForm.end_week} onChange={e => setUserForm({...userForm, end_week: e.target.value})} placeholder="Leave blank if active"/></label>
                     </div>
                   </div>
                   <div className="flex justify-end gap-3 pt-4 border-t border-slate-200 dark:border-zinc-800">
@@ -280,7 +197,13 @@ export default function SettingsView() {
                 </form>
               )}
 
-              <div className="border border-slate-200 dark:border-zinc-800 rounded-2xl overflow-hidden shadow-sm">
+              {/* Sub-Tabs */}
+              <div className="flex gap-6 mb-4 border-b border-slate-200 dark:border-zinc-800">
+                <button onClick={() => {setUserTab('active'); setUserPage(1);}} className={`pb-2 font-bold text-sm border-b-2 transition-colors ${userTab === 'active' ? 'border-blue-500 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Active Users</button>
+                <button onClick={() => {setUserTab('offboarded'); setUserPage(1);}} className={`pb-2 font-bold text-sm border-b-2 transition-colors ${userTab === 'offboarded' ? 'border-blue-500 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Offboarded Users</button>
+              </div>
+
+              <div className="border border-slate-200 dark:border-zinc-800 rounded-2xl overflow-hidden shadow-sm flex flex-col flex-1">
                 <table className="w-full text-left text-sm">
                   <thead className="bg-slate-50 dark:bg-zinc-900/50 border-b border-slate-200 dark:border-zinc-800">
                     <tr>
@@ -291,12 +214,12 @@ export default function SettingsView() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-zinc-800">
-                    {users?.map(u => (
+                    {displayUsers.slice((userPage - 1) * ITEMS_PER_PAGE, userPage * ITEMS_PER_PAGE).map(u => (
                       <tr key={u.id} className="hover:bg-slate-50 dark:hover:bg-zinc-800/50 transition-colors">
                         <td className="p-4">
                           <div className="flex items-center gap-3">
                             {u.avatar_url ? (
-                              <img src={u.avatar_url} alt={u.name} className="w-9 h-9 rounded-full border border-slate-200 dark:border-zinc-700" />
+                              <img src={u.avatar_url} alt={u.name} className="w-9 h-9 rounded-full border border-slate-200 dark:border-zinc-700 object-cover" />
                             ) : (
                               <div className="w-9 h-9 rounded-full bg-slate-200 dark:bg-zinc-800 text-slate-500 dark:text-zinc-400 flex items-center justify-center font-bold">
                                 {u.name.charAt(0)}
@@ -312,7 +235,6 @@ export default function SettingsView() {
                           <span className="px-2.5 py-1 rounded-full bg-slate-100 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 text-[11px] font-extrabold uppercase tracking-wider text-slate-700 dark:text-zinc-300">
                             {u.role.replace('_', ' ')}
                           </span>
-                          {/* Visually indicate if a user was soft-deleted/offboarded */}
                           {u.end_year && (
                              <span className="px-2.5 py-1 rounded-full bg-red-100 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 text-[10px] font-extrabold uppercase tracking-wider text-red-700 dark:text-red-400">
                                Offboarded (W{u.end_week}/{u.end_year})
@@ -342,73 +264,25 @@ export default function SettingsView() {
                     ))}
                   </tbody>
                 </table>
-                {(!users || users.length === 0) && <div className="p-12 text-center text-slate-500 dark:text-zinc-500 bg-slate-50/50 dark:bg-zinc-900/50">No users found.</div>}
-              </div>
-            </div>
-          )}
+                {displayUsers.length === 0 && <div className="p-12 text-center text-slate-500 dark:text-zinc-500 bg-slate-50/50 dark:bg-zinc-900/50">No users found.</div>}
 
-          {/* LOCATIONS (Now a Table!) */}
-          {activeTab === 'locations' && (
-            <div className="fade-in">
-              <div className="flex justify-between items-center mb-6">
-                <div>
-                  <h2 className="text-xl font-bold text-slate-900 dark:text-zinc-100">Locations</h2>
-                  <p className="text-sm text-slate-500 dark:text-zinc-400">Geographic bases for calculating national holidays.</p>
-                </div>
-                <button onClick={() => { setEditLocId(null); setLocForm(defaultLocForm); setShowForm('locations'); }} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2">
-                  <Plus size={16} /> Add Location
-                </button>
-              </div>
-
-              {showForm === 'locations' && (
-                <form onSubmit={submitLocation} className="bg-slate-50 dark:bg-zinc-950/50 p-6 rounded-2xl border border-slate-200 dark:border-zinc-800 mb-8 shadow-inner">
-                  <h3 className="font-bold text-lg text-slate-900 dark:text-zinc-100 mb-4">{editLocId ? 'Edit Location' : 'Add Location'}</h3>
-                  <label className="text-sm font-bold text-slate-700 dark:text-zinc-300 block mb-6">Location Name <input className={inputClasses} value={locForm.name} onChange={e => setLocForm({...locForm, name: e.target.value})} required placeholder="e.g. London" /></label>
-                  <div className="flex justify-end gap-3 border-t border-slate-200 dark:border-zinc-800 pt-4">
-                    <button type="button" onClick={() => {setShowForm(null); setEditLocId(null);}} className="px-5 py-2.5 text-sm font-medium bg-slate-200 hover:bg-slate-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-300 rounded-lg transition-colors">Cancel</button>
-                    <button type="submit" className="px-5 py-2.5 text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-sm transition-colors">{editLocId ? 'Update Location' : 'Save Location'}</button>
+                {/* Pagination Footer */}
+                {displayUsers.length > 0 && (
+                  <div className="px-6 py-4 border-t border-slate-200 dark:border-zinc-700 flex justify-between items-center bg-slate-50 dark:bg-zinc-950/50 mt-auto">
+                    <span className="text-sm text-slate-500">Page {userPage} of {Math.ceil(displayUsers.length / ITEMS_PER_PAGE) || 1}</span>
+                    <div className="flex gap-2">
+                      <button onClick={() => setUserPage(p => Math.max(1, p - 1))} disabled={userPage === 1} className="px-4 py-1.5 border border-slate-300 dark:border-zinc-700 rounded-lg hover:bg-slate-100 dark:hover:bg-zinc-800 disabled:opacity-50 text-sm font-medium transition-colors">Prev</button>
+                      <button onClick={() => setUserPage(p => p + 1)} disabled={userPage >= Math.ceil(displayUsers.length / ITEMS_PER_PAGE)} className="px-4 py-1.5 border border-slate-300 dark:border-zinc-700 rounded-lg hover:bg-slate-100 dark:hover:bg-zinc-800 disabled:opacity-50 text-sm font-medium transition-colors">Next</button>
+                    </div>
                   </div>
-                </form>
-              )}
-
-              <div className="border border-slate-200 dark:border-zinc-800 rounded-2xl overflow-hidden shadow-sm">
-                <table className="w-full text-left text-sm">
-                  <thead className="bg-slate-50 dark:bg-zinc-900/50 border-b border-slate-200 dark:border-zinc-800">
-                    <tr>
-                      <th className="p-4 font-bold text-slate-600 dark:text-zinc-400">Location Name</th>
-                      <th className="p-4 font-bold text-slate-600 dark:text-zinc-400 text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 dark:divide-zinc-800">
-                    {locations?.map(loc => (
-                      <tr key={loc.id} className="hover:bg-slate-50 dark:hover:bg-zinc-800/50 transition-colors">
-                        <td className="p-4 font-bold text-base text-slate-900 dark:text-zinc-100">{loc.name}</td>
-                        <td className="p-4 text-right">
-                          <div className="flex justify-end gap-2">
-                            <button onClick={() => {
-                              setEditLocId(loc.id);
-                              setLocForm({ name: loc.name, is_active: loc.is_active });
-                              setShowForm('locations');
-                            }} className="text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-500/10 p-2 rounded-lg transition-colors">
-                              <Edit2 size={18} />
-                            </button>
-                            <button onClick={() => confirmDelete('/api/locations/', loc.id, loc.name)} className="text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 p-2 rounded-lg transition-colors">
-                              <Trash2 size={18} />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                {(!locations || locations.length === 0) && <div className="p-12 text-center text-slate-500 dark:text-zinc-500 bg-slate-50/50 dark:bg-zinc-900/50">No locations found.</div>}
+                )}
               </div>
             </div>
           )}
 
           {/* ASSET TYPES */}
           {activeTab === 'asset_types' && (
-            <div className="fade-in">
+            <div className="fade-in flex-1 flex flex-col">
               <div className="flex justify-between items-center mb-6">
                 <div>
                   <h2 className="text-xl font-bold text-slate-900 dark:text-zinc-100">Asset Types</h2>
@@ -430,7 +304,7 @@ export default function SettingsView() {
                 </form>
               )}
 
-              <div className="border border-slate-200 dark:border-zinc-800 rounded-2xl overflow-hidden shadow-sm">
+              <div className="border border-slate-200 dark:border-zinc-800 rounded-2xl overflow-hidden shadow-sm flex flex-col flex-1">
                 <table className="w-full text-left text-sm">
                   <thead className="bg-slate-50 dark:bg-zinc-900/50 border-b border-slate-200 dark:border-zinc-800">
                     <tr>
@@ -439,10 +313,7 @@ export default function SettingsView() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-zinc-800">
-                    {/* Pagination Math applied here! */}
-                    {(assetTypes || [])
-                      .slice((assetTypePage - 1) * ASSET_TYPES_PER_PAGE, assetTypePage * ASSET_TYPES_PER_PAGE)
-                      .map((at: any) => (
+                    {(assetTypes || []).slice((assetTypePage - 1) * ITEMS_PER_PAGE, assetTypePage * ITEMS_PER_PAGE).map((at: any) => (
                       <tr key={at.id} className="hover:bg-slate-50 dark:hover:bg-zinc-800/50 transition-colors">
                         <td className="p-4 font-bold text-base text-slate-900 dark:text-zinc-100">{at.name}</td>
                         <td className="p-4 text-right">
@@ -456,24 +327,13 @@ export default function SettingsView() {
                   </tbody>
                 </table>
                 {(!assetTypes || assetTypes.length === 0) && <div className="p-12 text-center text-slate-500 dark:text-zinc-500 bg-slate-50/50 dark:bg-zinc-900/50">No asset types found.</div>}
+
                 {assetTypes && assetTypes.length > 0 && (
-                  <div className="px-6 py-4 border-t border-slate-200 dark:border-zinc-700 flex justify-between items-center bg-slate-50 dark:bg-zinc-950/50">
-                    <span className="text-sm text-slate-500">Page {assetTypePage} of {Math.ceil((assetTypes?.length || 0) / ASSET_TYPES_PER_PAGE) || 1}</span>
+                  <div className="px-6 py-4 border-t border-slate-200 dark:border-zinc-700 flex justify-between items-center bg-slate-50 dark:bg-zinc-950/50 mt-auto">
+                    <span className="text-sm text-slate-500">Page {assetTypePage} of {Math.ceil((assetTypes.length) / ITEMS_PER_PAGE) || 1}</span>
                     <div className="flex gap-2">
-                      <button
-                        onClick={() => setAssetTypePage(p => Math.max(1, p - 1))}
-                        disabled={assetTypePage === 1}
-                        className="px-4 py-1.5 border border-slate-300 dark:border-zinc-700 rounded-lg hover:bg-slate-100 dark:hover:bg-zinc-800 disabled:opacity-50 text-sm font-medium transition-colors"
-                      >
-                        Prev
-                      </button>
-                      <button
-                        onClick={() => setAssetTypePage(p => p + 1)}
-                        disabled={assetTypePage >= Math.ceil((assetTypes?.length || 0) / ASSET_TYPES_PER_PAGE)}
-                        className="px-4 py-1.5 border border-slate-300 dark:border-zinc-700 rounded-lg hover:bg-slate-100 dark:hover:bg-zinc-800 disabled:opacity-50 text-sm font-medium transition-colors"
-                      >
-                        Next
-                      </button>
+                      <button onClick={() => setAssetTypePage(p => Math.max(1, p - 1))} disabled={assetTypePage === 1} className="px-4 py-1.5 border border-slate-300 dark:border-zinc-700 rounded-lg hover:bg-slate-100 dark:hover:bg-zinc-800 disabled:opacity-50 text-sm font-medium transition-colors">Prev</button>
+                      <button onClick={() => setAssetTypePage(p => p + 1)} disabled={assetTypePage >= Math.ceil(assetTypes.length / ITEMS_PER_PAGE)} className="px-4 py-1.5 border border-slate-300 dark:border-zinc-700 rounded-lg hover:bg-slate-100 dark:hover:bg-zinc-800 disabled:opacity-50 text-sm font-medium transition-colors">Next</button>
                     </div>
                   </div>
                 )}
@@ -481,23 +341,18 @@ export default function SettingsView() {
             </div>
           )}
 
-          {/* SERVICES (Color picker crash fixed via Uncontrolled Input) */}
+          {/* SERVICES */}
           {activeTab === 'services' && (
             <div>
-              {renderSimpleList('Dynamic Service Lanes', 'Define distinct testing lanes, default credits, and visual themes.', services, '/api/services/', 'services', (item) => {
-                if (item) {
-                  setEditServiceId(item.id);
-                  setServiceForm({
-                    name: item.name, theme_color: item.theme_color, default_credits: item.default_credits,
-                    default_duration_weeks: item.default_duration_weeks, max_concurrent_per_week: item.max_concurrent_per_week || 5,
-                    match_keywords: item.match_keywords || '', display_order: item.display_order, is_active: item.is_active
-                  });
-                  setShowForm('services');
-                } else {
-                  setEditServiceId(null);
-                  setServiceForm(defaultServiceForm);
-                }
-              })}
+              <div className="flex justify-between items-center mb-6">
+                <div>
+                  <h2 className="text-xl font-bold text-slate-900 dark:text-zinc-100">Dynamic Service Lanes</h2>
+                  <p className="text-sm text-slate-500 dark:text-zinc-400">Define distinct testing lanes, default credits, and visual themes.</p>
+                </div>
+                <button onClick={() => { setShowForm('services'); setEditServiceId(null); setServiceForm(defaultServiceForm); }} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors">
+                  <Plus size={16} /> Add Service
+                </button>
+              </div>
 
               {showForm === 'services' && (
                 <form onSubmit={submitService} className="bg-slate-50 dark:bg-zinc-950/50 p-6 rounded-2xl border border-slate-200 dark:border-zinc-800 my-6 space-y-4 shadow-inner">
@@ -507,41 +362,29 @@ export default function SettingsView() {
                     <div className="text-sm font-bold text-slate-700 dark:text-zinc-300">
                       Theme Color
                       <div className="mt-2 flex flex-col gap-3">
-                        {/* 1. Clickable Palette */}
                         <div className="flex flex-wrap gap-2 p-3 bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-lg">
                           {PREDEFINED_COLORS.map(color => (
                             <button
-                              key={color}
-                              type="button"
+                              key={color} type="button" title={color}
                               onClick={() => setServiceForm({ ...serviceForm, theme_color: color })}
                               className={`w-6 h-6 rounded-full border-2 transition-all hover:scale-110 ${serviceForm.theme_color.toLowerCase() === color ? 'border-slate-900 dark:border-white scale-110 shadow-md' : 'border-transparent shadow-sm'}`}
                               style={{ backgroundColor: color }}
-                              title={color}
                             />
                           ))}
                         </div>
-                        {/* 2. Manual Hex Code Input & Preview */}
                         <div className="flex items-center gap-3">
-                          <input
-                            type="text"
-                            className={`${inputClasses} !mt-0 font-mono uppercase w-32`}
-                            value={serviceForm.theme_color}
-                            onChange={e => setServiceForm({...serviceForm, theme_color: e.target.value})}
-                            placeholder="#3B82F6"
-                            maxLength={7}
-                            pattern="^#[0-9A-Fa-f]{6}$"
-                            required
-                          />
-                          <div
-                            className="w-10 h-10 rounded-lg shadow-inner border border-slate-200 dark:border-zinc-700 shrink-0 transition-colors"
-                            style={{ backgroundColor: serviceForm.theme_color.length === 7 ? serviceForm.theme_color : 'transparent' }}
-                          ></div>
+                          <input type="text" className={`${inputClasses} !mt-0 font-mono uppercase w-32`} value={serviceForm.theme_color} onChange={e => setServiceForm({...serviceForm, theme_color: e.target.value})} placeholder="#3B82F6" maxLength={7} pattern="^#[0-9A-Fa-f]{6}$" required />
+                          <div className="w-10 h-10 rounded-lg shadow-inner border border-slate-200 dark:border-zinc-700 shrink-0 transition-colors" style={{ backgroundColor: serviceForm.theme_color.length === 7 ? serviceForm.theme_color : 'transparent' }}></div>
                         </div>
                       </div>
                     </div>
                     <label className="text-sm font-bold text-slate-700 dark:text-zinc-300">Default Credits <input type="number" step="0.1" className={inputClasses} value={serviceForm.default_credits} onChange={e => setServiceForm({...serviceForm, default_credits: parseFloat(e.target.value)})} required /></label>
                     <label className="text-sm font-bold text-slate-700 dark:text-zinc-300">Default Duration (Wks) <input type="number" className={inputClasses} value={serviceForm.default_duration_weeks} onChange={e => setServiceForm({...serviceForm, default_duration_weeks: parseInt(e.target.value)})} required /></label>
                     <label className="text-sm font-bold text-slate-700 dark:text-zinc-300 col-span-1 md:col-span-2">Match Keywords (comma separated) <input className={inputClasses} value={serviceForm.match_keywords} onChange={e => setServiceForm({...serviceForm, match_keywords: e.target.value})} placeholder="e.g. web, dast, external" /></label>
+
+                    <div className="col-span-1 md:col-span-2 pt-2 mt-2 border-t border-slate-200 dark:border-zinc-800">
+                      <Toggle checked={serviceForm.is_active} onChange={(c) => setServiceForm({...serviceForm, is_active: c})} label="Service Lane is Active" />
+                    </div>
                   </div>
                   <div className="flex justify-end gap-3 pt-4 border-t border-slate-200 dark:border-zinc-800">
                     <button type="button" onClick={() => {setShowForm(null); setEditServiceId(null);}} className="px-5 py-2.5 text-sm font-medium bg-slate-200 hover:bg-slate-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-300 rounded-lg transition-colors">Cancel</button>
@@ -549,8 +392,209 @@ export default function SettingsView() {
                   </div>
                 </form>
               )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {services?.map((item: any) => (
+                  <div key={item.id} className={`border p-5 rounded-2xl flex justify-between items-start transition-colors bg-white dark:bg-zinc-900 shadow-sm hover:shadow-md ${item.is_active ? 'border-slate-200 dark:border-zinc-800 hover:border-blue-500 dark:hover:border-blue-500' : 'border-slate-200 dark:border-zinc-800 opacity-60 grayscale'}`}>
+                    <div>
+                      <div className="font-bold text-lg text-slate-900 dark:text-zinc-100 flex items-center gap-2">
+                        {item.theme_color && <div className="w-4 h-4 rounded-full shadow-sm" style={{backgroundColor: item.theme_color}}></div>}
+                        {item.name}
+                      </div>
+                      <div className="mt-2 space-y-1">
+                        <div className="text-sm text-slate-500 dark:text-zinc-400 font-medium">Credits: <span className="text-slate-900 dark:text-zinc-200">{item.default_credits}cr</span> / Duration: <span className="text-slate-900 dark:text-zinc-200">{item.default_duration_weeks}w</span></div>
+                      </div>
+                      <div className={`mt-4 px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-wider w-fit shadow-sm border ${item.is_active ? 'bg-emerald-100 dark:bg-emerald-500/10 border-emerald-200 dark:border-emerald-500/20 text-emerald-800 dark:text-emerald-400' : 'bg-slate-100 dark:bg-zinc-800 border-slate-200 dark:border-zinc-700 text-slate-500 dark:text-zinc-400'}`}>
+                        {item.is_active ? 'Active' : 'Inactive'}
+                      </div>
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <button onClick={() => {
+                        setEditServiceId(item.id);
+                        setServiceForm({
+                          name: item.name, theme_color: item.theme_color, default_credits: item.default_credits,
+                          default_duration_weeks: item.default_duration_weeks, max_concurrent_per_week: item.max_concurrent_per_week || 5,
+                          match_keywords: item.match_keywords || '', display_order: item.display_order, is_active: item.is_active
+                        });
+                        setShowForm('services');
+                      }} className="text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-500/10 p-2 rounded-lg transition-colors"><Edit2 size={18} /></button>
+                      <button onClick={() => confirmDelete('/api/services/', item.id, item.name)} className="text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 p-2 rounded-lg transition-colors"><Trash2 size={18} /></button>
+                    </div>
+                  </div>
+                ))}
+                {(!services || services.length === 0) && <div className="col-span-full p-12 text-center text-slate-500 dark:text-zinc-500 bg-slate-50/50 dark:bg-zinc-900/50 rounded-2xl">No services found.</div>}
+              </div>
             </div>
           )}
+
+          {/* REGIONS */}
+          {activeTab === 'regions' && (
+            <div className="fade-in flex-1 flex flex-col">
+              <div className="flex justify-between items-center mb-6">
+                <div>
+                  <h2 className="text-xl font-bold text-slate-900 dark:text-zinc-100">Regions</h2>
+                  <p className="text-sm text-slate-500 dark:text-zinc-400">Broad operational boundaries.</p>
+                </div>
+                <button onClick={() => { setEditRegionId(null); setRegionForm(defaultRegionForm); setShowForm('regions'); }} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors">
+                  <Plus size={16} /> Add Region
+                </button>
+              </div>
+
+              {showForm === 'regions' && (
+                <form onSubmit={submitRegion} className="bg-slate-50 dark:bg-zinc-950/50 p-6 rounded-2xl border border-slate-200 dark:border-zinc-800 mb-8 shadow-inner">
+                  <h3 className="font-bold text-lg text-slate-900 dark:text-zinc-100 mb-4">{editRegionId ? 'Edit Region' : 'Add Region'}</h3>
+                  <label className="text-sm font-bold text-slate-700 dark:text-zinc-300 block mb-6">Region Name <input className={inputClasses} value={regionForm.name} onChange={e => setRegionForm({...regionForm, name: e.target.value})} required /></label>
+                  <div className="mb-6 pt-2">
+                    <Toggle checked={regionForm.is_active} onChange={(c) => setRegionForm({...regionForm, is_active: c})} label="Region is Active" />
+                  </div>
+                  <div className="flex justify-end gap-3 border-t border-slate-200 dark:border-zinc-800 pt-4">
+                    <button type="button" onClick={() => {setShowForm(null); setEditRegionId(null);}} className="px-5 py-2.5 text-sm font-medium bg-slate-200 hover:bg-slate-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-300 rounded-lg transition-colors">Cancel</button>
+                    <button type="submit" className="px-5 py-2.5 text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-sm transition-colors">{editRegionId ? 'Update Region' : 'Save Region'}</button>
+                  </div>
+                </form>
+              )}
+
+              {/* Sub-Tabs */}
+              <div className="flex gap-6 mb-4 border-b border-slate-200 dark:border-zinc-800">
+                <button onClick={() => {setRegionTab('active'); setRegionPage(1);}} className={`pb-2 font-bold text-sm border-b-2 transition-colors ${regionTab === 'active' ? 'border-blue-500 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Active Regions</button>
+                <button onClick={() => {setRegionTab('disabled'); setRegionPage(1);}} className={`pb-2 font-bold text-sm border-b-2 transition-colors ${regionTab === 'disabled' ? 'border-blue-500 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Disabled Regions</button>
+              </div>
+
+              <div className="border border-slate-200 dark:border-zinc-800 rounded-2xl overflow-hidden shadow-sm flex flex-col flex-1">
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-slate-50 dark:bg-zinc-900/50 border-b border-slate-200 dark:border-zinc-800">
+                    <tr>
+                      <th className="p-4 font-bold text-slate-600 dark:text-zinc-400">Region Name</th>
+                      <th className="p-4 font-bold text-slate-600 dark:text-zinc-400 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-zinc-800">
+                    {displayRegions.slice((regionPage - 1) * ITEMS_PER_PAGE, regionPage * ITEMS_PER_PAGE).map(r => (
+                      <tr key={r.id} className="hover:bg-slate-50 dark:hover:bg-zinc-800/50 transition-colors">
+                        <td className="p-4 font-bold text-base text-slate-900 dark:text-zinc-100">{r.name}</td>
+                        <td className="p-4 text-right">
+                          <div className="flex justify-end gap-2">
+                            <button onClick={() => {
+                              setEditRegionId(r.id);
+                              setRegionForm({ name: r.name, is_active: r.is_active });
+                              setShowForm('regions');
+                            }} className="text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-500/10 p-2 rounded-lg transition-colors"><Edit2 size={18} /></button>
+                            <button onClick={() => confirmDelete('/api/regions/', r.id, r.name)} className="text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 p-2 rounded-lg transition-colors"><Trash2 size={18} /></button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {displayRegions.length === 0 && <div className="p-12 text-center text-slate-500 dark:text-zinc-500 bg-slate-50/50 dark:bg-zinc-900/50">No regions found.</div>}
+
+                {/* Pagination Footer */}
+                {displayRegions.length > 0 && (
+                  <div className="px-6 py-4 border-t border-slate-200 dark:border-zinc-700 flex justify-between items-center bg-slate-50 dark:bg-zinc-950/50 mt-auto">
+                    <span className="text-sm text-slate-500">Page {regionPage} of {Math.ceil(displayRegions.length / ITEMS_PER_PAGE) || 1}</span>
+                    <div className="flex gap-2">
+                      <button onClick={() => setRegionPage(p => Math.max(1, p - 1))} disabled={regionPage === 1} className="px-4 py-1.5 border border-slate-300 dark:border-zinc-700 rounded-lg hover:bg-slate-100 dark:hover:bg-zinc-800 disabled:opacity-50 text-sm font-medium transition-colors">Prev</button>
+                      <button onClick={() => setRegionPage(p => p + 1)} disabled={regionPage >= Math.ceil(displayRegions.length / ITEMS_PER_PAGE)} className="px-4 py-1.5 border border-slate-300 dark:border-zinc-700 rounded-lg hover:bg-slate-100 dark:hover:bg-zinc-800 disabled:opacity-50 text-sm font-medium transition-colors">Next</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* COUNTRIES */}
+          {activeTab === 'countries' && (
+            <div className="fade-in flex-1 flex flex-col">
+              <div className="flex justify-between items-center mb-6">
+                <div>
+                  <h2 className="text-xl font-bold text-slate-900 dark:text-zinc-100">Countries</h2>
+                  <p className="text-sm text-slate-500 dark:text-zinc-400">Manage operating countries and analytics mappings.</p>
+                </div>
+                <button onClick={() => { setEditCountryId(null); setCountryForm(defaultCountryForm); setShowForm('countries'); }} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors">
+                  <Plus size={16} /> Add Country
+                </button>
+              </div>
+
+              {showForm === 'countries' && (
+                <form onSubmit={submitCountry} className="bg-slate-50 dark:bg-zinc-950/50 p-6 rounded-2xl border border-slate-200 dark:border-zinc-800 mb-8 space-y-4 shadow-inner">
+                  <h3 className="font-bold text-lg text-slate-900 dark:text-zinc-100 mb-2">{editCountryId ? 'Edit Country' : 'Add Country'}</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                    <label className="text-sm font-bold text-slate-700 dark:text-zinc-300">Code (e.g. US) <input className={inputClasses} value={countryForm.code} onChange={e => setCountryForm({...countryForm, code: e.target.value.toUpperCase()})} required /></label>
+                    <label className="text-sm font-bold text-slate-700 dark:text-zinc-300">Name <input className={inputClasses} value={countryForm.name} onChange={e => setCountryForm({...countryForm, name: e.target.value})} required /></label>
+                    <label className="text-sm font-bold text-slate-700 dark:text-zinc-300 col-span-1 md:col-span-2">Region
+                      <select className={inputClasses} value={countryForm.region_id} onChange={e => setCountryForm({...countryForm, region_id: e.target.value})}>
+                        <option value="">-- None --</option>
+                        {regions?.map(r => <option key={r.id} value={r.id}>{r.name || r.regions}</option>)}
+                      </select>
+                    </label>
+                    <div className="col-span-1 md:col-span-2 pt-2 border-t border-slate-200 dark:border-zinc-800">
+                      <Toggle checked={countryForm.is_active} onChange={(c) => setCountryForm({...countryForm, is_active: c})} label="Country is Active" />
+                    </div>
+                  </div>
+                  <div className="flex justify-end gap-3 pt-4 border-t border-slate-200 dark:border-zinc-800">
+                    <button type="button" onClick={() => {setShowForm(null); setEditCountryId(null);}} className="px-5 py-2.5 text-sm font-medium bg-slate-200 hover:bg-slate-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-300 rounded-lg transition-colors">Cancel</button>
+                    <button type="submit" className="px-5 py-2.5 text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-sm transition-colors">{editCountryId ? 'Update Country' : 'Save Country'}</button>
+                  </div>
+                </form>
+              )}
+
+              {/* Sub-Tabs */}
+              <div className="flex gap-6 mb-4 border-b border-slate-200 dark:border-zinc-800">
+                <button onClick={() => {setCountryTab('active'); setCountryPage(1);}} className={`pb-2 font-bold text-sm border-b-2 transition-colors ${countryTab === 'active' ? 'border-blue-500 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Active Countries</button>
+                <button onClick={() => {setCountryTab('disabled'); setCountryPage(1);}} className={`pb-2 font-bold text-sm border-b-2 transition-colors ${countryTab === 'disabled' ? 'border-blue-500 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Disabled Countries</button>
+              </div>
+
+              <div className="border border-slate-200 dark:border-zinc-800 rounded-2xl overflow-hidden shadow-sm flex flex-col flex-1">
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-slate-50 dark:bg-zinc-900/50 border-b border-slate-200 dark:border-zinc-800">
+                    <tr>
+                      <th className="p-4 font-bold text-slate-600 dark:text-zinc-400">Code</th>
+                      <th className="p-4 font-bold text-slate-600 dark:text-zinc-400">Country Name</th>
+                      <th className="p-4 font-bold text-slate-600 dark:text-zinc-400">Region Mapping</th>
+                      <th className="p-4 font-bold text-slate-600 dark:text-zinc-400 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-zinc-800">
+                    {displayCountries.slice((countryPage - 1) * ITEMS_PER_PAGE, countryPage * ITEMS_PER_PAGE).map(c => (
+                      <tr key={c.id} className="hover:bg-slate-50 dark:hover:bg-zinc-800/50 transition-colors">
+                        <td className="p-4 text-slate-500 dark:text-zinc-400 font-mono font-bold">{c.code}</td>
+                        <td className="p-4 font-bold text-slate-900 dark:text-zinc-100">{c.name}</td>
+                        <td className="p-4">
+                          <span className="px-2.5 py-1 rounded-full bg-indigo-50 dark:bg-indigo-500/10 border border-indigo-200 dark:border-indigo-500/20 text-indigo-700 dark:text-indigo-400 text-xs font-bold shadow-sm">
+                            {c.region_name || 'Unmapped'}
+                          </span>
+                        </td>
+                        <td className="p-4 text-right">
+                          <div className="flex justify-end gap-2">
+                            <button onClick={() => {
+                              setEditCountryId(c.id);
+                              setCountryForm({ code: c.code, name: c.name, region_id: c.region_id || '', is_active: c.is_active });
+                              setShowForm('countries');
+                            }} className="text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-500/10 p-2 rounded-lg transition-colors"><Edit2 size={18} /></button>
+                            <button onClick={() => confirmDelete('/api/countries/', c.id, c.name)} className="text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 p-2 rounded-lg transition-colors"><Trash2 size={18} /></button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {displayCountries.length === 0 && <div className="p-12 text-center text-slate-500 dark:text-zinc-500 bg-slate-50/50 dark:bg-zinc-900/50">No countries found.</div>}
+
+                {/* Pagination Footer */}
+                {displayCountries.length > 0 && (
+                  <div className="px-6 py-4 border-t border-slate-200 dark:border-zinc-700 flex justify-between items-center bg-slate-50 dark:bg-zinc-950/50 mt-auto">
+                    <span className="text-sm text-slate-500">Page {countryPage} of {Math.ceil(displayCountries.length / ITEMS_PER_PAGE) || 1}</span>
+                    <div className="flex gap-2">
+                      <button onClick={() => setCountryPage(p => Math.max(1, p - 1))} disabled={countryPage === 1} className="px-4 py-1.5 border border-slate-300 dark:border-zinc-700 rounded-lg hover:bg-slate-100 dark:hover:bg-zinc-800 disabled:opacity-50 text-sm font-medium transition-colors">Prev</button>
+                      <button onClick={() => setCountryPage(p => p + 1)} disabled={countryPage >= Math.ceil(displayCountries.length / ITEMS_PER_PAGE)} className="px-4 py-1.5 border border-slate-300 dark:border-zinc-700 rounded-lg hover:bg-slate-100 dark:hover:bg-zinc-800 disabled:opacity-50 text-sm font-medium transition-colors">Next</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ... (Categories, Locations, System Logs logic remains untouched below this block) ... */}
 
           {/* CATEGORIES (Table View) */}
           {activeTab === 'categories' && (
@@ -624,26 +668,26 @@ export default function SettingsView() {
             </div>
           )}
 
-          {/* REGIONS (Table View) */}
-          {activeTab === 'regions' && (
+          {/* LOCATIONS */}
+          {activeTab === 'locations' && (
             <div className="fade-in">
               <div className="flex justify-between items-center mb-6">
                 <div>
-                  <h2 className="text-xl font-bold text-slate-900 dark:text-zinc-100">Regions</h2>
-                  <p className="text-sm text-slate-500 dark:text-zinc-400">Broad operational boundaries.</p>
+                  <h2 className="text-xl font-bold text-slate-900 dark:text-zinc-100">Locations</h2>
+                  <p className="text-sm text-slate-500 dark:text-zinc-400">Geographic bases for calculating national holidays.</p>
                 </div>
-                <button onClick={() => { setEditRegionId(null); setRegionForm(defaultRegionForm); setShowForm('regions'); }} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors">
-                  <Plus size={16} /> Add Region
+                <button onClick={() => { setEditLocId(null); setLocForm(defaultLocForm); setShowForm('locations'); }} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2">
+                  <Plus size={16} /> Add Location
                 </button>
               </div>
 
-              {showForm === 'regions' && (
-                <form onSubmit={submitRegion} className="bg-slate-50 dark:bg-zinc-950/50 p-6 rounded-2xl border border-slate-200 dark:border-zinc-800 mb-8 shadow-inner">
-                  <h3 className="font-bold text-lg text-slate-900 dark:text-zinc-100 mb-4">{editRegionId ? 'Edit Region' : 'Add Region'}</h3>
-                  <label className="text-sm font-bold text-slate-700 dark:text-zinc-300 block mb-6">Region Name <input className={inputClasses} value={regionForm.name} onChange={e => setRegionForm({...regionForm, name: e.target.value})} required /></label>
+              {showForm === 'locations' && (
+                <form onSubmit={submitLocation} className="bg-slate-50 dark:bg-zinc-950/50 p-6 rounded-2xl border border-slate-200 dark:border-zinc-800 mb-8 shadow-inner">
+                  <h3 className="font-bold text-lg text-slate-900 dark:text-zinc-100 mb-4">{editLocId ? 'Edit Location' : 'Add Location'}</h3>
+                  <label className="text-sm font-bold text-slate-700 dark:text-zinc-300 block mb-6">Location Name <input className={inputClasses} value={locForm.name} onChange={e => setLocForm({...locForm, name: e.target.value})} required placeholder="e.g. London" /></label>
                   <div className="flex justify-end gap-3 border-t border-slate-200 dark:border-zinc-800 pt-4">
-                    <button type="button" onClick={() => {setShowForm(null); setEditRegionId(null);}} className="px-5 py-2.5 text-sm font-medium bg-slate-200 hover:bg-slate-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-300 rounded-lg transition-colors">Cancel</button>
-                    <button type="submit" className="px-5 py-2.5 text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-sm transition-colors">{editRegionId ? 'Update Region' : 'Save Region'}</button>
+                    <button type="button" onClick={() => {setShowForm(null); setEditLocId(null);}} className="px-5 py-2.5 text-sm font-medium bg-slate-200 hover:bg-slate-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-300 rounded-lg transition-colors">Cancel</button>
+                    <button type="submit" className="px-5 py-2.5 text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-sm transition-colors">{editLocId ? 'Update Location' : 'Save Location'}</button>
                   </div>
                 </form>
               )}
@@ -652,101 +696,33 @@ export default function SettingsView() {
                 <table className="w-full text-left text-sm">
                   <thead className="bg-slate-50 dark:bg-zinc-900/50 border-b border-slate-200 dark:border-zinc-800">
                     <tr>
-                      <th className="p-4 font-bold text-slate-600 dark:text-zinc-400">Region Name</th>
+                      <th className="p-4 font-bold text-slate-600 dark:text-zinc-400">Location Name</th>
                       <th className="p-4 font-bold text-slate-600 dark:text-zinc-400 text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-zinc-800">
-                    {regions?.map(r => (
-                      <tr key={r.id} className="hover:bg-slate-50 dark:hover:bg-zinc-800/50 transition-colors">
-                        <td className="p-4 font-bold text-base text-slate-900 dark:text-zinc-100">{r.name}</td>
+                    {locations?.map(loc => (
+                      <tr key={loc.id} className="hover:bg-slate-50 dark:hover:bg-zinc-800/50 transition-colors">
+                        <td className="p-4 font-bold text-base text-slate-900 dark:text-zinc-100">{loc.name}</td>
                         <td className="p-4 text-right">
                           <div className="flex justify-end gap-2">
                             <button onClick={() => {
-                              setEditRegionId(r.id);
-                              setRegionForm({ name: r.name, is_active: r.is_active });
-                              setShowForm('regions');
-                            }} className="text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-500/10 p-2 rounded-lg transition-colors"><Edit2 size={18} /></button>
-                            <button onClick={() => confirmDelete('/api/regions/', r.id, r.name)} className="text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 p-2 rounded-lg transition-colors"><Trash2 size={18} /></button>
+                              setEditLocId(loc.id);
+                              setLocForm({ name: loc.name, is_active: loc.is_active });
+                              setShowForm('locations');
+                            }} className="text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-500/10 p-2 rounded-lg transition-colors">
+                              <Edit2 size={18} />
+                            </button>
+                            <button onClick={() => confirmDelete('/api/locations/', loc.id, loc.name)} className="text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 p-2 rounded-lg transition-colors">
+                              <Trash2 size={18} />
+                            </button>
                           </div>
                         </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
-                {(!regions || regions.length === 0) && <div className="p-12 text-center text-slate-500 dark:text-zinc-500 bg-slate-50/50 dark:bg-zinc-900/50">No regions found.</div>}
-              </div>
-            </div>
-          )}
-
-          {/* COUNTRIES (Table View) */}
-          {activeTab === 'countries' && (
-            <div className="fade-in">
-              <div className="flex justify-between items-center mb-6">
-                <div>
-                  <h2 className="text-xl font-bold text-slate-900 dark:text-zinc-100">Countries</h2>
-                  <p className="text-sm text-slate-500 dark:text-zinc-400">Manage operating countries and analytics mappings.</p>
-                </div>
-                <button onClick={() => { setEditCountryId(null); setCountryForm(defaultCountryForm); setShowForm('countries'); }} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors">
-                  <Plus size={16} /> Add Country
-                </button>
-              </div>
-
-              {showForm === 'countries' && (
-                <form onSubmit={submitCountry} className="bg-slate-50 dark:bg-zinc-950/50 p-6 rounded-2xl border border-slate-200 dark:border-zinc-800 mb-8 space-y-4 shadow-inner">
-                  <h3 className="font-bold text-lg text-slate-900 dark:text-zinc-100 mb-2">{editCountryId ? 'Edit Country' : 'Add Country'}</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                    <label className="text-sm font-bold text-slate-700 dark:text-zinc-300">Code (e.g. US) <input className={inputClasses} value={countryForm.code} onChange={e => setCountryForm({...countryForm, code: e.target.value.toUpperCase()})} required /></label>
-                    <label className="text-sm font-bold text-slate-700 dark:text-zinc-300">Name <input className={inputClasses} value={countryForm.name} onChange={e => setCountryForm({...countryForm, name: e.target.value})} required /></label>
-                    <label className="text-sm font-bold text-slate-700 dark:text-zinc-300 col-span-1 md:col-span-2">Region
-                      <select className={inputClasses} value={countryForm.region_id} onChange={e => setCountryForm({...countryForm, region_id: e.target.value})}>
-                        <option value="">-- None --</option>
-                        {regions?.map(r => <option key={r.id} value={r.id}>{r.name || r.regions}</option>)}
-                      </select>
-                    </label>
-                  </div>
-                  <div className="flex justify-end gap-3 pt-4 border-t border-slate-200 dark:border-zinc-800">
-                    <button type="button" onClick={() => {setShowForm(null); setEditCountryId(null);}} className="px-5 py-2.5 text-sm font-medium bg-slate-200 hover:bg-slate-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-300 rounded-lg transition-colors">Cancel</button>
-                    <button type="submit" className="px-5 py-2.5 text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-sm transition-colors">{editCountryId ? 'Update Country' : 'Save Country'}</button>
-                  </div>
-                </form>
-              )}
-
-              <div className="border border-slate-200 dark:border-zinc-800 rounded-2xl overflow-hidden shadow-sm">
-                <table className="w-full text-left text-sm">
-                  <thead className="bg-slate-50 dark:bg-zinc-900/50 border-b border-slate-200 dark:border-zinc-800">
-                    <tr>
-                      <th className="p-4 font-bold text-slate-600 dark:text-zinc-400">Code</th>
-                      <th className="p-4 font-bold text-slate-600 dark:text-zinc-400">Country Name</th>
-                      <th className="p-4 font-bold text-slate-600 dark:text-zinc-400">Region Mapping</th>
-                      <th className="p-4 font-bold text-slate-600 dark:text-zinc-400 text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 dark:divide-zinc-800">
-                    {countries?.map(c => (
-                      <tr key={c.id} className="hover:bg-slate-50 dark:hover:bg-zinc-800/50 transition-colors">
-                        <td className="p-4 text-slate-500 dark:text-zinc-400 font-mono font-bold">{c.code}</td>
-                        <td className="p-4 font-bold text-slate-900 dark:text-zinc-100">{c.name}</td>
-                        <td className="p-4">
-                          <span className="px-2.5 py-1 rounded-full bg-indigo-50 dark:bg-indigo-500/10 border border-indigo-200 dark:border-indigo-500/20 text-indigo-700 dark:text-indigo-400 text-xs font-bold shadow-sm">
-                            {c.region_name || 'Unmapped'}
-                          </span>
-                        </td>
-                        <td className="p-4 text-right">
-                          <div className="flex justify-end gap-2">
-                            <button onClick={() => {
-                              setEditCountryId(c.id);
-                              setCountryForm({ code: c.code, name: c.name, region_id: c.region_id || '', is_active: c.is_active });
-                              setShowForm('countries');
-                            }} className="text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-500/10 p-2 rounded-lg transition-colors"><Edit2 size={18} /></button>
-                            <button onClick={() => confirmDelete('/api/countries/', c.id, c.name)} className="text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 p-2 rounded-lg transition-colors"><Trash2 size={18} /></button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                {(!countries || countries.length === 0) && <div className="p-12 text-center text-slate-500 dark:text-zinc-500 bg-slate-50/50 dark:bg-zinc-900/50">No countries found.</div>}
+                {(!locations || locations.length === 0) && <div className="p-12 text-center text-slate-500 dark:text-zinc-500 bg-slate-50/50 dark:bg-zinc-900/50">No locations found.</div>}
               </div>
             </div>
           )}
@@ -759,7 +735,6 @@ export default function SettingsView() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="border border-slate-200 dark:border-zinc-800 rounded-2xl p-5 flex justify-between items-center bg-slate-50 dark:bg-zinc-900 shadow-sm">
                     <span className="font-bold text-slate-700 dark:text-zinc-300">PostgreSQL Primary</span>
-
                     {dbLatency !== null ? (
                       <span className="flex items-center gap-2 text-sm text-emerald-700 dark:text-emerald-400 font-extrabold uppercase tracking-wider bg-emerald-100 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/20 px-3 py-1.5 rounded-full">
                         <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
@@ -771,7 +746,6 @@ export default function SettingsView() {
                         Offline
                       </span>
                     )}
-
                   </div>
                 </div>
               </div>
@@ -786,7 +760,6 @@ export default function SettingsView() {
                           <span className="font-mono text-sm font-medium text-slate-700 dark:text-zinc-300">{log}</span>
                           <div className="flex gap-2">
                             <button onClick={() => downloadLog(log)} className="text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-500/10 px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-bold transition-colors"><Download size={16} /> Download</button>
-                            {/* Reusing our awesome Confirm Modal for Log Deletion! */}
                             <button onClick={() => confirmDelete('/api/system/logs/', log, log)} className="text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-bold transition-colors"><Trash2 size={16} /> Delete</button>
                           </div>
                         </li>
@@ -801,6 +774,7 @@ export default function SettingsView() {
               </div>
             </div>
           )}
+
         </section>
       </main>
     </div>

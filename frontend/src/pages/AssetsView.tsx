@@ -1,3 +1,4 @@
+// frontend/src/pages/AssetsView.tsx
 import { useState, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 import axios from "axios";
@@ -14,6 +15,8 @@ interface PoolAsset {
   country?: string;
   service_name?: string;
   is_assigned: boolean;
+  duplicate_allowed: boolean;
+  completed_count: number;
 }
 
 export default function AssetsView() {
@@ -71,6 +74,19 @@ export default function AssetsView() {
     }
   };
 
+  const handleGenerateSingleTest = async (assetId: string) => {
+    const toastId = toast.loading("Generating test...");
+    try {
+      await axios.post("/api/tests/bulk", { asset_ids: [assetId] });
+      toast.dismiss(toastId);
+      toast.success("Test generated! Check the Planner Backlog.");
+      fetchPoolAssets();
+    } catch (error) {
+      toast.dismiss(toastId);
+      toast.error("Failed to generate test");
+    }
+  };
+
   const executeBulkAction = async () => {
     if (selectedAssets.length === 0 || !confirmModal.action) return;
 
@@ -94,27 +110,29 @@ export default function AssetsView() {
     setSelectedAssets(prev => prev.includes(assetId) ? prev.filter(id => id !== assetId) : [...prev, assetId]);
   };
 
+  // --- UPDATED FILTER LOGIC ---
   const filteredAssets = assets.filter(asset => {
     const matchesSearch = !searchTerm ||
       asset.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (asset.country && asset.country.toLowerCase().includes(searchTerm.toLowerCase()));
 
+    // If an asset allows duplicates, it is ALWAYS considered "Ready to be assigned"
+    const isAvailableForTest = !asset.is_assigned || asset.duplicate_allowed;
+
     if (filterStatus === "assigned") return matchesSearch && asset.is_assigned;
-    if (filterStatus === "unassigned") return matchesSearch && !asset.is_assigned;
+    if (filterStatus === "unassigned") return matchesSearch && isAvailableForTest;
     return matchesSearch;
   });
 
+  // --- UPDATED STATS LOGIC ---
   const stats = {
     total: assets.length,
     assigned: assets.filter(a => a.is_assigned).length,
-    unassigned: assets.filter(a => !a.is_assigned).length
+    unassigned: assets.filter(a => !a.is_assigned || a.duplicate_allowed).length
   };
 
-  // Only allow unassigned assets to be checked for test generation
-  const unassignedFiltered = filteredAssets.filter(a => !a.is_assigned);
-
-  // Only allow unassigned assets WITH a Service Lane to be checked for test generation
-  const validUnassigned = filteredAssets.filter(a => !a.is_assigned && a.service_name);
+  // Only allow assets that are purely unassigned OR allow duplicates
+  const validUnassigned = filteredAssets.filter(a => (!a.is_assigned || a.duplicate_allowed) && a.service_name);
 
   return (
     <div className="min-h-screen text-slate-900 dark:text-zinc-100">
@@ -137,7 +155,7 @@ export default function AssetsView() {
           Active Asset Pool
         </h1>
         <p className="text-slate-500 dark:text-zinc-400 mb-8">
-          Select unassigned assets to generate tests for the Planner Backlog.
+          Select unassigned (or multi-test) assets to generate tests for the Planner Backlog.
         </p>
 
         {/* Stats Cards */}
@@ -148,12 +166,12 @@ export default function AssetsView() {
           </div>
 
           <div className="bg-white dark:bg-zinc-900 p-6 rounded-xl border border-slate-200 dark:border-zinc-800 shadow-sm">
-            <p className="text-sm text-slate-500 dark:text-zinc-400 mb-1">Tests Generated</p>
+            <p className="text-sm text-slate-500 dark:text-zinc-400 mb-1">Actively Testing</p>
             <p className="text-3xl font-bold text-blue-600">{stats.assigned}</p>
           </div>
 
           <div className="bg-white dark:bg-zinc-900 p-6 rounded-xl border border-slate-200 dark:border-zinc-800 shadow-sm">
-            <p className="text-sm text-slate-500 dark:text-zinc-400 mb-1">Unassigned (Ready)</p>
+            <p className="text-sm text-slate-500 dark:text-zinc-400 mb-1">Ready for Generation</p>
             <p className="text-3xl font-bold text-amber-600">{stats.unassigned}</p>
           </div>
         </div>
@@ -177,7 +195,7 @@ export default function AssetsView() {
               className={`flex items-center gap-2 px-4 py-2 rounded-lg border transition-colors text-sm font-medium ${filterStatus !== 'all' ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400' : 'border-slate-300 dark:border-zinc-700 hover:bg-slate-100 dark:hover:bg-zinc-800'}`}
             >
               <Filter className="h-4 w-4" />
-              {filterStatus === "all" ? "All Statuses" : filterStatus === "assigned" ? "Tests Generated" : "Unassigned Only"}
+              {filterStatus === "all" ? "All Statuses" : filterStatus === "assigned" ? "Active Tests Only" : "Ready Only"}
             </button>
           </div>
 
@@ -245,7 +263,8 @@ export default function AssetsView() {
                         <td className="p-4 text-center">
                           <input
                             type="checkbox"
-                            disabled={asset.is_assigned || !asset.service_name} // <-- Lock if missing lane
+                            // --- CRITICAL FIX: The checkbox is now clickable if duplicate_allowed is true! ---
+                            disabled={(asset.is_assigned && !asset.duplicate_allowed) || !asset.service_name}
                             checked={isSelected}
                             onChange={() => toggleAssetSelection(asset.id)}
                             className="h-4 w-4 text-blue-600 rounded border-slate-300 disabled:opacity-40"
@@ -281,26 +300,51 @@ export default function AssetsView() {
                           )}
                         </td>
                         <td className="px-6 py-4">
-                          {asset.is_assigned ? (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-100 dark:bg-emerald-900/30 text-emerald-800 dark:text-emerald-200">
-                              <div className="w-1.5 h-1.5 rounded-full bg-emerald-500"></div>
-                              Test Generated
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-400">
-                              <div className="w-1.5 h-1.5 rounded-full bg-amber-500"></div>
-                              Ready
-                            </span>
-                          )}
+                          <div className="flex flex-col gap-1.5 items-start">
+                            {asset.is_assigned ? (
+                              asset.duplicate_allowed ? (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-200">
+                                  <div className="w-1.5 h-1.5 rounded-full bg-purple-500 animate-pulse"></div> Active (Multi)
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200">
+                                  <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></div> Active Test
+                                </span>
+                              )
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 dark:bg-emerald-900/30 text-emerald-800 dark:text-emerald-200 shadow-sm border border-emerald-200 dark:border-emerald-800">
+                                Ready
+                              </span>
+                            )}
+
+                            {asset.completed_count > 0 && (
+                              <span className="text-[10px] font-bold text-slate-500 dark:text-zinc-400 bg-slate-100 dark:bg-zinc-800 px-2 py-0.5 rounded-md">
+                                Tested {asset.completed_count} {asset.completed_count === 1 ? 'time' : 'times'}
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="px-6 py-4 text-right">
-                          <button
-                            onClick={() => handleRemoveFromPool(asset.id, asset.name)}
-                            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 text-slate-500 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors text-sm"
-                          >
-                            <MoveRight className="h-3.5 w-3.5" />
-                            Return
-                          </button>
+                          <div className="flex items-center justify-end gap-2">
+                            {/* Inline Generate Button (Only shows if it can be tested) */}
+                            {((!asset.is_assigned || asset.duplicate_allowed) && asset.service_name) && (
+                              <button
+                                onClick={() => handleGenerateSingleTest(asset.id)}
+                                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-blue-200 dark:border-blue-900/50 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors text-sm font-bold shadow-sm"
+                                title="Generate new test in Backlog"
+                              >
+                                <Activity className="h-3.5 w-3.5" />
+                                Generate
+                              </button>
+                            )}
+                            <button
+                              onClick={() => handleRemoveFromPool(asset.id, asset.name)}
+                              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 text-slate-500 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors text-sm"
+                            >
+                              <MoveRight className="h-3.5 w-3.5" />
+                              Return
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );

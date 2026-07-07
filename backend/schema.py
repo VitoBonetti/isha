@@ -88,6 +88,7 @@ class RawAssetCreate(AssetBase):
     integrity_rating: Optional[int] = None
     availability_rating: Optional[int] = None
     facing_internet: bool = False
+    duplicate_allowed: bool = False
 
 class AssetResponse(AssetBase):
     id: UUID4

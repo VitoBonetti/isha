@@ -35,6 +35,7 @@ class RawAssets(Base):
     category_id = Column(UUID(as_uuid=True), ForeignKey('service_categories.id', ondelete='SET NULL'), nullable=True)
     create_date = Column(DateTime(timezone=True), default=aware_utcnow)
     update_date = Column(DateTime(timezone=True), nullable=True)
+    duplicate_allowed = Column(Boolean, default=False)
 
     # relashionship
     asset_types = relationship("AssetTypes", back_populates="raw_assets")

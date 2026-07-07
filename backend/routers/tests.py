@@ -45,7 +45,6 @@ def create_test(t: TestCreate, background_tasks: BackgroundTasks,
     if t.asset_ids:
         for asset_id in t.asset_ids:
             cursor.execute('INSERT INTO test_assets (test_id, asset_id) VALUES (%s, %s)', (new_id, str(asset_id)))
-            cursor.execute('UPDATE assets SET is_assigned = TRUE WHERE id = %s', (str(asset_id),))
 
     log_test_history(cursor, new_id, current_user['id'], "CREATED", f"Test manually created.")
     cursor.connection.commit()
@@ -103,8 +102,6 @@ def update_test(test_id: str, t: TestBase, background_tasks: BackgroundTasks,
 def delete_test(test_id: str, background_tasks: BackgroundTasks,
                 current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     cursor.execute('SELECT asset_id FROM test_assets WHERE test_id = %s', (test_id,))
-    for (asset_id,) in cursor.fetchall():
-        cursor.execute('UPDATE assets SET is_assigned = FALSE WHERE id = %s', (str(asset_id),))
 
     cursor.execute('DELETE FROM test_assets WHERE test_id = %s', (test_id,))
     cursor.execute('DELETE FROM assignments WHERE test_id = %s', (test_id,))
@@ -125,7 +122,13 @@ def process_bulk_tests_background(asset_ids: List[UUID4], user_id: str):
                 SELECT r.name, r.service_forecast_id
                 FROM assets a
                 JOIN raw_assets r ON a.raw_asset_id = r.id
-                WHERE a.id = %s AND (a.is_assigned = FALSE OR a.is_assigned IS NULL)
+                WHERE a.id = %s 
+                   AND (r.duplicate_allowed = TRUE OR NOT EXISTS (
+                      SELECT 1 FROM test_assets ta 
+                      JOIN tests t ON ta.test_id = t.id 
+                      WHERE ta.asset_id = a.id 
+                        AND t.stages::text IN ('NOT_PLANNED', 'SCHEDULED', 'IN_PROGRESS')
+                  ))
             ''', (str(asset_id),))
 
             asset_data = cursor.fetchone()
@@ -140,7 +143,6 @@ def process_bulk_tests_background(asset_ids: List[UUID4], user_id: str):
             ''', (new_test_id, asset_name, str(service_lane_id), 2.0, 1))
 
             cursor.execute('INSERT INTO test_assets (test_id, asset_id) VALUES (%s, %s)', (new_test_id, str(asset_id)))
-            cursor.execute('UPDATE assets SET is_assigned = TRUE WHERE id = %s', (str(asset_id),))
             log_test_history(cursor, new_test_id, user_id, "GENERATED", f"Test generated from Asset Pool.")
 
         cursor.connection.commit()
@@ -200,10 +202,21 @@ def complete_test(test_id: str, background_tasks: BackgroundTasks,
                   current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     cursor.execute("UPDATE tests SET stages = 'COMPLETED' WHERE id = %s", (test_id,))
 
+    cursor.execute("SELECT asset_id FROM test_assets WHERE test_id = %s", (test_id,))
+    for (ast_id,) in cursor.fetchall():
+        cursor.execute("SELECT raw_asset_id FROM assets WHERE id = %s", (ast_id,))
+        raw_row = cursor.fetchone()
+        if raw_row:
+            cursor.execute("""
+                INSERT INTO asset_history (id, raw_asset_id, user_id, action, details, timestamp)
+                VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+            """, (str(uuid.uuid4()), str(raw_row[0]), current_user['id'], "TEST_COMPLETED", f"A test cycle was successfully completed for this asset."))
+
     log_test_history(cursor, test_id, current_user['id'], "COMPLETED", "Test marked as completed.")
     cursor.connection.commit()
 
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
     return {"message": "Test marked as Completed."}
 
 

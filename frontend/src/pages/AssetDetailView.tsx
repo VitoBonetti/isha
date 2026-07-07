@@ -164,6 +164,12 @@ export default function AssetDetailView() {
                     <span className="text-sm font-bold text-slate-700 dark:text-zinc-300">Facing Internet</span>
                   </div>
                 </label>
+                <label className={`flex items-center w-fit gap-3 p-3 rounded-lg transition-colors ${isEditing ? 'bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800/50' : 'bg-transparent '}`}>
+                  <input type="checkbox" disabled={!isEditing} className="h-4 w-4 rounded text-blue-500 border-slate-300 disabled:opacity-70" checked={asset.duplicate_allowed || false} onChange={e => setAsset({...asset, duplicate_allowed: e.target.checked})} />
+                  <div className="flex flex-col">
+                    <span className="text-sm font-bold text-slate-700 dark:text-zinc-300">Allow Duplicates</span>
+                  </div>
+                </label>
               </div>
             </div>
 

@@ -300,6 +300,7 @@ export default function Planner() {
         setAssignModalTest={setAssignModalTest}
         backlogFilter={backlogFilter}
         setBacklogFilter={setBacklogFilter}
+        setTargetYear={setTargetYear}
       />
 
       <ConfirmModal
