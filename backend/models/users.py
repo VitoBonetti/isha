@@ -1,8 +1,9 @@
 import uuid
-from sqlalchemy import Column, String, Float, Integer, ForeignKey
+from sqlalchemy import Column, String, Float, Integer, ForeignKey, DateTime, Boolean
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from database import Base
+from utils.timeaware import aware_utcnow
 
 
 class Users(Base):
@@ -27,3 +28,15 @@ class Users(Base):
     assignments = relationship("Assignments", back_populates="users")
     events = relationship("Events", back_populates="users")
     notifications = relationship("Notifications", back_populates="users")
+
+
+class ApiKeys(Base):
+    __tablename__ = "api_keys"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete='CASCADE'), nullable=False)
+    name = Column(String(255), nullable=False)
+    prefix = Column(String(50), nullable=False)
+    hashed_key = Column(String(255), unique=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=aware_utcnow)
+    is_active = Column(Boolean, default=True)

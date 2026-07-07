@@ -10,6 +10,7 @@ import RawAssetsView from "./pages/RawAssetsView";
 import AssetDetailView from "./pages/AssetDetailView";
 import TestsView from "./pages/TestsView";
 import Planner from "./pages/Planner";
+import CountriesView from "./pages/CountriesView";
 import { SprayCan, LogOut } from "lucide-react";
 
 function AppContent() {
@@ -47,6 +48,7 @@ function AppContent() {
         <Route path="/raw" element={<RawAssetsView />} />
         <Route path="/raw/:id" element={<AssetDetailView />} />
         <Route path="/tests" element={<TestsView />} />
+        <Route path="/countries" element={<CountriesView />} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
     </div>
