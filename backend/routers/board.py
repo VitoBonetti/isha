@@ -84,6 +84,71 @@ def calculate_weekly_capacity(cursor, user_id, year, week_number):
     return max(0.0, round(provision - used, 1))
 
 
+# --- AUTO-REBALANCER ---
+def rebalance_user_week_assignments(cursor, user_id, year, week_number):
+    provision = get_user_provision_internal(cursor, user_id, year, week_number)
+
+    # Get current assignments for this week
+    cursor.execute('''
+        SELECT a.id, a.allocated_credits, t.name 
+        FROM assignments a
+        JOIN tests t ON a.test_id = t.id
+        WHERE a.user_id = %s AND a.year = %s AND a.week_number = %s
+        ORDER BY a.allocated_credits DESC
+    ''', (str(user_id), year, week_number))
+
+    assignments = cursor.fetchall()
+    if not assignments: return
+
+    total_used = sum(a[1] for a in assignments)
+
+    # If assignments exceed the new lowered capacity, shrink them
+    if total_used > provision:
+        excess = total_used - provision
+        for asg_id, alloc, t_name in assignments:
+            if excess <= 0: break
+
+            reduction = min(alloc, excess)
+            new_alloc = round(alloc - reduction, 1)
+            excess -= reduction
+
+            if new_alloc > 0:
+                cursor.execute("UPDATE assignments SET allocated_credits = %s WHERE id = %s", (new_alloc, asg_id))
+                # Notify the user their hours were cut
+                cursor.execute(
+                    "INSERT INTO notifications (id, user_id, message, type, created_at) VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)",
+                    (str(uuid.uuid4()), str(user_id),
+                     f"Your capacity on '{t_name}' (Wk {week_number}) was reduced to {new_alloc}cr due to time off.",
+                     "WARNING"))
+            else:
+                cursor.execute("DELETE FROM assignments WHERE id = %s", (asg_id,))
+                cursor.execute(
+                    "INSERT INTO notifications (id, user_id, message, type, created_at) VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)",
+                    (str(uuid.uuid4()), str(user_id),
+                     f"You were removed from '{t_name}' (Wk {week_number}) due to time off.", "REMOVAL"))
+
+
+def rebalance_affected_assignments(cursor, start_date, end_date, user_id=None, location_id=None):
+    affected_weeks = set()
+    d = start_date
+    while d <= end_date:
+        iso = d.isocalendar()
+        affected_weeks.add((iso[0], iso[1]))  # (year, week)
+        d += timedelta(days=1)
+
+    users_to_rebalance = []
+    if user_id:
+        users_to_rebalance = [str(user_id)]
+    else:
+        if location_id:
+            cursor.execute("SELECT id FROM users WHERE location_id = %s", (str(location_id),))
+        else:
+            cursor.execute("SELECT id FROM users")
+        users_to_rebalance = [str(r[0]) for r in cursor.fetchall()]
+
+    for u in users_to_rebalance:
+        for y, w in affected_weeks:
+            rebalance_user_week_assignments(cursor, u, y, w)
 # --- 2. THE MAIN BOARD PAYLOAD ---
 @router.get("/{year}/Q{quarter}")
 def get_quarterly_board(year: int, quarter: int, response: Response,
@@ -297,6 +362,7 @@ def create_event(e: EventCreate, background_tasks: BackgroundTasks,
         'INSERT INTO events (id, user_id, event_type, location_id, start_date, end_date) VALUES (%s, %s, %s, %s, %s, %s)',
         (new_event_id, u_id, e_type, loc_id, e.start_date, e.end_date)
     )
+    rebalance_affected_assignments(cursor, e.start_date, e.end_date, u_id, loc_id)
     cursor.connection.commit()
 
     log_audit_event(
@@ -321,6 +387,10 @@ def update_event(event_id: str, e: EventBase, background_tasks: BackgroundTasks,
         'UPDATE events SET event_type=%s, location_id=%s, start_date=%s, end_date=%s WHERE id=%s',
         (e_type, loc_id, e.start_date, e.end_date, event_id)
     )
+    cursor.execute("SELECT user_id FROM events WHERE id = %s", (event_id,))
+    u_row = cursor.fetchone()
+    current_u_id = str(u_row[0]) if u_row and u_row[0] else None
+    rebalance_affected_assignments(cursor, e.start_date, e.end_date, current_u_id, loc_id)
     cursor.connection.commit()
 
     log_audit_event(

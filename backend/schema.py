@@ -150,6 +150,7 @@ class EventType(str, Enum):
     national_holiday = "national_holiday"
     team_day = "team_day"
     personal_time_off = "personal_time_off"
+    sick_day = "sick_day"
 
 class EventBase(BaseModel):
     event_type: EventType

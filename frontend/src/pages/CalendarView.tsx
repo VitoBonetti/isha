@@ -242,6 +242,10 @@ export default function CalendarView() {
                       } else if (eType === 'team_day') {
                         bgClass = 'bg-fuchsia-100 dark:bg-fuchsia-500/20'; borderClass = 'border-fuchsia-500'; textClass = 'text-fuchsia-800 dark:text-fuchsia-400';
                         label = `🚀 Team Day`;
+                      } else if (eType === 'sick_day') {
+                        // NEW: Distinct styling for Sick Days
+                        bgClass = 'bg-orange-100 dark:bg-orange-500/20'; borderClass = 'border-orange-500'; textClass = 'text-orange-800 dark:text-orange-400';
+                        label = `🤒 ${user?.name || 'Unknown User'} (Sick)`;
                       } else {
                         const theme = getUserColor(user?.id, localPentesters);
                         bgClass = theme.bg; borderClass = theme.border; textClass = theme.text;
@@ -249,7 +253,7 @@ export default function CalendarView() {
 
                       const isAdmin = currentUser?.role === 'admin';
                       const isOwner = String(user?.id) === String(currentUser?.id);
-                      const canEdit = isAdmin || (eType === 'personal_time_off' && isOwner);
+                      const canEdit = isAdmin || (['personal_time_off', 'sick_day'].includes(eType) && isOwner);
 
                       return (
                         <div
