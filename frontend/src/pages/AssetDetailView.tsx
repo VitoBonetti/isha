@@ -55,6 +55,8 @@ export default function AssetDetailView() {
     try {
       const payload = {
         ...asset,
+        facing_internet: !!asset.facing_internet,
+        duplicate_allowed: !!asset.duplicate_allowed,
         business_critical: businessCritical,
         country_id: asset.country_id === "" ? null : asset.country_id,
         service_forecast_id: asset.service_forecast_id === "" ? null : asset.service_forecast_id,
