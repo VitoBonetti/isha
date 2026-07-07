@@ -21,6 +21,8 @@ def get_user_provision_internal(cursor, user_id, year, week_number):
     if not user_data: return 0.0
     base_cap, user_location_id, start_week, start_year, end_week, end_year = user_data
 
+    base_cap = float(base_cap or 0.0)
+
     if start_week is None: start_week = 1
     if start_year is None: start_year = 2024
 

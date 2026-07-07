@@ -19,6 +19,7 @@ export default function AddRawAssetModal({ isOpen, onClose, onSuccess, countries
     description: "",
     asset_type_id: "",
     facing_internet: false,
+    duplicate_allowed: false, // <-- 1. ADDED HERE
     country_id: "",
     service_forecast_id: "",
     category_id: "",
@@ -50,7 +51,7 @@ export default function AddRawAssetModal({ isOpen, onClose, onSuccess, countries
       await axios.post('/api/assets/raw', payload);
       toast.success("Asset added successfully!");
 
-      setNewAsset({ name: "", description: "", asset_type_id: "", facing_internet: false, country_id: "", service_forecast_id: "", category_id: "", confidentiality_rating: 0, integrity_rating: 0, availability_rating: 0 });
+      setNewAsset({ name: "", description: "", asset_type_id: "", facing_internet: false, duplicate_allowed: false, country_id: "", service_forecast_id: "", category_id: "", confidentiality_rating: 0, integrity_rating: 0, availability_rating: 0 });
       onSuccess();
       onClose();
     } catch (error) {
@@ -94,20 +95,23 @@ export default function AddRawAssetModal({ isOpen, onClose, onSuccess, countries
             <textarea className={`${inputClasses} resize-none h-20`} value={newAsset.description} onChange={e => setNewAsset({...newAsset, description: e.target.value})} placeholder="Brief overview of the asset..." />
           </div>
 
-          <label className="flex items-center gap-3 p-3 bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-lg cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800/50 transition-colors">
-            <input type="checkbox" className="h-4 w-4 rounded text-emerald-500 border-slate-300" checked={newAsset.facing_internet} onChange={e => setNewAsset({...newAsset, facing_internet: e.target.checked})} />
-            <div className="flex flex-col">
-              <span className="text-sm font-bold text-slate-700 dark:text-zinc-300 flex items-center gap-2"><Globe size={14}/> Facing Internet</span>
-              <span className="text-xs text-slate-500">Asset is accessible externally without VPN.</span>
-            </div>
-          </label>
-          <label className="flex items-center gap-3 p-3 bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-lg cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800/50 transition-colors">
-            <input type="checkbox" className="h-4 w-4 rounded text-blue-500 border-slate-300" checked={newAsset.duplicate_allowed} onChange={e => setNewAsset({...newAsset, duplicate_allowed: e.target.checked})} />
-            <div className="flex flex-col">
-              <span className="text-sm font-bold text-slate-700 dark:text-zinc-300 flex items-center gap-2">Allow Duplicates</span>
-              <span className="text-xs text-slate-500">Permit concurrent active tests.</span>
-            </div>
-          </label>
+          {/* 2. WRAPPED IN GRID CONTAINER */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <label className="flex items-center gap-3 p-3 bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-lg cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800/50 transition-colors">
+              <input type="checkbox" className="h-4 w-4 rounded text-emerald-500 border-slate-300" checked={newAsset.facing_internet} onChange={e => setNewAsset({...newAsset, facing_internet: e.target.checked})} />
+              <div className="flex flex-col">
+                <span className="text-sm font-bold text-slate-700 dark:text-zinc-300 flex items-center gap-2"><Globe size={14}/> Facing Internet</span>
+                <span className="text-xs text-slate-500">Accessible externally without VPN.</span>
+              </div>
+            </label>
+            <label className="flex items-center gap-3 p-3 bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-lg cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800/50 transition-colors">
+              <input type="checkbox" className="h-4 w-4 rounded text-blue-500 border-slate-300" checked={newAsset.duplicate_allowed} onChange={e => setNewAsset({...newAsset, duplicate_allowed: e.target.checked})} />
+              <div className="flex flex-col">
+                <span className="text-sm font-bold text-slate-700 dark:text-zinc-300 flex items-center gap-2">Allow Duplicates</span>
+                <span className="text-xs text-slate-500">Permit concurrent active tests.</span>
+              </div>
+            </label>
+          </div>
 
           {/* Ratings (CIA Triad & Business Criticality) */}
           <div className="bg-slate-50 dark:bg-zinc-950/50 p-4 rounded-xl border border-slate-200 dark:border-zinc-800">
@@ -125,17 +129,14 @@ export default function AddRawAssetModal({ isOpen, onClose, onSuccess, countries
               </div>
               <div>
                 <label className="text-xs font-bold text-slate-700 dark:text-zinc-300">Confidentiality</label>
-                {/* FIX: Restored to max 5 */}
                 <input type="number" min="0" max="5" className={ratingClasses} value={newAsset.confidentiality_rating} onChange={e => setNewAsset({...newAsset, confidentiality_rating: parseInt(e.target.value) || 0})} />
               </div>
               <div>
                 <label className="text-xs font-bold text-slate-700 dark:text-zinc-300">Integrity</label>
-                {/* FIX: Restored to max 5 */}
                 <input type="number" min="0" max="5" className={ratingClasses} value={newAsset.integrity_rating} onChange={e => setNewAsset({...newAsset, integrity_rating: parseInt(e.target.value) || 0})} />
               </div>
               <div>
                 <label className="text-xs font-bold text-slate-700 dark:text-zinc-300">Availability</label>
-                {/* FIX: Restored to max 5 */}
                 <input type="number" min="0" max="5" className={ratingClasses} value={newAsset.availability_rating} onChange={e => setNewAsset({...newAsset, availability_rating: parseInt(e.target.value) || 0})} />
               </div>
             </div>
