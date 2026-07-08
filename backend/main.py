@@ -5,7 +5,7 @@ import traceback
 import os
 import time
 from jose import jwt
-from routers import auth, services, users, regions, countries, assets, tests, board, logs, locations
+from routers import auth, services, users, regions, countries, assets, tests, board, logs, locations, insights
 from routers.auth import require_admin
 from database import get_db_connection, release_db_connection
 from websockets_manager import manager
@@ -59,6 +59,7 @@ app.include_router(assets.router)
 app.include_router(tests.router)
 app.include_router(board.router)
 app.include_router(logs.router)
+app.include_router(insights.router)
 
 
 # --- WEBSOCKET FOR REACTIVE UI ---
