@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, BackgroundTasks
 from database import get_db_cursor
-from routers.auth import require_admin
+from routers.auth import require_admin, get_current_user
 from schema import ServiceLaneBase
 from websockets_manager import manager
 import uuid
@@ -8,7 +8,7 @@ import uuid
 router = APIRouter(prefix="/api/services", tags=["Services"])
 
 @router.get("/")
-def get_services(cursor=Depends(get_db_cursor)):
+def get_services(current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
     cursor.execute('''
         SELECT id, name, max_concurrent_per_week, theme_color, 
                default_credits, default_duration_weeks, display_order, is_active

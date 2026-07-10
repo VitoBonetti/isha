@@ -10,8 +10,8 @@ from datetime import datetime
 router = APIRouter(prefix="/api/users", tags=["Users"])
 
 
-@router.get("/system/status")
-def check_system_status(cursor=Depends(get_db_cursor)):
+@router.get("/system/status", include_in_schema=False)
+def check_system_status(current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     # Simply checks if the board has been initialized at least once
     cursor.execute("SELECT COUNT(*) FROM users")
     count = cursor.fetchone()[0]

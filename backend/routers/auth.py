@@ -24,7 +24,7 @@ ALGORITHM = "HS256"
 
 # --- 1. THE GITHUB OAUTH HANDSHAKE ---
 
-@router.get("/github/callback")
+@router.get("/github/callback", include_in_schema=False)
 async def github_callback(code: str, cursor=Depends(get_db_cursor)):
     # 1. Start the Async Client session
     async with httpx.AsyncClient() as client:
