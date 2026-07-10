@@ -320,7 +320,7 @@ export default function RawAssetsView() {
             <span className="text-sm text-slate-500">Page {page}</span>
             <div className="flex gap-2">
               <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} className="px-4 py-1.5 border border-slate-300 dark:border-zinc-700 rounded-lg hover:bg-slate-100 dark:hover:bg-zinc-800 disabled:opacity-50 text-sm font-medium">Prev</button>
-              <button onClick={() => setPage(p => p + 1)} disabled={assets.length < 50} className="px-4 py-1.5 border border-slate-300 dark:border-zinc-700 rounded-lg hover:bg-slate-100 dark:hover:bg-zinc-800 disabled:opacity-50 text-sm font-medium">Next</button>
+              <button onClick={() => setPage(p => p + 1)} disabled={assets.length < 20} className="px-4 py-1.5 border border-slate-300 dark:border-zinc-700 rounded-lg hover:bg-slate-100 dark:hover:bg-zinc-800 disabled:opacity-50 text-sm font-medium">Next</button>
             </div>
           </div>
         </div>
