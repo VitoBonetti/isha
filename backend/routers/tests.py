@@ -31,7 +31,7 @@ def log_test_history(cursor, test_id: str, user_id: str, action: str, details: s
 
 
 # --- 1. CORE TEST MANAGEMENT ---
-@router.post("/")
+@router.post("/", summary="[Admin Only]")
 def create_test(t: TestCreate, background_tasks: BackgroundTasks,
                 current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     new_test_id = str(uuid.uuid4())
@@ -74,7 +74,7 @@ def get_all_tests(current_user: dict = Depends(get_current_user), cursor=Depends
     return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
 
-@router.put("/{test_id}")
+@router.put("/{test_id}", summary="[Admin Only]")
 def update_test(test_id: str, t: TestBase, background_tasks: BackgroundTasks,
                 current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     db_stage = FRONTEND_TO_DB_STAGES.get(t.status, "NOT_PLANNED")
@@ -98,7 +98,7 @@ def update_test(test_id: str, t: TestBase, background_tasks: BackgroundTasks,
     return {"message": "Test updated successfully."}
 
 
-@router.delete("/{test_id}")
+@router.delete("/{test_id}", summary="[Admin Only]")
 def delete_test(test_id: str, background_tasks: BackgroundTasks,
                 current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     cursor.execute('SELECT asset_id FROM test_assets WHERE test_id = %s', (test_id,))
@@ -148,7 +148,7 @@ def process_bulk_tests_background(asset_ids: List[UUID4], user_id: str):
         cursor.connection.commit()
 
 
-@router.post("/bulk")
+@router.post("/bulk", summary="[Admin Only]")
 def bulk_create_tests(req: BulkTestCreate, background_tasks: BackgroundTasks,
                       current_user: dict = Depends(require_admin)):
     background_tasks.add_task(process_bulk_tests_background, req.asset_ids, str(current_user['id']))
@@ -157,7 +157,7 @@ def bulk_create_tests(req: BulkTestCreate, background_tasks: BackgroundTasks,
 
 
 # --- 3. SCHEDULING & STATUS LIFECYCLE ---
-@router.put("/{test_id}/schedule")
+@router.put("/{test_id}/schedule", summary="[Admin Only]")
 def schedule_test(test_id: str, schedule: TestSchedule, background_tasks: BackgroundTasks,
                   current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     cursor.execute('UPDATE tests SET start_week = %s, start_year = %s, stages = %s WHERE id = %s',
@@ -171,7 +171,7 @@ def schedule_test(test_id: str, schedule: TestSchedule, background_tasks: Backgr
     return {"message": "Test scheduled on the board."}
 
 
-@router.put("/{test_id}/unschedule")
+@router.put("/{test_id}/unschedule", summary="[Admin Only]")
 def unschedule_test(test_id: str, background_tasks: BackgroundTasks,
                     current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     cursor.execute('SELECT user_id FROM assignments WHERE test_id = %s', (test_id,))
@@ -197,7 +197,7 @@ def unschedule_test(test_id: str, background_tasks: BackgroundTasks,
     return {"message": "Test returned to backlog."}
 
 
-@router.put("/{test_id}/complete")
+@router.put("/{test_id}/complete", summary="[Admin Only]")
 def complete_test(test_id: str, background_tasks: BackgroundTasks,
                   current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     cursor.execute("UPDATE tests SET stages = 'COMPLETED' WHERE id = %s", (test_id,))
@@ -220,7 +220,7 @@ def complete_test(test_id: str, background_tasks: BackgroundTasks,
     return {"message": "Test marked as Completed."}
 
 
-@router.put("/{test_id}/unable")
+@router.put("/{test_id}/unable", summary="[Admin Only]")
 def mark_test_unable(test_id: str, background_tasks: BackgroundTasks,
                      current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     # 1. Fetch Original Test Details
@@ -267,7 +267,7 @@ def mark_test_unable(test_id: str, background_tasks: BackgroundTasks,
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Test marked as Stopped."}
 
-@router.put("/{test_id}/unstop")
+@router.put("/{test_id}/unstop", summary="[Admin Only]")
 def unstop_test(test_id: str, background_tasks: BackgroundTasks,
                 current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     # 1. Get the Original test
@@ -318,7 +318,7 @@ def unstop_test(test_id: str, background_tasks: BackgroundTasks,
 
 
 # Make un-completing a test cleaner on the backend
-@router.put("/{test_id}/uncomplete")
+@router.put("/{test_id}/uncomplete", summary="[Admin Only]")
 def uncomplete_test(test_id: str, background_tasks: BackgroundTasks,
                     current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     cursor.execute("UPDATE tests SET stages = 'SCHEDULED' WHERE id = %s", (test_id,))
@@ -329,7 +329,7 @@ def uncomplete_test(test_id: str, background_tasks: BackgroundTasks,
 
 
 # --- 4. ASSIGNMENTS ---
-@router.post("/assignments")
+@router.post("/assignments", summary="[Admin Only]")
 def create_assignment(assign: AssignmentCreate, background_tasks: BackgroundTasks,
                       current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     cursor.execute('''
@@ -360,7 +360,7 @@ def create_assignment(assign: AssignmentCreate, background_tasks: BackgroundTask
     return {"message": "Successfully Assigned"}
 
 
-@router.delete("/assignments/{test_id}/{user_id}")
+@router.delete("/assignments/{test_id}/{user_id}", summary="[Admin Only]")
 def remove_assignment(test_id: str, user_id: str, background_tasks: BackgroundTasks,
                       current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     cursor.execute("SELECT name FROM tests WHERE id = %s", (test_id,))

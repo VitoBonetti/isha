@@ -14,7 +14,7 @@ def get_locations(current_user: dict = Depends(get_current_user), cursor = Depen
     return [{"id": r[0], "name": r[1], "is_active": r[2]} for r in cursor.fetchall()]
 
 
-@router.post("/")
+@router.post("/", summary="[Admin Only]")
 def create_location(loc: LocationBase, current_user: dict = Depends(require_admin), cursor = Depends(get_db_cursor)):
     new_location_id = str(uuid.uuid4())
     try:
@@ -26,14 +26,14 @@ def create_location(loc: LocationBase, current_user: dict = Depends(require_admi
         raise HTTPException(status_code=400, detail=f"Location name already exists. {e}")
 
 
-@router.put("/{loc_id}")
+@router.put("/{loc_id}", summary="[Admin Only]")
 def update_location(loc_id: str, loc: LocationBase, current_user: dict = Depends(require_admin), cursor = Depends(get_db_cursor)):
     cursor.execute("UPDATE locations SET name=%s, is_active=%s WHERE id=%s", (loc.name, loc.is_active, loc_id))
     cursor.connection.commit()
     return {"message": "Location updated."}
 
 
-@router.delete("/{loc_id}")
+@router.delete("/{loc_id}", summary="[Admin Only]")
 def delete_location(loc_id: str, current_user: dict = Depends(require_admin), cursor = Depends(get_db_cursor)):
     cursor.execute("DELETE FROM locations WHERE id = %s", (loc_id,))
     cursor.connection.commit()

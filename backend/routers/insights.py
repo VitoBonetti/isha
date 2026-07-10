@@ -7,7 +7,7 @@ from routers.auth import require_admin
 router = APIRouter(prefix="/api/insights", tags=["Insights"])
 
 
-@router.get("/")
+@router.get("/", summary="[Admin Only]")
 def get_yearly_insights(year: Optional[int] = None, current_user: dict = Depends(require_admin),
                         cursor=Depends(get_db_cursor)):
     if not year: year = datetime.now().year

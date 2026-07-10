@@ -21,7 +21,7 @@ def get_regions(current_user: dict = Depends(get_current_user), cursor=Depends(g
     return [{"id": r[0], "name": r[1], "is_active": r[2]} for r in cursor.fetchall()]
 
 
-@router.post("/")
+@router.post("/", summary="[Admin Only]")
 def create_region(r: RegionBase, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
 
     new_region_id = str(uuid.uuid4())
@@ -37,7 +37,7 @@ def create_region(r: RegionBase, current_user: dict = Depends(require_admin), cu
         raise HTTPException(status_code=400, detail="Region name already exists.")
 
 
-@router.put("/{region_id}")
+@router.put("/{region_id}", summary="[Admin Only]")
 def update_region(region_id: str, r: RegionBase, current_user: dict = Depends(require_admin),
                   cursor=Depends(get_db_cursor)):
     cursor.execute("UPDATE regions SET name=%s, is_active=%s WHERE id=%s", (r.name, r.is_active, region_id))
@@ -45,7 +45,7 @@ def update_region(region_id: str, r: RegionBase, current_user: dict = Depends(re
     return {"message": "Region updated."}
 
 
-@router.delete("/{region_id}")
+@router.delete("/{region_id}", summary="[Admin Only]")
 def delete_region(region_id: str, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     cursor.execute("DELETE FROM regions WHERE id = %s", (region_id,))
     cursor.connection.commit()

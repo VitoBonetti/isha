@@ -149,7 +149,9 @@ def rebalance_affected_assignments(cursor, start_date, end_date, user_id=None, l
     for u in users_to_rebalance:
         for y, w in affected_weeks:
             rebalance_user_week_assignments(cursor, u, y, w)
-# --- 2. THE MAIN BOARD PAYLOAD ---
+
+
+# --- THE MAIN BOARD PAYLOAD ---
 @router.get("/{year}/Q{quarter}")
 def get_quarterly_board(year: int, quarter: int, response: Response,
                         current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
@@ -258,7 +260,7 @@ def get_categories(current_user: dict = Depends(get_current_user), cursor=Depend
     return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
 
-@router.post("/categories/")
+@router.post("/categories/", summary="[Admin Only]")
 def create_category(cat: ServiceCategoryCreate, current_user: dict = Depends(require_admin),
                     cursor=Depends(get_db_cursor)):
     # Safely convert UUID to string for psycopg2
@@ -284,7 +286,7 @@ def create_category(cat: ServiceCategoryCreate, current_user: dict = Depends(req
     return {"id": new_id}
 
 
-@router.put("/categories/{cat_id}")
+@router.put("/categories/{cat_id}", summary="[Admin Only]")
 def update_category(cat_id: str, cat: ServiceCategoryBase, background_tasks: BackgroundTasks,
                     current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     cursor.execute(
@@ -305,7 +307,7 @@ def update_category(cat_id: str, cat: ServiceCategoryBase, background_tasks: Bac
     return {"message": "Category updated"}
 
 
-@router.delete("/categories/{cat_id}")
+@router.delete("/categories/{cat_id}", summary="[Admin Only]")
 def delete_category(cat_id: str, background_tasks: BackgroundTasks,
                     current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     service_category_name = cursor.execute('SELECT name FROM service_categories WHERE id=%s', (cat_id,)).fetchone()[0]
@@ -429,7 +431,7 @@ def delete_event(event_id: str, background_tasks: BackgroundTasks,
     return {"message": "Event deleted"}
 
 
-@router.delete("/system/wipe")
+@router.delete("/system/wipe", summary="[Admin Only]")
 def wipe_system_data(background_tasks: BackgroundTasks,
                      current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     """

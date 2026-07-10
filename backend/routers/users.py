@@ -18,7 +18,7 @@ def check_system_status(current_user: dict = Depends(require_admin), cursor=Depe
     return {"setup_required": count == 0}
 
 
-@router.get("/")
+@router.get("/", summary="[Admin Only]")
 def get_all_users(current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     cursor.execute("""
         SELECT id, email, name, role, base_capacity, start_week, start_year, end_week, end_year, location_id, avatar_url 
@@ -35,7 +35,7 @@ def get_all_users(current_user: dict = Depends(require_admin), cursor=Depends(ge
     return users
 
 
-@router.post("/")
+@router.post("/", summary="[Admin Only]")
 def create_user(u: UserCreate, background_tasks: BackgroundTasks,
                 current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     if u.role.value == 'read_only':
@@ -57,7 +57,7 @@ def create_user(u: UserCreate, background_tasks: BackgroundTasks,
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": f"User {u.name} whitelisted in the database."}
 
-@router.delete("/{user_id}")
+@router.delete("/{user_id}", summary="[Admin Only]")
 def delete_user(user_id: str, background_tasks: BackgroundTasks,
                 current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     """
@@ -91,7 +91,7 @@ def delete_user(user_id: str, background_tasks: BackgroundTasks,
         background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
         return {"message": "User successfully offboarded."}
 
-@router.put("/{user_id}")
+@router.put("/{user_id}", summary="[Admin Only]")
 def update_user(user_id: str, u: UserBase, background_tasks: BackgroundTasks,
                 current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     if u.role == 'read_only':
