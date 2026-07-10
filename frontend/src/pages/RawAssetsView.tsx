@@ -79,7 +79,7 @@ export default function RawAssetsView() {
   const fetchRawAssets = async () => {
     try {
       setLoading(true);
-      const params: any = { page, limit: 50, sort_by: sortBy, sort_dir: sortDir };
+      const params: any = { page, limit: 20, sort_by: sortBy, sort_dir: sortDir };
 
       if (debouncedSearch) params.search = debouncedSearch;
       if (filters.country) params.country_id = filters.country;
