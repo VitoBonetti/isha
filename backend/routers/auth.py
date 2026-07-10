@@ -65,7 +65,7 @@ async def github_callback(code: str, cursor=Depends(get_db_cursor)):
     # --- CLIENT SAFELY CLOSES HERE ---
 
     if not email:
-        return Response(status_code=302, headers={"Location": "http://localhost:5173/login?error=no_email"})
+        return Response(status_code=302, headers={"Location": "https://isha.vitobonetti.nl/login?error=no_email"})
 
     avatar_url = gh_user.get("avatar_url")
     github_id = str(gh_user.get("id"))
@@ -84,13 +84,13 @@ async def github_callback(code: str, cursor=Depends(get_db_cursor)):
         cursor.connection.commit()
     else:
         # User NOT Found: Redirect to login with "Not Invited" error
-        return Response(status_code=302, headers={"Location": "http://localhost:5173/login?error=not_invited"})
+        return Response(status_code=302, headers={"Location": "https://isha.vitobonetti.nl/login?error=not_invited"})
 
     # Issue JWT
     token = jwt.encode({"sub": email}, SECRET_KEY, algorithm=ALGORITHM)
 
     # Redirect to dashboard and set cookie
-    response = Response(status_code=302, headers={"Location": "http://localhost:5173/dashboard"})
+    response = Response(status_code=302, headers={"Location": "https://isha.vitobonetti.nl/dashboard"})
     response.set_cookie(
         key="access_token",
         value=token,
