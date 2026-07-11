@@ -133,6 +133,9 @@ class TestSchedule(BaseModel):
     start_week: int
     start_year: int
 
+class SecureNotePayload(BaseModel):
+    note: str
+
 class BulkTestCreate(BaseModel):
     asset_ids: List[UUID4]
 

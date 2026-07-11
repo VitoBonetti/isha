@@ -187,31 +187,34 @@ def get_quarterly_board(year: int, quarter: int, response: Response,
 
     # 3. Tests (Backlog) - Force stages::text to prevent serialization errors
     cursor.execute('''
-        SELECT t.id, t.name, t.service_lane_id, t.category_id, 
-               t.credits_per_week, t.duration_weeks, t.stages::text,
-               (SELECT COUNT(*) FROM test_assets WHERE test_id = t.id)
-        FROM tests t
-        WHERE t.stages::text = 'NOT_PLANNED'
-    ''')
+            SELECT t.id, t.name, t.service_lane_id, t.category_id, 
+                   t.credits_per_week, t.duration_weeks, t.stages::text,
+                   (SELECT COUNT(*) FROM test_assets WHERE test_id = t.id),
+                   EXISTS(SELECT 1 FROM secret_notes WHERE test_id = t.id)
+            FROM tests t
+            WHERE t.stages::text = 'NOT_PLANNED'
+        ''')
     backlog = []
     for r in cursor.fetchall():
         backlog.append({
             "id": str(r[0]), "name": r[1], "service_lane_id": str(r[2]) if r[2] else None,
             "category_id": str(r[3]) if r[3] else None,
-            "credits": r[4], "duration": r[5], "status": enum_map.get(str(r[6]), str(r[6])), "asset_count": r[7]
+            "credits": r[4], "duration": r[5], "status": enum_map.get(str(r[6]), str(r[6])),
+            "asset_count": r[7], "has_secret": r[8]
         })
 
     # 4. Tests (Scheduled) - Force stages::text to prevent serialization errors
     cursor.execute('''
-        SELECT t.id, t.name, t.service_lane_id, t.category_id, 
-               t.credits_per_week, t.duration_weeks, t.start_week, t.start_year, t.stages::text,
-               (SELECT COUNT(*) FROM test_assets WHERE test_id = t.id)
-        FROM tests t
-        WHERE t.stages::text IN ('SCHEDULED', 'IN_PROGRESS', 'STOPPED', 'COMPLETED') 
-          AND t.start_year = %s 
-          AND (t.start_week + t.duration_weeks - 1) >= %s 
-          AND t.start_week <= %s
-    ''', (year, weeks[0], weeks[-1]))
+            SELECT t.id, t.name, t.service_lane_id, t.category_id, 
+                   t.credits_per_week, t.duration_weeks, t.start_week, t.start_year, t.stages::text,
+                   (SELECT COUNT(*) FROM test_assets WHERE test_id = t.id),
+                   EXISTS(SELECT 1 FROM secret_notes WHERE test_id = t.id)
+            FROM tests t
+            WHERE t.stages::text IN ('SCHEDULED', 'IN_PROGRESS', 'STOPPED', 'COMPLETED') 
+              AND t.start_year = %s 
+              AND (t.start_week + t.duration_weeks - 1) >= %s 
+              AND t.start_week <= %s
+        ''', (year, weeks[0], weeks[-1]))
 
     scheduled = []
     for r in cursor.fetchall():
@@ -219,7 +222,7 @@ def get_quarterly_board(year: int, quarter: int, response: Response,
             "id": str(r[0]), "name": r[1], "service_lane_id": str(r[2]) if r[2] else None,
             "category_id": str(r[3]) if r[3] else None,
             "credits": r[4], "duration": r[5], "startWeek": r[6], "startYear": r[7],
-            "status": enum_map.get(str(r[8]), str(r[8])), "asset_count": r[9]
+            "status": enum_map.get(str(r[8]), str(r[8])), "asset_count": r[9], "has_secret": r[10]
         })
 
     # 5. Assignments
@@ -470,3 +473,12 @@ def wipe_system_data(background_tasks: BackgroundTasks,
     except Exception as e:
         cursor.connection.rollback()
         raise HTTPException(status_code=500, detail="Failed to wipe system data.")
+
+
+@router.delete("/system/wipe-secrets", summary="[Admin Only]")
+def wipe_all_secrets(background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    cursor.execute("TRUNCATE TABLE secret_notes CASCADE;")
+    log_audit_event(str(current_user["id"]), current_user["name"], "WIPE_SECRETS", "DATABASE", details="Wiped ALL encrypted secure notes.")
+    cursor.connection.commit()
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+    return {"message": "All secure notes wiped."}

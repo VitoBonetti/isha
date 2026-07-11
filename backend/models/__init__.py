@@ -8,3 +8,4 @@ from .tests import Tests, TestAssets, TestStages, Assignments
 from .events import Events
 from .notifications import Notifications
 from .histories import AssetHistory, TestHistory
+from .secret_notes import SecretNotes
