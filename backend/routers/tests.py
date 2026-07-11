@@ -386,7 +386,7 @@ def remove_assignment(test_id: str, user_id: str, background_tasks: BackgroundTa
 @router.get("/{test_id}/history")
 def get_test_history(test_id: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
     cursor.execute('''
-        SELECT th.id, th.action, th.details, th.timestamp as created_at, u.name as user_name
+        SELECT th.id, th.action, th.details, th.timestamp, u.name as user_name
         FROM test_history th
         LEFT JOIN users u ON th.user_id = u.id
         WHERE th.test_id = %s
