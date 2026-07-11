@@ -359,20 +359,20 @@ export default function AssetsView() {
                         disabled={validForSelection.length === 0}
                       />
                     </th>
-                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800/50 transition-colors" onClick={() => handleSort("name")}>
-                      <div className="flex items-center gap-1.5">Asset Name <SortIcon column="name"/></div>
+                    <th className="p-4 font-semibold text-slate-500 uppercase cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"  onClick={() => handleSort("name")}>
+                      <div className="flex items-center gap-2">Asset Name <SortIcon column="name"/></div>
                     </th>
-                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800/50 transition-colors" onClick={() => handleSort("type")}>
-                      <div className="flex items-center gap-1.5">Type <SortIcon column="type"/></div>
+                    <th className="p-4 font-semibold text-slate-500 uppercase cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"  onClick={() => handleSort("type")}>
+                      <div className="flex items-center gap-2">Type <SortIcon column="type"/></div>
                     </th>
-                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800/50 transition-colors" onClick={() => handleSort("country")}>
-                      <div className="flex items-center gap-1.5">Country <SortIcon column="country"/></div>
+                    <th className="p-4 font-semibold text-slate-500 uppercase cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"  onClick={() => handleSort("country")}>
+                      <div className="flex items-center gap-2">Country <SortIcon column="country"/></div>
                     </th>
-                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800/50 transition-colors" onClick={() => handleSort("service")}>
-                      <div className="flex items-center gap-1.5">Service Lane <SortIcon column="service"/></div>
+                    <th className="p-4 font-semibold text-slate-500 uppercase cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"  onClick={() => handleSort("service")}>
+                      <div className="flex items-center gap-2">Service Lane <SortIcon column="service"/></div>
                     </th>
-                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800/50 transition-colors" onClick={() => handleSort("status")}>
-                      <div className="flex items-center gap-1.5">Status <SortIcon column="status"/></div>
+                    <th className="p-4 font-semibold text-slate-500 uppercase cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"  onClick={() => handleSort("status")}>
+                      <div className="flex items-center gap-2">Status <SortIcon column="status"/></div>
                     </th>
                     <th className="px-6 py-4 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Actions</th>
                   </tr>
