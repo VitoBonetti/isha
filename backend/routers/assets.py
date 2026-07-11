@@ -129,6 +129,15 @@ def get_raw_assets(
 
     where_str = "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
 
+    #  total 4 paginator
+    count_query = f"""
+            SELECT COUNT(*) FROM raw_assets r
+            LEFT JOIN assets a ON r.id = a.raw_asset_id
+            {where_str}
+        """
+    cursor.execute(count_query, tuple(params))
+    total_count = cursor.fetchone()[0]
+
     sort_map = {
         "name": "r.name", "country": "c.code", "service": "s.name",
         "category": "cat.name", "type": "at.name", "status": "is_promoted"
@@ -152,7 +161,9 @@ def get_raw_assets(
     """
     cursor.execute(query, tuple(params + [limit, offset]))
     columns = [col[0] for col in cursor.description]
-    return [dict(zip(columns, row)) for row in cursor.fetchall()]
+    items = [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+    return {"items": items, "total_count": total_count}
 
 # --- STANDARDIZED ASSET HISTORY LOGGING ---
 def insert_asset_history(cursor, raw_asset_id: str, user_id: str, action: str, details: str):

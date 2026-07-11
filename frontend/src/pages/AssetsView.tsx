@@ -191,7 +191,8 @@ export default function AssetsView() {
   const stats = {
     total: assets.length,
     assigned: assets.filter(a => a.is_assigned).length,
-    unassigned: assets.filter(a => !a.is_assigned || a.duplicate_allowed).length
+    unassigned: assets.filter(a => !a.is_assigned || a.duplicate_allowed).length,
+    completed: assets.filter(a => a.completed_count > 0).length
   };
 
   // UNLOCKED: Users can now select unassigned assets even if they are missing a Service Lane!
@@ -252,7 +253,7 @@ export default function AssetsView() {
         </p>
 
         {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
           <div className="bg-white dark:bg-zinc-900 p-6 rounded-xl border border-slate-200 dark:border-zinc-800 shadow-sm">
             <p className="text-sm text-slate-500 dark:text-zinc-400 mb-1">Total Assets</p>
             <p className="text-3xl font-bold text-emerald-600">{stats.total}</p>
@@ -266,6 +267,11 @@ export default function AssetsView() {
           <div className="bg-white dark:bg-zinc-900 p-6 rounded-xl border border-slate-200 dark:border-zinc-800 shadow-sm">
             <p className="text-sm text-slate-500 dark:text-zinc-400 mb-1">Ready for Generation</p>
             <p className="text-3xl font-bold text-amber-600">{stats.unassigned}</p>
+          </div>
+
+          <div className="bg-white dark:bg-zinc-900 p-6 rounded-xl border border-slate-200 dark:border-zinc-800 shadow-sm">
+            <p className="text-sm text-slate-500 dark:text-zinc-400 mb-1">Successfully Tested</p>
+            <p className="text-3xl font-bold text-emerald-600">{stats.completed}</p>
           </div>
         </div>
 

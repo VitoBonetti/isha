@@ -162,7 +162,7 @@ def bulk_create_tests(req: BulkTestCreate, background_tasks: BackgroundTasks,
     return {"message": f"Generating {len(req.asset_ids)} tests from active pool."}
 
 
-# --- SCHEDULING & STATUS LIFECYCLE ---
+# --- 3. SCHEDULING & STATUS LIFECYCLE ---
 @router.put("/{test_id}/schedule", summary="[Admin Only]")
 def schedule_test(test_id: str, schedule: TestSchedule, background_tasks: BackgroundTasks,
                   current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
@@ -307,7 +307,7 @@ def unstop_test(test_id: str, background_tasks: BackgroundTasks,
                 cursor.execute("DELETE FROM test_assets WHERE test_id = %s", (clone_id,))
                 cursor.execute("DELETE FROM tests WHERE id = %s", (clone_id,))
             else:
-                # The clone is already scheduled on the board! Block the unstop.
+                # DANGER: The clone is already scheduled on the board! Block the unstop.
                 raise HTTPException(
                     status_code=400,
                     detail="Cannot Undo Stop: The remaining work for this test has already been rescheduled."
@@ -352,12 +352,15 @@ def create_assignment(assign: AssignmentCreate, background_tasks: BackgroundTask
         VALUES (%s, %s, %s, %s, %s, %s)
     ''', (new_assignment_id, str(assign.test_id), str(assign.user_id), assign.week_number, assign.year,
           assign.allocated_credits))
+
     cursor.execute("SELECT name FROM tests WHERE id = %s", (str(assign.test_id),))
     test_row = cursor.fetchone()
+
     if test_row:
         cursor.execute("INSERT INTO notifications (id, user_id, message, type, created_at) VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)",
                        (str(uuid.uuid4()), str(assign.user_id), f"You were assigned to {test_row[0]} for Week {assign.week_number}.",
                         "ASSIGNMENT"))
+
     cursor.connection.commit()
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Successfully Assigned"}
@@ -368,9 +371,11 @@ def remove_assignment(test_id: str, user_id: str, background_tasks: BackgroundTa
                       current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     cursor.execute("SELECT name FROM tests WHERE id = %s", (test_id,))
     test_row = cursor.fetchone()
+
     if test_row:
         cursor.execute("INSERT INTO notifications (id, user_id, message, type, created_at) VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)",
                        (str(uuid.uuid4()), str(user_id), f"You were removed from {test_row[0]}.", "REMOVAL"))
+
     cursor.execute('DELETE FROM assignments WHERE test_id = %s AND user_id = %s', (test_id, user_id))
     cursor.connection.commit()
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
@@ -381,7 +386,7 @@ def remove_assignment(test_id: str, user_id: str, background_tasks: BackgroundTa
 @router.get("/{test_id}/history")
 def get_test_history(test_id: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
     cursor.execute('''
-        SELECT th.id, th.action, th.details, th.timestamp as created_at, u.name as user_name
+        SELECT th.id, th.action, th.details, th.timestamp, u.name as user_name
         FROM test_history th
         LEFT JOIN users u ON th.user_id = u.id
         WHERE th.test_id = %s
