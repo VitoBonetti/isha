@@ -11,7 +11,7 @@ from audit_logger import log_audit_event
 router = APIRouter(prefix="/api/board", tags=["Board & Events"])
 
 
-# --- 1. CAPACITY & SCHEDULING ENGINE ---
+# --- CAPACITY & SCHEDULING ENGINE ---
 def get_user_provision_internal(cursor, user_id, year, week_number):
     """Calculates exact capacity accounting for holidays, start dates, and locations."""
     cursor.execute(
@@ -31,7 +31,7 @@ def get_user_provision_internal(cursor, user_id, year, week_number):
     if end_year and year > end_year: return 0.0
     if end_year and year == end_year and end_week and week_number > end_week: return 0.0
 
-    # FIX: Safely cast the location ID to prevent the "None" UUID crash
+    # Safely cast the location ID to prevent the "None" UUID crash
     safe_loc_id = str(user_location_id) if user_location_id is not None else None
 
     # Fetch relevant events (Personal PTO, Team Days, or Local/Global National Holidays)
@@ -158,7 +158,7 @@ def get_quarterly_board(year: int, quarter: int, response: Response,
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     weeks = list(get_quarter_weeks(quarter))
 
-    # 1. Services & Categories
+    # Services & Categories
     cursor.execute(
         'SELECT id, name, theme_color, display_order, max_concurrent_per_week, is_active FROM services_lanes ORDER BY display_order ASC')
     services = [{"id": str(r[0]), "name": r[1], "theme_color": r[2], "max_concurrent_per_week": r[4], "is_active": r[5]} for r in cursor.fetchall()]
@@ -167,7 +167,7 @@ def get_quarterly_board(year: int, quarter: int, response: Response,
     categories = [{"id": str(r[0]), "name": r[1], "target_goal": r[2], "service_lane_id": str(r[3]) if r[3] else None}
                   for r in cursor.fetchall()]
 
-    # 2. Users (Pentesters) & Capacity Matrix
+    # Users (Pentesters) & Capacity Matrix
     cursor.execute('SELECT id, name, role, email, base_capacity, location_id, avatar_url FROM users')
     pentesters = [{"id": str(r[0]), "name": r[1], "role": r[2], "email": r[3], "capacity": r[4],
                    "location_id": str(r[5]) if r[5] else None, "avatar_url": r[6]} for r in cursor.fetchall()]
@@ -185,11 +185,12 @@ def get_quarterly_board(year: int, quarter: int, response: Response,
         "ARCHIVED": "Archived"
     }
 
-    # 3. Tests (Backlog) - Force stages::text to prevent serialization errors
+    # Tests (Backlog) - Force stages::text to prevent serialization errors
     cursor.execute('''
         SELECT t.id, t.name, t.service_lane_id, t.category_id, 
-               t.credits_per_week, t.duration_weeks, t.stages::text,
-               (SELECT COUNT(*) FROM test_assets WHERE test_id = t.id)
+            t.credits_per_week, t.duration_weeks, t.stages::text,
+            (SELECT COUNT(*) FROM test_assets WHERE test_id = t.id),
+            EXISTS(SELECT 1 FROM secret_notes WHERE test_id = t.id)
         FROM tests t
         WHERE t.stages::text = 'NOT_PLANNED'
     ''')
@@ -198,19 +199,21 @@ def get_quarterly_board(year: int, quarter: int, response: Response,
         backlog.append({
             "id": str(r[0]), "name": r[1], "service_lane_id": str(r[2]) if r[2] else None,
             "category_id": str(r[3]) if r[3] else None,
-            "credits": r[4], "duration": r[5], "status": enum_map.get(str(r[6]), str(r[6])), "asset_count": r[7]
+            "credits": r[4], "duration": r[5], "status": enum_map.get(str(r[6]), str(r[6])),
+            "asset_count": r[7], "has_secret": r[8]
         })
 
-    # 4. Tests (Scheduled) - Force stages::text to prevent serialization errors
+    # Tests (Scheduled) - Force stages::text to prevent serialization errors
     cursor.execute('''
         SELECT t.id, t.name, t.service_lane_id, t.category_id, 
-               t.credits_per_week, t.duration_weeks, t.start_week, t.start_year, t.stages::text,
-               (SELECT COUNT(*) FROM test_assets WHERE test_id = t.id)
+            t.credits_per_week, t.duration_weeks, t.start_week, t.start_year, t.stages::text,
+            (SELECT COUNT(*) FROM test_assets WHERE test_id = t.id),
+            EXISTS(SELECT 1 FROM secret_notes WHERE test_id = t.id)
         FROM tests t
         WHERE t.stages::text IN ('SCHEDULED', 'IN_PROGRESS', 'STOPPED', 'COMPLETED') 
-          AND t.start_year = %s 
-          AND (t.start_week + t.duration_weeks - 1) >= %s 
-          AND t.start_week <= %s
+            AND t.start_year = %s 
+            AND (t.start_week + t.duration_weeks - 1) >= %s 
+            AND t.start_week <= %s
     ''', (year, weeks[0], weeks[-1]))
 
     scheduled = []
@@ -219,10 +222,10 @@ def get_quarterly_board(year: int, quarter: int, response: Response,
             "id": str(r[0]), "name": r[1], "service_lane_id": str(r[2]) if r[2] else None,
             "category_id": str(r[3]) if r[3] else None,
             "credits": r[4], "duration": r[5], "startWeek": r[6], "startYear": r[7],
-            "status": enum_map.get(str(r[8]), str(r[8])), "asset_count": r[9]
+            "status": enum_map.get(str(r[8]), str(r[8])), "asset_count": r[9], "has_secret": r[10]
         })
 
-    # 5. Assignments
+    # Assignments
     cursor.execute('''
         SELECT a.test_id, a.user_id, a.week_number, u.name, a.allocated_credits 
         FROM assignments a 
@@ -246,7 +249,7 @@ def get_quarterly_board(year: int, quarter: int, response: Response,
         "assignments": assignments, "events": events
     }
 
-# --- 3. UNIVERSAL CATEGORIES ---
+# --- UNIVERSAL CATEGORIES ---
 @router.get("/categories/")
 def get_categories(current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
     """Fetches all service categories for the settings page."""
@@ -326,7 +329,7 @@ def delete_category(cat_id: str, background_tasks: BackgroundTasks,
     return {"message": "Category deleted"}
 
 
-# --- 4. EVENTS ---
+# ---  EVENTS ---
 @router.post("/events")
 def create_event(e: EventCreate, background_tasks: BackgroundTasks,
                  current_user: dict = Depends(require_write_access), cursor=Depends(get_db_cursor)):
@@ -381,7 +384,7 @@ def create_event(e: EventCreate, background_tasks: BackgroundTasks,
 @router.put("/events/{event_id}")
 def update_event(event_id: str, e: EventBase, background_tasks: BackgroundTasks,
                  current_user: dict = Depends(require_write_access), cursor=Depends(get_db_cursor)):
-    # FIX: Safely convert UUID to string
+    # Safely convert UUID to string
     loc_id = str(e.location_id) if e.location_id else None
     e_type = e.event_type.value if hasattr(e.event_type, 'value') else e.event_type
 
@@ -470,3 +473,12 @@ def wipe_system_data(background_tasks: BackgroundTasks,
     except Exception as e:
         cursor.connection.rollback()
         raise HTTPException(status_code=500, detail="Failed to wipe system data.")
+
+
+@router.delete("/system/wipe-secrets", summary="[Admin Only]")
+def wipe_all_secrets(background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    cursor.execute("TRUNCATE TABLE secret_notes CASCADE;")
+    log_audit_event(str(current_user["id"]), current_user["name"], "WIPE_SECRETS", "DATABASE", details="Wiped ALL encrypted secure notes.")
+    cursor.connection.commit()
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+    return {"message": "All secure notes wiped."}

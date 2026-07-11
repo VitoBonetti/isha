@@ -178,7 +178,7 @@ export default function SettingsView() {
               <button onClick={() => { setActiveTab('regions'); setShowForm(null); }} className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors ${activeTab === 'regions' ? 'bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-400' : 'text-slate-600 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800'}`}><Globe size={18} /> Regions</button>
               <button onClick={() => { setActiveTab('countries'); setShowForm(null); }} className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors ${activeTab === 'countries' ? 'bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-400' : 'text-slate-600 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800'}`}><Flag size={18} /> Countries</button>
               <button onClick={() => { setActiveTab('api_keys'); setShowForm(null); }} className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors ${activeTab === 'api_keys' ? 'bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-400' : 'text-slate-600 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800'}`}><Key size={18} /> API Keys</button>
-              <button onClick={() => { setActiveTab('system'); setShowForm(null); }} className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors ${activeTab === 'system' ? 'bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-400' : 'text-slate-600 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800'}`}><Server size={18} /> System Logs</button>
+              <button onClick={() => { setActiveTab('system'); setShowForm(null); }} className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors ${activeTab === 'system' ? 'bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-400' : 'text-slate-600 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800'}`}><Server size={18} /> System Logs & DB</button>
             </nav>
           </div>
         </aside>
@@ -770,7 +770,7 @@ export default function SettingsView() {
             <div className="fade-in flex-1 flex flex-col">
               <div className="flex justify-between items-center mb-6">
                 <div>
-                  <h2 className="text-xl font-bold text-slate-900 dark:text-zinc-100">Global API Keys</h2>
+                  <h2 className="text-xl font-bold text-slate-900 dark:text-zinc-100"><Key size={20} className="text-blue-500"/>Global API Keys</h2>
                   <p className="text-sm text-slate-500 dark:text-zinc-400">Monitor and revoke active API keys across the entire platform.</p>
                 </div>
               </div>
@@ -826,7 +826,7 @@ export default function SettingsView() {
           {activeTab === 'system' && (
             <div className="space-y-8 fade-in">
               <div>
-                <h2 className="text-xl font-bold text-slate-900 dark:text-zinc-100 mb-4 flex items-center gap-2"><Database size={20} className="text-blue-500"/> Infrastructure Logic</h2>
+                <h2 className="text-xl font-bold text-slate-900 dark:text-zinc-100 mb-4 flex items-center gap-2"><Server size={20} className="text-blue-500"/> System Logs & DB</h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="border border-slate-200 dark:border-zinc-800 rounded-2xl p-5 flex justify-between items-center bg-slate-50 dark:bg-zinc-900 shadow-sm">
                     <span className="font-bold text-slate-700 dark:text-zinc-300">PostgreSQL Primary</span>
@@ -866,6 +866,7 @@ export default function SettingsView() {
               <div className="pt-6 border-t border-slate-200 dark:border-zinc-800">
                 <h2 className="text-xl font-bold text-red-600 dark:text-red-500 mb-2 flex items-center gap-2"><AlertTriangle size={20} /> Danger Zone</h2>
                 <button onClick={() => setNukeModalOpen(true)} className="bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-8 rounded-xl shadow-sm mt-4 transition-colors focus:ring-4 focus:ring-red-500/20">Execute Factory Reset</button>
+                <button onClick={() => { if(confirm("Permanently wipe ALL encrypted notes?")) { axios.delete('/api/board/system/wipe-secrets'); toast.success("Notes wiped."); } }} className="bg-orange-600 hover:bg-orange-700 text-white font-bold py-3 px-8 rounded-xl shadow-sm mt-4 ml-4 transition-colors">Wipe All Secure Notes</button>
               </div>
             </div>
           )}

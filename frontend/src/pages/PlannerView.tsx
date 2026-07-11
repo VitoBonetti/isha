@@ -4,11 +4,13 @@ import type { DropResult, DragStart } from '@hello-pangea/dnd';
 import { useNavigate } from 'react-router-dom';
 import TestHistoryModal from '../components/Modals/TestHistoryModal';
 import AssignTeamModal from '../components/Modals/AssignTeamModal';
+import SecureNoteModal from "../components/Modals/SecureNoteModal";
+import ConfirmModal from "../components/Modals/ConfirmModal";
 import TopNav from '../components/TopNav';
 import { useAppContext } from '../context/AppContext';
 import { getWeekDateRange } from '../utils/helpers';
 import type { BoardData, Test } from '../types/board';
-import { ChevronLeft, ChevronRight, Search, X, History, Edit2, Trash2, Plus, Users, CheckCircle, XCircle, CalendarOff, User } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Search, X, History, Edit2, Trash2, Plus, Users, CheckCircle, XCircle, CalendarOff, User, LockOpen, Lock } from 'lucide-react';
 
 interface PlannerViewProps {
   onlineUsers: string[];
@@ -74,6 +76,9 @@ export default function PlannerView({
 
   const currentRealWeek = getISOWeek(new Date());
   const currentRealYear = new Date().getFullYear();
+
+  const [secretTarget, setSecretTarget] = useState<Test | null>(null);
+  const [secretConfirmOpen, setSecretConfirmOpen] = useState<Test | null>(null);
 
   const handleDragStart = (start: DragStart) => {
     const { draggableId, source } = start;
@@ -345,6 +350,15 @@ export default function PlannerView({
                                                       <button title="Edit" className="p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-700 rounded transition-colors" onClick={() => openEditModal(test)}><Edit2 size={14}/></button>
                                                     </>
                                                   )}
+                                                  {currentUser?.role !== 'read_only' && (test.has_secret || service?.is_active) && (
+                                                    <button
+                                                      onClick={() => setSecretConfirmOpen(test)}
+                                                      className={`p-1.5 rounded transition-colors ${test.has_secret ? 'text-indigo-600 bg-indigo-100 dark:bg-indigo-900/30' : 'text-slate-400 hover:text-indigo-500 hover:bg-slate-100 dark:hover:bg-zinc-800'}`}
+                                                      title={test.has_secret ? "View Secure Note" : "Add Secure Note"}
+                                                    >
+                                                      {test.has_secret ? <Lock size={14} /> : <LockOpen size={14} />}
+                                                    </button>
+                                                  )}
                                                 </div>
                                               )}
                                             </div>
@@ -455,6 +469,16 @@ export default function PlannerView({
 
       <AssignTeamModal assignModalTest={assignModalTest} setAssignModalTest={setAssignModalTest} boardData={boardData} handleAssignTeam={handleAssignTeam} targetYear={targetYear} />
       {historyTest && <TestHistoryModal test={historyTest} onClose={() => setHistoryTest(null)} />}
+      <ConfirmModal
+        isOpen={!!secretConfirmOpen}
+        variant="secure"
+        title="Access Secure Vault"
+        message="You are about to decrypt sensitive credentials. Proceed?"
+        confirmText="Decrypt & Open"
+        onConfirm={() => { setSecretTarget(secretConfirmOpen); setSecretConfirmOpen(null); }}
+        onCancel={() => setSecretConfirmOpen(null)}
+       />
+      {secretTarget && <SecureNoteModal test={secretTarget} onClose={() => setSecretTarget(null)} />}
     </DragDropContext>
   );
 }

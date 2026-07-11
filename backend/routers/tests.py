@@ -1,11 +1,16 @@
-from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from typing import List
 import uuid
+import os
+import base64
+import hashlib
+from cryptography.fernet import Fernet
 from pydantic import BaseModel, UUID4
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from database import get_db_cursor, db_cursor_context
-from routers.auth import get_current_user, require_admin
+from routers.auth import get_current_user, require_admin, require_write_access
 from websockets_manager import manager
-from schema import TestCreate, TestBase, AssignmentBase, TestSchedule, BulkTestCreate, AssignmentCreate
+from schema import TestCreate, TestBase, AssignmentBase, TestSchedule, BulkTestCreate, AssignmentCreate, SecureNotePayload
+from audit_logger import log_audit_event
 
 router = APIRouter(prefix="/api/tests", tags=["Tests & Assignments"])
 
@@ -21,6 +26,13 @@ FRONTEND_TO_DB_STAGES = {
 }
 
 
+# --- SECURITY: ENCRYPTION CIPHER ---
+def get_cipher():
+    secret = os.getenv("SECRET_KEY", "fallback_secret_for_development")
+    key = base64.urlsafe_b64encode(hashlib.sha256(secret.encode()).digest())
+    return Fernet(key)
+
+
 # --- HELPER: TEST HISTORY LOGGER ---
 def log_test_history(cursor, test_id: str, user_id: str, action: str, details: str = None):
     new_id = str(uuid.uuid4())
@@ -30,7 +42,7 @@ def log_test_history(cursor, test_id: str, user_id: str, action: str, details: s
     ''', (new_id, test_id, str(user_id) if user_id else None, action, details))
 
 
-# --- 1. CORE TEST MANAGEMENT ---
+# --- CORE TEST MANAGEMENT ---
 @router.post("/", summary="[Admin Only]")
 def create_test(t: TestCreate, background_tasks: BackgroundTasks,
                 current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
@@ -58,16 +70,10 @@ def create_test(t: TestCreate, background_tasks: BackgroundTasks,
 def get_all_tests(current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
     cursor.execute('''
         SELECT t.id, t.name, t.start_week, t.start_year, t.duration_weeks, t.stages::text as status,
-               s.name as service_lane_name,
-               COALESCE(
-                   (SELECT string_agg(DISTINCT u.name, ', ') 
-                    FROM assignments a 
-                    JOIN users u ON a.user_id = u.id 
-                    WHERE a.test_id = t.id), 
-                   'Unassigned'
-               ) as assigned_pentesters
-        FROM tests t
-        LEFT JOIN services_lanes s ON t.service_lane_id = s.id
+               s.name as service_lane_name, s.is_active as is_service_active,
+               COALESCE((SELECT string_agg(DISTINCT u.name, ', ') FROM assignments a JOIN users u ON a.user_id = u.id WHERE a.test_id = t.id), 'Unassigned') as assigned_pentesters,
+               EXISTS(SELECT 1 FROM secret_notes WHERE test_id = t.id) as has_secret
+        FROM tests t LEFT JOIN services_lanes s ON t.service_lane_id = s.id
         ORDER BY t.start_year DESC NULLS LAST, t.start_week DESC NULLS LAST, t.name ASC
     ''')
     columns = [col[0] for col in cursor.description]
@@ -113,7 +119,7 @@ def delete_test(test_id: str, background_tasks: BackgroundTasks,
     return {"message": "Test permanently deleted and assets freed."}
 
 
-# --- 2. BULK GENERATION ---
+# --- BULK GENERATION ---
 def process_bulk_tests_background(asset_ids: List[UUID4], user_id: str):
     with db_cursor_context() as cursor:
         if not cursor: return
@@ -156,7 +162,7 @@ def bulk_create_tests(req: BulkTestCreate, background_tasks: BackgroundTasks,
     return {"message": f"Generating {len(req.asset_ids)} tests from active pool."}
 
 
-# --- 3. SCHEDULING & STATUS LIFECYCLE ---
+# --- SCHEDULING & STATUS LIFECYCLE ---
 @router.put("/{test_id}/schedule", summary="[Admin Only]")
 def schedule_test(test_id: str, schedule: TestSchedule, background_tasks: BackgroundTasks,
                   current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
@@ -223,32 +229,32 @@ def complete_test(test_id: str, background_tasks: BackgroundTasks,
 @router.put("/{test_id}/unable", summary="[Admin Only]")
 def mark_test_unable(test_id: str, background_tasks: BackgroundTasks,
                      current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
-    # 1. Fetch Original Test Details
+    #  Fetch Original Test Details
     cursor.execute('SELECT name, service_lane_id, credits_per_week, duration_weeks FROM tests WHERE id = %s',
                    (test_id,))
     row = cursor.fetchone()
     if not row: raise HTTPException(status_code=404, detail="Test not found.")
     name, service_lane_id, credits, duration = row
 
-    # 2. Keep the Original Test on the board, but mark it as STOPPED and add [BLOCKED]
+    # Keep the Original Test on the board, but mark it as STOPPED and add [BLOCKED]
     cursor.execute("UPDATE tests SET stages = 'STOPPED', name = %s WHERE id = %s", (f"[BLOCKED] {name}", test_id))
 
-    # 3. Release the pentester's credits by deleting assignments!
+    # Release the pentester's credits by deleting assignments!
     cursor.execute('DELETE FROM assignments WHERE test_id = %s', (test_id,))
 
-    # 4. Create a fresh Clone in the Backlog (Clean Name)
+    #  Create a fresh Clone in the Backlog (Clean Name)
     clone_id = str(uuid.uuid4())
     cursor.execute('''
         INSERT INTO tests (id, name, service_lane_id, credits_per_week, duration_weeks, stages) 
         VALUES (%s, %s, %s, %s, %s, 'NOT_PLANNED')
     ''', (clone_id, name, str(service_lane_id), credits, duration))
 
-    # 5. Attach the same assets to the Clone
+    # Attach the same assets to the Clone
     cursor.execute('SELECT asset_id FROM test_assets WHERE test_id = %s', (test_id,))
     for (asset_id,) in cursor.fetchall():
         cursor.execute('INSERT INTO test_assets (test_id, asset_id) VALUES (%s, %s)', (clone_id, str(asset_id)))
 
-    # --- NEW: COPY THE ENTIRE HISTORY TO THE CLONE! ---
+    # --- COPY THE ENTIRE HISTORY TO THE CLONE! ---
     cursor.execute("SELECT user_id, action, details, timestamp FROM test_history WHERE test_id = %s", (test_id,))
     old_history = cursor.fetchall()
     for h_user, h_action, h_details, h_time in old_history:
@@ -258,7 +264,7 @@ def mark_test_unable(test_id: str, background_tasks: BackgroundTasks,
             VALUES (%s, %s, %s, %s, %s, %s)
         ''', (new_h_id, clone_id, str(h_user) if h_user else None, h_action, h_details, h_time))
 
-    # 6. Log the split event for both tests
+    #  Log the split event for both tests
     log_test_history(cursor, clone_id, current_user['id'], "CLONED", "Test resumed in backlog from stopped original.")
     log_test_history(cursor, test_id, current_user['id'], "STOPPED",
                      f"Test stopped. Clone generated in backlog: {clone_id}")
@@ -270,7 +276,7 @@ def mark_test_unable(test_id: str, background_tasks: BackgroundTasks,
 @router.put("/{test_id}/unstop", summary="[Admin Only]")
 def unstop_test(test_id: str, background_tasks: BackgroundTasks,
                 current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
-    # 1. Get the Original test
+    # Get the Original test
     cursor.execute("SELECT name FROM tests WHERE id = %s AND stages = 'STOPPED'", (test_id,))
     row = cursor.fetchone()
     if not row: raise HTTPException(status_code=404, detail="Stopped test not found.")
@@ -279,7 +285,7 @@ def unstop_test(test_id: str, background_tasks: BackgroundTasks,
     name = row[0]
     original_name = name.replace("[BLOCKED] ", "") if name.startswith("[BLOCKED] ") else name
 
-    # 2. Find the Clone ID from history
+    #  Find the Clone ID from history
     cursor.execute("""
         SELECT details FROM test_history 
         WHERE test_id = %s AND action = 'STOPPED' 
@@ -301,13 +307,13 @@ def unstop_test(test_id: str, background_tasks: BackgroundTasks,
                 cursor.execute("DELETE FROM test_assets WHERE test_id = %s", (clone_id,))
                 cursor.execute("DELETE FROM tests WHERE id = %s", (clone_id,))
             else:
-                # DANGER: The clone is already scheduled on the board! Block the unstop.
+                # The clone is already scheduled on the board! Block the unstop.
                 raise HTTPException(
                     status_code=400,
                     detail="Cannot Undo Stop: The remaining work for this test has already been rescheduled."
                 )
 
-    # 3. Revert Original test back to SCHEDULED and restore its clean name
+    #  Revert Original test back to SCHEDULED and restore its clean name
     cursor.execute("UPDATE tests SET name = %s, stages = 'SCHEDULED' WHERE id = %s", (original_name, test_id))
 
     log_test_history(cursor, test_id, current_user['id'], "UNSTOPPED", "Test unblocked and clone removed.")
@@ -328,7 +334,7 @@ def uncomplete_test(test_id: str, background_tasks: BackgroundTasks,
     return {"message": "Test uncompleted."}
 
 
-# --- 4. ASSIGNMENTS ---
+# ---  ASSIGNMENTS ---
 @router.post("/assignments", summary="[Admin Only]")
 def create_assignment(assign: AssignmentCreate, background_tasks: BackgroundTasks,
                       current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
@@ -346,15 +352,12 @@ def create_assignment(assign: AssignmentCreate, background_tasks: BackgroundTask
         VALUES (%s, %s, %s, %s, %s, %s)
     ''', (new_assignment_id, str(assign.test_id), str(assign.user_id), assign.week_number, assign.year,
           assign.allocated_credits))
-
     cursor.execute("SELECT name FROM tests WHERE id = %s", (str(assign.test_id),))
     test_row = cursor.fetchone()
-
     if test_row:
         cursor.execute("INSERT INTO notifications (id, user_id, message, type, created_at) VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)",
                        (str(uuid.uuid4()), str(assign.user_id), f"You were assigned to {test_row[0]} for Week {assign.week_number}.",
                         "ASSIGNMENT"))
-
     cursor.connection.commit()
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Successfully Assigned"}
@@ -365,18 +368,16 @@ def remove_assignment(test_id: str, user_id: str, background_tasks: BackgroundTa
                       current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     cursor.execute("SELECT name FROM tests WHERE id = %s", (test_id,))
     test_row = cursor.fetchone()
-
     if test_row:
         cursor.execute("INSERT INTO notifications (id, user_id, message, type, created_at) VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)",
                        (str(uuid.uuid4()), str(user_id), f"You were removed from {test_row[0]}.", "REMOVAL"))
-
     cursor.execute('DELETE FROM assignments WHERE test_id = %s AND user_id = %s', (test_id, user_id))
     cursor.connection.commit()
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Successfully Unassigned"}
 
 
-# --- 5. HISTORY ROUTE ---
+# ---  HISTORY ROUTE ---
 @router.get("/{test_id}/history")
 def get_test_history(test_id: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
     cursor.execute('''
@@ -388,3 +389,44 @@ def get_test_history(test_id: str, current_user: dict = Depends(get_current_user
     ''', (test_id,))
     columns = [col[0] for col in cursor.description]
     return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+
+# --- SECURE NOTES CRUD ---
+@router.get("/{test_id}/secret")
+def get_test_secret(test_id: str, current_user: dict = Depends(require_write_access), cursor=Depends(get_db_cursor)):
+    cursor.execute("SELECT encrypted_note FROM secret_notes WHERE test_id = %s", (test_id,))
+    row = cursor.fetchone()
+    if not row: return {"note": ""}
+    try:
+        cipher = get_cipher()
+        decrypted_note = cipher.decrypt(row[0].encode()).decode()
+        log_audit_event(str(current_user["id"]), current_user["name"], "SECRET_VIEWED", "TEST_SECRET", details=f"Viewed secure note for test {test_id}.")
+        return {"note": decrypted_note}
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to decrypt the secure note.")
+
+
+@router.put("/{test_id}/secret")
+def update_test_secret(test_id: str, payload: SecureNotePayload, background_tasks: BackgroundTasks,
+                       current_user: dict = Depends(require_write_access), cursor=Depends(get_db_cursor)):
+    cipher = get_cipher()
+    encrypted_note = cipher.encrypt(payload.note.encode()).decode()
+    cursor.execute('''
+        INSERT INTO secret_notes (test_id, encrypted_note, updated_at) 
+        VALUES (%s, %s, CURRENT_TIMESTAMP)
+        ON CONFLICT (test_id) DO UPDATE SET encrypted_note = EXCLUDED.encrypted_note, updated_at = CURRENT_TIMESTAMP
+    ''', (test_id, encrypted_note))
+    log_audit_event(str(current_user["id"]), current_user["name"], "SECRET_UPDATED", "TEST_SECRET", details=f"Updated secure note for test {test_id}.")
+    cursor.connection.commit()
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+    return {"message": "Secure note encrypted and saved."}
+
+
+@router.delete("/{test_id}/secret", summary="[Admin Only]")
+def delete_test_secret(test_id: str, background_tasks: BackgroundTasks,
+                       current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    cursor.execute("DELETE FROM secret_notes WHERE test_id = %s", (test_id,))
+    log_audit_event(str(current_user["id"]), current_user["name"], "SECRET_DELETED", "TEST_SECRET", details=f"Deleted secure note for test {test_id}.")
+    cursor.connection.commit()
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+    return {"message": "Secure note permanently deleted."}

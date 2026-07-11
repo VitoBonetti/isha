@@ -6,7 +6,7 @@ import ApiKeysModal from './Modals/ApiKeysModal';
 import {
   Sun, Moon, Laptop, LogOut, User as UserIcon, Bell,
   SprayCan, Snail, SunMoon, Fingerprint, Rabbit, Cat, Shell, Turtle, Radar, HandMetal, Drum, TentTree,
-  Wifi, WifiOff, Loader2, ChevronDown, Key
+  Wifi, WifiOff, Loader2, ChevronDown, Key, LockOpen, Lock
 } from 'lucide-react';
 
 export default function TopNav() {
@@ -27,7 +27,7 @@ export default function TopNav() {
   const notificationRef = useRef<HTMLDivElement>(null);
 
   // Rotating Logo Icons Logic
-  const logoIcons = [SprayCan, Snail, SunMoon, Fingerprint, Rabbit, Cat, Shell, Turtle, Radar, HandMetal, Drum, TentTree, Wifi, WifiOff];
+  const logoIcons = [SprayCan, Snail, SunMoon, Fingerprint, Rabbit, Cat, Shell, Turtle, Radar, HandMetal, Drum, TentTree, Wifi, WifiOff, LockOpen, Lock];
   const ICON_ROTATION_TIME = 1000 * 60 * 5;
   const iconIndex = Math.floor(Date.now() / ICON_ROTATION_TIME) % logoIcons.length;
   const LogoIcon = logoIcons[iconIndex];
