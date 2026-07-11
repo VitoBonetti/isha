@@ -7,10 +7,47 @@ import anyio
 from database import get_db_cursor, db_cursor_context
 from routers.auth import get_current_user, require_admin
 from schema import RawAssetCreate, AssetBase, PromoteAssetRequest, BulkAssetRequest, AssetTypeBase, BulkServiceUpdateRequest
+from starlette import status
 from websockets_manager import manager
 from audit_logger import log_audit_event
 
 router = APIRouter(prefix="/api/assets", tags=["Assets"])
+
+MAX_FILE_SIZE = 5 * 1024 * 1024  # 5 MB limit
+ALLOWED_MIME_TYPES = {
+    "text/csv",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+}
+
+#--- VALIDATIONS HELPERS ---
+def is_valid_file_signature(contents: bytes, filename: str) -> bool:
+    """Validates file contents against expected magic numbers."""
+    if not contents:
+        return False
+
+    ext = filename.lower().split('.')[-1]
+
+    # XLSX (ZIP format) signature: 50 4B 03 04
+    if ext == 'xlsx':
+        return contents.startswith(b'\x50\x4B\x03\x04')
+    # XLS (OLE2 format) signature: D0 CF 11 E0 A1 B1 1A E1
+    elif ext == 'xls':
+        return contents.startswith(b'\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1')
+    # CSV  should not contain binary null bytes
+    elif ext == 'csv':
+        return b'\x00' not in contents[:1024]
+
+    return False
+
+
+def sanitize_csv_injection(text: str) -> str:
+    """Neutralize executable macros starting with =, +, -, or @ to prevent CSV Injection."""
+    if not text:
+        return text
+    if text.startswith(('=', '+', '-', '@')):
+        return f"'{text}"
+    return text
 
 
 # --- ASSET TYPES DICTIONARY ---
@@ -331,16 +368,27 @@ def process_excel_import_sync(contents: bytes, filename: str, current_user: dict
             failed_items = []
 
             for _, row in df.iterrows():
-                name = str(row.get('Name', '')).strip()
-                if not name: continue
+                raw_name = str(row.get('Name', '')).strip()
+                if not raw_name: continue
+                name = sanitize_csv_injection(raw_name)
 
-                desc = str(row.get('Description', '')).strip()
-                type_str = str(row.get('Asset Type', '')).strip().lower()
-                country_str = str(row.get('Country', '')).strip().lower()
-                service_str = str(row.get('Service Lane', '')).strip().lower()
-                cat_str = str(row.get('Category', '')).strip().lower()
+                raw_desc = str(row.get('Description', '')).strip()
+                desc = sanitize_csv_injection(raw_desc)
 
-                internet_val = str(row.get('Facing Internet', '')).strip().lower()
+                raw_type_str = str(row.get('Asset Type', '')).strip().lower()
+                type_str = sanitize_csv_injection(raw_type_str)
+
+                raw_country_str = str(row.get('Country', '')).strip().lower()
+                country_str = sanitize_csv_injection(raw_country_str)
+
+                raw_service_str = str(row.get('Service Lane', '')).strip().lower()
+                service_str = sanitize_csv_injection(raw_service_str)
+
+                raw_cat_str = str(row.get('Category', '')).strip().lower()
+                cat_str = sanitize_csv_injection(raw_cat_str)
+
+                raw_internet_val = str(row.get('Facing Internet', '')).strip().lower()
+                internet_val = sanitize_csv_injection(raw_internet_val)
                 facing_internet = internet_val in ['true', 'yes', '1', 'y']
 
                 try:
@@ -408,7 +456,18 @@ def process_excel_import_sync(contents: bytes, filename: str, current_user: dict
 
 @router.post("/raw/import", summary="[Admin Only]")
 async def import_assets(file: UploadFile = File(...), background_tasks: BackgroundTasks = BackgroundTasks(), current_user: dict = Depends(require_admin)):
-    contents = await file.read()
+    # Mime type validations
+    if file.content_type not in ALLOWED_MIME_TYPES:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File type not allowed")
+    # enforcing 5 MB limit
+    contents = b""
+    while chunk := await file.read(1024 * 1024): # chunck of 1 MB
+        contents += chunk
+        if len(contents) > MAX_FILE_SIZE:
+            raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="File too large")
+    # Signature Check
+    if not is_valid_file_signature(contents, file.filename):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid file signature")
 
     # anyio.to_thread runs the synchronous parsing/DB operations in a background worker thread
     # This prevents the FastAPI event loop from freezing, keeping WebSockets responsive!

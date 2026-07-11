@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, Response
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, Response, status
 from pydantic import UUID4
 import uuid
 from datetime import datetime, timedelta
@@ -335,7 +335,7 @@ def create_event(e: EventCreate, background_tasks: BackgroundTasks,
                  current_user: dict = Depends(require_write_access), cursor=Depends(get_db_cursor)):
     if current_user['role'] == 'pentester':
         if e.event_type in ['national_holiday', 'team_day']:
-            raise HTTPException(status_code=403, detail="Only Admins can create System-wide events.")
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only Admins can create System-wide events.")
         e.user_id = current_user['id']
 
     if e.event_type in ['national_holiday', 'team_day']:
@@ -417,7 +417,7 @@ def delete_event(event_id: str, background_tasks: BackgroundTasks,
         cursor.execute("SELECT user_id, event_type FROM events WHERE id = %s", (event_id,))
         row = cursor.fetchone()
         if not row or str(row[0]) != current_user['id'] or row[1] in ['national_holiday', 'team_day']:
-            raise HTTPException(status_code=403, detail="You can only delete your own personal time off.")
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You can only delete your own personal time off.")
 
     cursor.execute('DELETE FROM events WHERE id=%s', (event_id,))
     cursor.connection.commit()
@@ -472,7 +472,7 @@ def wipe_system_data(background_tasks: BackgroundTasks,
         return {"message": "System data wiped successfully."}
     except Exception as e:
         cursor.connection.rollback()
-        raise HTTPException(status_code=500, detail="Failed to wipe system data.")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to wipe system data.")
 
 
 @router.delete("/system/wipe-secrets", summary="[Admin Only]")
