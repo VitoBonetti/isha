@@ -1,5 +1,5 @@
 import uuid
-from fastapi import APIRouter, Depends, BackgroundTasks
+from fastapi import APIRouter, Depends, BackgroundTasks, status
 from database import get_db_cursor
 from routers.auth import get_current_user, require_admin
 from schema import UserCreate, UserBase
@@ -101,22 +101,22 @@ def update_user(user_id: str, u: UserBase, background_tasks: BackgroundTasks,
     loc_id = str(u.location_id) if u.location_id else None
 
     # revoking the keys
-    cursor.execute("SELECT role FROM users WHERE id = %s", (user_id))
+    cursor.execute("SELECT role FROM users WHERE id = %s", (user_id,))
     row = cursor.fetchone()
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
 
-    old_role = row[0]
-    new_role = user.role.value if hasattr(user.role, 'value') else user.role
+    old_role = str(row[0]).strip().lower()
+    new_role = str(u.role.value if hasattr(u.role, 'value') else u.role).strip().lower()
 
     if old_role != new_role:
         cursor.execute("DELETE FROM api_keys WHERE user_id = %s", (user_id,))
 
         message = f"Your role was changed from '{old_role}' to '{new_role}'. For security reasons, all your active API keys have been revoked."
-
+        new_notif_id = str(uuid.uuid4())
         cursor.execute("""
-            INSERT INTO notifications (id, user_id, message, type, created_at) VALUES (str(uuid.uuid4()), %s, %s, 'REMOVAL', CURRENT_TIMESTAP)
-        """, (user_id, message))
+            INSERT INTO notifications (id, user_id, message, type, created_at) VALUES (%s, %s, %s, 'REMOVAL', CURRENT_TIMESTAP)
+        """, (new_notif_id, user_id, message))
 
     cursor.execute(
         '''UPDATE users 
