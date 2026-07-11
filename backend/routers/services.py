@@ -14,7 +14,6 @@ def get_services(current_user: dict = Depends(get_current_user), cursor=Depends(
         SELECT id, name, max_concurrent_per_week, theme_color, 
                default_credits, default_duration_weeks, display_order, is_active
         FROM services_lanes 
-        WHERE is_active IS TRUE OR is_active IS NULL
         ORDER BY display_order ASC, name ASC
     ''')
 
