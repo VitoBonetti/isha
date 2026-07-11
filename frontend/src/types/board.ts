@@ -31,6 +31,8 @@ export interface Test {
   startYear?: number;
   status: 'Not Planned' | 'Scheduled' | 'In Progress' | 'Stopped' | 'Deleted' | 'Completed' | 'Archived';
   asset_count: number;
+  has_secret?: boolean;
+  is_service_active?: boolean;
 }
 
 export interface Assignment {

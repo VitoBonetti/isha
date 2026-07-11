@@ -3,11 +3,15 @@ import { useState, useEffect } from "react";
 import axios from "axios";
 import TopNav from "../components/TopNav";
 import TestHistoryModal from "../components/Modals/TestHistoryModal";
+import SecureNoteModal from "../components/Modals/SecureNoteModal";
+import ConfirmModal from "../components/Modals/ConfirmModal";
 import toast, { Toaster } from "react-hot-toast";
-import { Search, ShieldAlert, Calendar, ChevronsUpDown, ChevronUp, ChevronDown } from "lucide-react";
+import { Search, ShieldAlert, Calendar, ChevronsUpDown, ChevronUp, ChevronDown, LockOpen, Lock } from "lucide-react";
+import { useAppContext } from "../context/AppContext";
 import type { Test } from "../types/board";
 
 export default function TestsView() {
+  const { currentUser } = useAppContext();
   const [tests, setTests] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
@@ -21,6 +25,10 @@ export default function TestsView() {
   // Sorting State
   const [sortBy, setSortBy] = useState<string>("name");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+
+  //Secret note
+  const [secretTarget, setSecretTarget] = useState<Test | null>(null);
+  const [secretConfirmOpen, setSecretConfirmOpen] = useState<Test | null>(null);
 
   useEffect(() => {
     fetchTests();
@@ -106,6 +114,16 @@ export default function TestsView() {
       <Toaster position="bottom-right" />
 
       {historyTest && <TestHistoryModal test={historyTest} onClose={() => setHistoryTest(null)} />}
+      <ConfirmModal
+        isOpen={!!secretConfirmOpen}
+        variant="secure"
+        title="Access Secure Vault"
+        message="You are about to decrypt sensitive credentials. Proceed?"
+        confirmText="Decrypt & Open"
+        onConfirm={() => { setSecretTarget(secretConfirmOpen); setSecretConfirmOpen(null); }}
+        onCancel={() => setSecretConfirmOpen(null)}
+      />
+      {secretTarget && <SecureNoteModal test={secretTarget} onClose={() => { setSecretTarget(null); fetchTests(); }} />}
 
       <div className="pt-32 px-6 max-w-7xl mx-auto">
         <h1 className="text-2xl font-extrabold flex items-center gap-2">
@@ -198,7 +216,19 @@ export default function TestsView() {
                         {test.assigned_pentesters}
                       </td>
                       <td className="p-4 text-right">
-                        {getStatusPill(test.status)}
+                        <div className="flex items-center justify-end gap-3">
+                          {getStatusPill(test.status)}
+
+                          {currentUser?.role !== 'read_only' && (test.has_secret || test.is_service_active) && (
+                            <button
+                              onClick={() => setSecretConfirmOpen(test)}
+                              className={`p-1.5 rounded transition-colors ${test.has_secret ? 'text-indigo-600 bg-indigo-100 dark:bg-indigo-900/30' : 'text-slate-400 hover:text-indigo-500 hover:bg-slate-100 dark:hover:bg-zinc-800'}`}
+                              title={test.has_secret ? "View Secure Note" : "Add Secure Note"}
+                            >
+                              {test.has_secret ? <Lock size={14} /> : <LockOpen size={14} />}
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -235,5 +265,6 @@ export default function TestsView() {
         </div>
       </div>
     </div>
+
   );
 }
