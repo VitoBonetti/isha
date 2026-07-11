@@ -5,7 +5,7 @@ import axios from "axios";
 import TopNav from "../components/TopNav";
 import ConfirmModal from "../components/Modals/ConfirmModal";
 import toast, { Toaster } from "react-hot-toast";
-import { Search, Filter, MoveRight, Server, ChevronDown as ChevronDownIcon, Activity, Layers, ChevronsUpDown, ChevronUp } from "lucide-react";
+import { Search, Filter, MoveRight, Server, ChevronDown, Activity, Layers, ChevronsUpDown, ChevronUp } from "lucide-react";
 
 interface PoolAsset {
   id: string;
@@ -42,9 +42,9 @@ export default function AssetsView() {
   };
 
   const SortIcon = ({ column }: { column: string }) => {
-    if (sortBy !== column) return <ChevronsUpDown className="opacity-30 inline-block" size="{14}"/>;
-    return sortDir === "asc" ? <ChevronUp className="text-emerald-500 inline-block" size="{14}"/> : <ChevronDownIcon className="text-emerald-500 inline-block" size="{14}"/>;
-  };
+    if (sortBy !== column) return <ChevronsUpDown size={14} className="opacity-30" />;
+    return sortDir === "asc" ? <ChevronUp size={14} className="text-emerald-500" /> : <ChevronDown size={14} className="text-emerald-500" />;
+  };;
 
   // Selection & Bulk Actions
   const [selectedAssets, setSelectedAssets] = useState<string[]>([]);
