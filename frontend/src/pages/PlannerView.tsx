@@ -64,8 +64,9 @@ export default function PlannerView({
   const { currentUser } = useAppContext();
 
   const displayWeeks = boardData?.weeks || [];
-  const [isBacklogOpen, setIsBacklogOpen] = useState(true);
+  const [isBacklogOpen, setIsBacklogOpen] = useState(false);
   const [draggingServiceId, setDraggingServiceId] = useState<string | null>(null);
+  const [draggingSourceId, setDraggingSourceId] = useState<string | null>(null);
   const [historyTest, setHistoryTest] = useState<Test | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -76,15 +77,16 @@ export default function PlannerView({
 
   const handleDragStart = (start: DragStart) => {
     const { draggableId, source } = start;
+    setDraggingSourceId(source.droppableId);
     const draggedTest = source.droppableId === 'backlog'
       ? boardData?.backlog?.find(t => String(t.id) === String(draggableId))
       : boardData?.scheduled?.find(t => String(t.id) === String(draggableId));
-
     if (draggedTest) setDraggingServiceId(draggedTest.service_lane_id);
   };
 
   const handleDragEnd = (result: DropResult) => {
     setDraggingServiceId(null);
+    setDraggingSourceId(null);
     onDragEnd(result);
   };
 
@@ -109,13 +111,9 @@ export default function PlannerView({
                   value={targetYear}
                   onChange={(e) => setTargetYear(parseInt(e.target.value))}
                 >
-                  <option value={2025}>2025</option>
-                  <option value={2026}>2026</option>
-                  <option value={2027}>2027</option>
-                  <option value={2028}>2028</option>
-                  <option value={2029}>2029</option>
-                  <option value={2030}>2030</option>
-                  <option value={2031}>2031</option>
+                  {[2025, 2026, 2027, 2028, 2029, 2030, 2031].map(y => (
+                    <option key={y} value={y} className="bg-white dark:bg-zinc-800">{y}</option>
+                  ))}
                 </select>
               </div>
               <button className="p-1.5 hover:bg-slate-200 dark:hover:bg-zinc-800 rounded-md text-slate-500 transition-colors" onClick={handleNextQuarter}><ChevronRight size={16} /></button>
@@ -234,8 +232,14 @@ export default function PlannerView({
                     {displayWeeks.map(week => {
                       const cellId = `${service.id}_${week}`;
                       const testsInThisCell = boardData.scheduled.filter(t => t.service_lane_id === service.id && t.startYear === targetYear && week >= (t.startWeek || 0) && week < ((t.startWeek || 0) + t.duration));
-                      const isInvalidDropTarget = draggingServiceId && draggingServiceId !== service.id;
-                      const isValidDropTarget = draggingServiceId && draggingServiceId === service.id;
+
+                      // Safely cast to number, default to 0
+                      const maxConcurrent = service.max_concurrent_per_week || 0;
+                      // If maxConcurrent is > 0, check if we hit the limit
+                      const isAtCapacity = maxConcurrent > 0 ? testsInThisCell.length >= maxConcurrent : false;
+
+                      const isInvalidDropTarget = (draggingServiceId && draggingServiceId !== service.id) || (draggingSourceId && draggingSourceId !== cellId && isAtCapacity);
+                      const isValidDropTarget = draggingServiceId && draggingServiceId === service.id && !isInvalidDropTarget;
                       const isCurrent = week === currentRealWeek && targetYear === currentRealYear;
 
                       return (
@@ -332,7 +336,9 @@ export default function PlannerView({
                                                     </>
                                                   ) : (
                                                     <>
-                                                      <button title="Assign Staff" className="p-1.5 text-blue-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded transition-colors" onClick={() => setAssignModalTest(test)}><Users size={14}/></button>
+                                                      {service.is_active && (
+                                                        <button title="Assign Staff" className="p-1.5 text-blue-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded transition-colors" onClick={() => setAssignModalTest(test)}><Users size={14}/></button>
+                                                      )}
                                                       <button title="Mark Done" className="p-1.5 text-emerald-500 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 rounded transition-colors" onClick={() => handleCompleteTest(test.id)}><CheckCircle size={14}/></button>
                                                       <button title="Stop Test" className="p-1.5 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded transition-colors" onClick={() => handleMarkUnable(test.id)}><XCircle size={14}/></button>
                                                       <button title="Unschedule" className="p-1.5 text-amber-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/30 rounded transition-colors" onClick={() => handleUnscheduleTest(test.id)}><CalendarOff size={14}/></button>

@@ -1,10 +1,10 @@
-// frontend/src/pages/SettingsView.tsx
-import { useState } from 'react';
+import axios from "axios";
+import { useState, useEffect } from 'react';
 import { useSettings } from '../hooks/useSettings';
 import TopNav from '../components/TopNav';
 import ConfirmModal from '../components/Modals/ConfirmModal';
 import { Toaster } from 'react-hot-toast';
-import { Users, MapPin, Activity, Tags, Globe, Flag, Server, Trash2, Download, AlertTriangle, Plus, Database, Terminal, Edit2, LayoutTemplate } from 'lucide-react';
+import { Key, Users, MapPin, Activity, Tags, Globe, Flag, Server, Trash2, Download, AlertTriangle, Plus, Database, Terminal, Edit2, LayoutTemplate } from 'lucide-react';
 
 // Sleek Custom Toggle Component
 const Toggle = ({ checked, onChange, label, disabled = false }: { checked: boolean, onChange: (c: boolean) => void, label: string, disabled?: boolean }) => (
@@ -39,6 +39,35 @@ export default function SettingsView() {
   const [countryTab, setCountryTab] = useState<'active' | 'disabled'>('active');
   const [countryPage, setCountryPage] = useState(1);
 
+  const [globalApiKeys, setGlobalApiKeys] = useState<any[]>([]);
+  const [apiKeyPage, setApiKeyPage] = useState(1);
+
+  // Fetch API keys whenever the admin clicks the tab
+  useEffect(() => {
+    const fetchGlobalKeys = () => {
+      axios.get('/api/auth/keys?global_view=true')
+        .then(res => setGlobalApiKeys(res.data))
+        .catch(() => toast.error("Failed to load global API keys."));
+    };
+
+    if (activeTab === 'api_keys') fetchGlobalKeys();
+
+    const handleRefresh = () => {
+      if (activeTab === 'api_keys') fetchGlobalKeys();
+    };
+
+    window.addEventListener('refresh_api_keys', handleRefresh);
+    return () => window.removeEventListener('refresh_api_keys', handleRefresh);
+  }, [activeTab]);
+
+  const handleRevokeGlobalKey = async (id: string) => {
+    try {
+      await axios.delete(`/api/auth/keys/${id}`);
+      setGlobalApiKeys(prev => prev.filter(k => k.id !== id));
+      toast.success("API Key permanently revoked.");
+    } catch (err) { toast.error("Failed to revoke key."); }
+  };
+
   const [assetTypePage, setAssetTypePage] = useState(1);
 
   // Forms
@@ -50,7 +79,7 @@ export default function SettingsView() {
   const [locForm, setLocForm] = useState(defaultLocForm);
   const [editLocId, setEditLocId] = useState<string | null>(null);
 
-  const defaultServiceForm = { name: '', theme_color: '#3b82f6', default_credits: 2.0, default_duration_weeks: 1, max_concurrent_per_week: 5, match_keywords: '', display_order: 99, is_active: true };
+  const defaultServiceForm = { name: '', theme_color: '#3b82f6', default_credits: 2.0, default_duration_weeks: 1, max_concurrent_per_week: 5, display_order: 99, is_active: true };
   const [serviceForm, setServiceForm] = useState(defaultServiceForm);
   const [editServiceId, setEditServiceId] = useState<string | null>(null);
 
@@ -78,7 +107,14 @@ export default function SettingsView() {
     if (await handleSave('/api/users/', payload, !!editUserId, editUserId)) { setShowForm(null); setEditUserId(null); setUserForm(defaultUserForm); }
   };
   const submitLocation = async (e: React.FormEvent) => { e.preventDefault(); if (await handleSave('/api/locations/', locForm, !!editLocId, editLocId)) { setShowForm(null); setEditLocId(null); setLocForm(defaultLocForm); }};
-  const submitService = async (e: React.FormEvent) => { e.preventDefault(); const payload = { ...serviceForm, match_keywords: typeof serviceForm.match_keywords === 'string' ? serviceForm.match_keywords.split(',').map(s => s.trim()) : serviceForm.match_keywords }; if (await handleSave('/api/services/', payload, !!editServiceId, editServiceId)) { setShowForm(null); setEditServiceId(null); setServiceForm(defaultServiceForm); }};
+  const submitService = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (await handleSave('/api/services/', serviceForm, !!editServiceId, editServiceId)) {
+      setShowForm(null);
+      setEditServiceId(null);
+      setServiceForm(defaultServiceForm);
+    }
+  };
   const submitCategory = async (e: React.FormEvent) => { e.preventDefault(); const payload = { ...catForm, service_lane_id: catForm.service_lane_id === '' ? null : catForm.service_lane_id }; if (await handleSave('/api/board/categories/', payload, !!editCatId, editCatId)) { setShowForm(null); setEditCatId(null); setCatForm(defaultCatForm); }};
   const submitRegion = async (e: React.FormEvent) => { e.preventDefault(); if (await handleSave('/api/regions/', regionForm, !!editRegionId, editRegionId)) { setShowForm(null); setEditRegionId(null); setRegionForm(defaultRegionForm); }};
   const submitCountry = async (e: React.FormEvent) => { e.preventDefault(); const payload = { ...countryForm, region_id: countryForm.region_id === '' ? null : countryForm.region_id }; if (await handleSave('/api/countries/', payload, !!editCountryId, editCountryId)) { setShowForm(null); setEditCountryId(null); setCountryForm(defaultCountryForm); }};
@@ -141,6 +177,7 @@ export default function SettingsView() {
               <button onClick={() => { setActiveTab('categories'); setShowForm(null); }} className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors ${activeTab === 'categories' ? 'bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-400' : 'text-slate-600 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800'}`}><Tags size={18} /> Categories</button>
               <button onClick={() => { setActiveTab('regions'); setShowForm(null); }} className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors ${activeTab === 'regions' ? 'bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-400' : 'text-slate-600 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800'}`}><Globe size={18} /> Regions</button>
               <button onClick={() => { setActiveTab('countries'); setShowForm(null); }} className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors ${activeTab === 'countries' ? 'bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-400' : 'text-slate-600 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800'}`}><Flag size={18} /> Countries</button>
+              <button onClick={() => { setActiveTab('api_keys'); setShowForm(null); }} className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors ${activeTab === 'api_keys' ? 'bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-400' : 'text-slate-600 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800'}`}><Key size={18} /> API Keys</button>
               <button onClick={() => { setActiveTab('system'); setShowForm(null); }} className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors ${activeTab === 'system' ? 'bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-400' : 'text-slate-600 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800'}`}><Server size={18} /> System Logs</button>
             </nav>
           </div>
@@ -380,7 +417,8 @@ export default function SettingsView() {
                     </div>
                     <label className="text-sm font-bold text-slate-700 dark:text-zinc-300">Default Credits <input type="number" step="0.1" className={inputClasses} value={serviceForm.default_credits} onChange={e => setServiceForm({...serviceForm, default_credits: parseFloat(e.target.value)})} required /></label>
                     <label className="text-sm font-bold text-slate-700 dark:text-zinc-300">Default Duration (Wks) <input type="number" className={inputClasses} value={serviceForm.default_duration_weeks} onChange={e => setServiceForm({...serviceForm, default_duration_weeks: parseInt(e.target.value)})} required /></label>
-                    <label className="text-sm font-bold text-slate-700 dark:text-zinc-300 col-span-1 md:col-span-2">Match Keywords (comma separated) <input className={inputClasses} value={serviceForm.match_keywords} onChange={e => setServiceForm({...serviceForm, match_keywords: e.target.value})} placeholder="e.g. web, dast, external" /></label>
+                    <label className="text-sm font-bold text-slate-700 dark:text-zinc-300">Max Concurrent / Wk <input type="number" className={inputClasses} value={serviceForm.max_concurrent_per_week || ''} onChange={e => setServiceForm({...serviceForm, max_concurrent_per_week: parseInt(e.target.value)})} required /></label>
+                    <label className="text-sm font-bold text-slate-700 dark:text-zinc-300 col-span-1 md:col-span-2">Display Order <input type="number" className={inputClasses} value={serviceForm.display_order} onChange={e => setServiceForm({...serviceForm, display_order: parseInt(e.target.value)})} placeholder="e.g. 1" /></label>
 
                     <div className="col-span-1 md:col-span-2 pt-2 mt-2 border-t border-slate-200 dark:border-zinc-800">
                       <Toggle checked={serviceForm.is_active} onChange={(c) => setServiceForm({...serviceForm, is_active: c})} label="Service Lane is Active" />
@@ -402,7 +440,7 @@ export default function SettingsView() {
                         {item.name}
                       </div>
                       <div className="mt-2 space-y-1">
-                        <div className="text-sm text-slate-500 dark:text-zinc-400 font-medium">Credits: <span className="text-slate-900 dark:text-zinc-200">{item.default_credits}cr</span> / Duration: <span className="text-slate-900 dark:text-zinc-200">{item.default_duration_weeks}w</span></div>
+                        <div className="text-sm text-slate-500 dark:text-zinc-400 font-medium">Credits: <span className="text-slate-900 dark:text-zinc-200">{item.default_credits}cr</span> / Duration: <span className="text-slate-900 dark:text-zinc-200">{item.default_duration_weeks}w</span> / Max: <span className="text-slate-900 dark:text-zinc-200">{item.max_concurrent_per_week || '∞'}</span></div>
                       </div>
                       <div className={`mt-4 px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-wider w-fit shadow-sm border ${item.is_active ? 'bg-emerald-100 dark:bg-emerald-500/10 border-emerald-200 dark:border-emerald-500/20 text-emerald-800 dark:text-emerald-400' : 'bg-slate-100 dark:bg-zinc-800 border-slate-200 dark:border-zinc-700 text-slate-500 dark:text-zinc-400'}`}>
                         {item.is_active ? 'Active' : 'Inactive'}
@@ -414,7 +452,7 @@ export default function SettingsView() {
                         setServiceForm({
                           name: item.name, theme_color: item.theme_color, default_credits: item.default_credits,
                           default_duration_weeks: item.default_duration_weeks, max_concurrent_per_week: item.max_concurrent_per_week || 5,
-                          match_keywords: item.match_keywords || '', display_order: item.display_order, is_active: item.is_active
+                          display_order: item.display_order || 99, is_active: item.is_active
                         });
                         setShowForm('services');
                       }} className="text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-500/10 p-2 rounded-lg transition-colors"><Edit2 size={18} /></button>
@@ -723,6 +761,63 @@ export default function SettingsView() {
                   </tbody>
                 </table>
                 {(!locations || locations.length === 0) && <div className="p-12 text-center text-slate-500 dark:text-zinc-500 bg-slate-50/50 dark:bg-zinc-900/50">No locations found.</div>}
+              </div>
+            </div>
+          )}
+
+          {/* GLOBAL API KEYS (ADMIN ONLY) */}
+          {activeTab === 'api_keys' && (
+            <div className="fade-in flex-1 flex flex-col">
+              <div className="flex justify-between items-center mb-6">
+                <div>
+                  <h2 className="text-xl font-bold text-slate-900 dark:text-zinc-100">Global API Keys</h2>
+                  <p className="text-sm text-slate-500 dark:text-zinc-400">Monitor and revoke active API keys across the entire platform.</p>
+                </div>
+              </div>
+
+              <div className="border border-slate-200 dark:border-zinc-800 rounded-2xl overflow-hidden shadow-sm flex flex-col flex-1 bg-white dark:bg-zinc-900">
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-slate-50 dark:bg-zinc-900/50 border-b border-slate-200 dark:border-zinc-800">
+                    <tr>
+                      <th className="p-4 font-bold text-slate-600 dark:text-zinc-400">Key Owner</th>
+                      <th className="p-4 font-bold text-slate-600 dark:text-zinc-400">Key Name</th>
+                      <th className="p-4 font-bold text-slate-600 dark:text-zinc-400 font-mono">Prefix</th>
+                      <th className="p-4 font-bold text-slate-600 dark:text-zinc-400 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-zinc-800">
+                    {globalApiKeys.slice((apiKeyPage - 1) * ITEMS_PER_PAGE, apiKeyPage * ITEMS_PER_PAGE).map(k => (
+                      <tr key={k.id} className="hover:bg-slate-50 dark:hover:bg-zinc-800/50 transition-colors">
+                        <td className="p-4">
+                          <div className="font-bold text-slate-900 dark:text-zinc-100">{k.owner_name}</div>
+                          <div className="text-xs text-slate-500">{k.owner_email}</div>
+                        </td>
+                        <td className="p-4 font-medium text-slate-700 dark:text-zinc-300">{k.key_name}</td>
+                        <td className="p-4 text-slate-500 dark:text-zinc-400 font-mono text-xs">{k.prefix}••••••••</td>
+                        <td className="p-4 text-right">
+                          <button onClick={() => {
+                             if(confirm(`Are you sure you want to revoke the key "${k.key_name}" owned by ${k.owner_name}? Any scripts using this key will immediately fail.`)) {
+                               handleRevokeGlobalKey(k.id);
+                             }
+                          }} className="text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 p-2 rounded-lg transition-colors" title="Revoke Key">
+                            <Trash2 size={18} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {globalApiKeys.length === 0 && <div className="p-12 text-center text-slate-500 dark:text-zinc-500 bg-slate-50/50 dark:bg-zinc-900/50">No API keys are currently active.</div>}
+
+                {globalApiKeys.length > 0 && (
+                  <div className="px-6 py-4 border-t border-slate-200 dark:border-zinc-700 flex justify-between items-center bg-slate-50 dark:bg-zinc-950/50 mt-auto">
+                    <span className="text-sm text-slate-500">Page {apiKeyPage} of {Math.ceil(globalApiKeys.length / ITEMS_PER_PAGE) || 1}</span>
+                    <div className="flex gap-2">
+                      <button onClick={() => setApiKeyPage(p => Math.max(1, p - 1))} disabled={apiKeyPage === 1} className="px-4 py-1.5 border border-slate-300 dark:border-zinc-700 rounded-lg hover:bg-slate-100 dark:hover:bg-zinc-800 disabled:opacity-50 text-sm font-medium transition-colors">Prev</button>
+                      <button onClick={() => setApiKeyPage(p => p + 1)} disabled={apiKeyPage >= Math.ceil(globalApiKeys.length / ITEMS_PER_PAGE)} className="px-4 py-1.5 border border-slate-300 dark:border-zinc-700 rounded-lg hover:bg-slate-100 dark:hover:bg-zinc-800 disabled:opacity-50 text-sm font-medium transition-colors">Next</button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}

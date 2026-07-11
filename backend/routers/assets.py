@@ -6,7 +6,7 @@ import uuid
 import anyio
 from database import get_db_cursor, db_cursor_context
 from routers.auth import get_current_user, require_admin
-from schema import RawAssetCreate, AssetBase, PromoteAssetRequest, BulkAssetRequest, AssetTypeBase
+from schema import RawAssetCreate, AssetBase, PromoteAssetRequest, BulkAssetRequest, AssetTypeBase, BulkServiceUpdateRequest
 from websockets_manager import manager
 from audit_logger import log_audit_event
 
@@ -21,7 +21,7 @@ def get_asset_types(current_user: dict = Depends(get_current_user), cursor=Depen
     return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
 
-@router.post("/types/")
+@router.post("/types/", summary="[Admin Only]")
 def create_asset_type(at: AssetTypeBase, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     new_id = str(uuid.uuid4())
     try:
@@ -33,14 +33,14 @@ def create_asset_type(at: AssetTypeBase, current_user: dict = Depends(require_ad
         raise HTTPException(status_code=400, detail="Asset type name might already exist.")
 
 
-@router.put("/types/{type_id}")
+@router.put("/types/{type_id}", summary="[Admin Only]")
 def update_asset_type(type_id: str, at: AssetTypeBase, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     cursor.execute("UPDATE asset_types SET name=%s WHERE id=%s", (at.name, type_id))
     cursor.connection.commit()
     return {"message": "Asset Type updated."}
 
 
-@router.delete("/types/{type_id}")
+@router.delete("/types/{type_id}", summary="[Admin Only]")
 def delete_asset_type(type_id: str, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     # Note: Because of CASCADE rules in DB, this will delete all associated Raw Assets.
     cursor.execute("DELETE FROM asset_types WHERE id = %s", (type_id,))
@@ -126,7 +126,7 @@ def insert_asset_history(cursor, raw_asset_id: str, user_id: str, action: str, d
     """, (str(uuid.uuid4()), raw_asset_id, user_id, action, details))
 
 
-@router.post("/raw")
+@router.post("/raw", summary="[Admin Only]")
 def create_manual_raw_asset(asset: RawAssetCreate, background_tasks: BackgroundTasks,
                             current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     c_id = str(asset.country_id) if asset.country_id else None
@@ -188,7 +188,7 @@ def get_single_raw_asset(raw_id: str, current_user: dict = Depends(get_current_u
     return asset_data
 
 
-@router.put("/raw/{raw_id}")
+@router.put("/raw/{raw_id}", summary="[Admin Only]")
 def update_raw_asset(raw_id: str, asset: RawAssetCreate, background_tasks: BackgroundTasks,
                      current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     # 1. Fetch the OLD state (including relational names via JOINs)
@@ -277,7 +277,7 @@ def update_raw_asset(raw_id: str, asset: RawAssetCreate, background_tasks: Backg
     return {"message": "Raw Asset updated"}
 
 
-@router.delete("/raw/{raw_id}")
+@router.delete("/raw/{raw_id}", summary="[Admin Only]")
 def delete_raw_asset(raw_id: str, background_tasks: BackgroundTasks,
                      current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     cursor.execute("DELETE FROM raw_assets WHERE id = %s", (raw_id,))
@@ -286,7 +286,7 @@ def delete_raw_asset(raw_id: str, background_tasks: BackgroundTasks,
     return {"message": "Asset permanently deleted"}
 
 
-@router.post("/raw/bulk-delete")
+@router.post("/raw/bulk-delete", summary="[Admin Only]")
 def bulk_delete_raw_assets(req: BulkAssetRequest, background_tasks: BackgroundTasks,
                            current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     for raw_id in req.raw_asset_ids:
@@ -406,9 +406,8 @@ def process_excel_import_sync(contents: bytes, filename: str, current_user: dict
             return 0, [f"File formatting error: {str(e)}"]
 
 
-@router.post("/raw/import")
-async def import_assets(file: UploadFile = File(...), background_tasks: BackgroundTasks = BackgroundTasks(),
-                        current_user: dict = Depends(require_admin)):
+@router.post("/raw/import", summary="[Admin Only]")
+async def import_assets(file: UploadFile = File(...), background_tasks: BackgroundTasks = BackgroundTasks(), current_user: dict = Depends(require_admin)):
     contents = await file.read()
 
     # anyio.to_thread runs the synchronous parsing/DB operations in a background worker thread
@@ -428,7 +427,7 @@ async def import_assets(file: UploadFile = File(...), background_tasks: Backgrou
 
 
 # --- THE PROMOTION ENGINE ---
-@router.post("/promote")
+@router.post("/promote", summary="[Admin Only]")
 def promote_raw_assets_to_pool(req: BulkAssetRequest, background_tasks: BackgroundTasks,
                                current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     promoted = 0
@@ -457,6 +456,39 @@ def promote_raw_assets_to_pool(req: BulkAssetRequest, background_tasks: Backgrou
     cursor.connection.commit()
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
     return {"message": f"Successfully promoted {promoted} assets to the Active Pool."}
+
+
+@router.put("/bulk-service", summary="[Admin Only]")
+def bulk_update_service_lane(req: BulkServiceUpdateRequest, background_tasks: BackgroundTasks,
+                             current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    service_id = str(req.service_lane_id)
+
+    # Fetch new service name for logging
+    cursor.execute("SELECT name FROM services_lanes WHERE id = %s", (service_id,))
+    s_row = cursor.fetchone()
+    s_name = s_row[0] if s_row else "Unknown"
+
+    for asset_id in req.asset_ids:
+        # Get raw_asset_id linked to this pool asset
+        cursor.execute("SELECT raw_asset_id FROM assets WHERE id = %s", (str(asset_id),))
+        row = cursor.fetchone()
+        if not row: continue
+        raw_asset_id = str(row[0])
+
+        # 1. Update the Active Pool record
+        cursor.execute("UPDATE assets SET service_forecast_id = %s WHERE id = %s", (service_id, str(asset_id)))
+
+        # 2. Update the Source Raw record permanently
+        cursor.execute("UPDATE raw_assets SET service_forecast_id = %s, update_date = CURRENT_TIMESTAMP WHERE id = %s",
+                       (service_id, raw_asset_id))
+
+        # 3. Log it in the Asset's History
+        insert_asset_history(cursor, raw_asset_id, str(current_user["id"]), "UPDATED",
+                             f"Service Lane bulk updated to '{s_name}'.")
+
+    cursor.connection.commit()
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
+    return {"message": f"Successfully updated service lane for {len(req.asset_ids)} assets."}
 
 
 # --- ACTIVE ASSET POOL ---
@@ -499,7 +531,7 @@ def get_active_asset_pool(current_user: dict = Depends(get_current_user), cursor
     return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
 
-@router.delete("/{asset_id}")
+@router.delete("/{asset_id}", summary="[Admin Only]")
 def remove_from_active_pool(asset_id: str, background_tasks: BackgroundTasks,
                             current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     cursor.execute("DELETE FROM assets WHERE id = %s", (asset_id,))

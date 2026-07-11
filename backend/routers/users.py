@@ -1,6 +1,5 @@
 import uuid
-
-from fastapi import APIRouter, Depends, BackgroundTasks
+from fastapi import APIRouter, Depends, BackgroundTasks, status, HTTPException
 from database import get_db_cursor
 from routers.auth import get_current_user, require_admin
 from schema import UserCreate, UserBase
@@ -10,15 +9,15 @@ from datetime import datetime
 router = APIRouter(prefix="/api/users", tags=["Users"])
 
 
-@router.get("/system/status")
-def check_system_status(cursor=Depends(get_db_cursor)):
+@router.get("/system/status", include_in_schema=False)
+def check_system_status(current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     # Simply checks if the board has been initialized at least once
     cursor.execute("SELECT COUNT(*) FROM users")
     count = cursor.fetchone()[0]
     return {"setup_required": count == 0}
 
 
-@router.get("/")
+@router.get("/", summary="[Admin Only]")
 def get_all_users(current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     cursor.execute("""
         SELECT id, email, name, role, base_capacity, start_week, start_year, end_week, end_year, location_id, avatar_url 
@@ -35,7 +34,7 @@ def get_all_users(current_user: dict = Depends(require_admin), cursor=Depends(ge
     return users
 
 
-@router.post("/")
+@router.post("/", summary="[Admin Only]")
 def create_user(u: UserCreate, background_tasks: BackgroundTasks,
                 current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     if u.role.value == 'read_only':
@@ -57,7 +56,7 @@ def create_user(u: UserCreate, background_tasks: BackgroundTasks,
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": f"User {u.name} whitelisted in the database."}
 
-@router.delete("/{user_id}")
+@router.delete("/{user_id}", summary="[Admin Only]")
 def delete_user(user_id: str, background_tasks: BackgroundTasks,
                 current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     """
@@ -91,7 +90,7 @@ def delete_user(user_id: str, background_tasks: BackgroundTasks,
         background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
         return {"message": "User successfully offboarded."}
 
-@router.put("/{user_id}")
+@router.put("/{user_id}", summary="[Admin Only]")
 def update_user(user_id: str, u: UserBase, background_tasks: BackgroundTasks,
                 current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     if u.role == 'read_only':
@@ -100,6 +99,24 @@ def update_user(user_id: str, u: UserBase, background_tasks: BackgroundTasks,
     ew = u.end_week if str(u.end_week).strip() != '' else None
     ey = u.end_year if str(u.end_year).strip() != '' else None
     loc_id = str(u.location_id) if u.location_id else None
+
+    # revoking the keys
+    cursor.execute("SELECT role FROM users WHERE id = %s", (user_id,))
+    row = cursor.fetchone()
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
+
+    old_role = str(row[0]).strip().lower()
+    new_role = str(u.role.value if hasattr(u.role, 'value') else u.role).strip().lower()
+
+    if old_role != new_role:
+        cursor.execute("DELETE FROM api_keys WHERE user_id = %s", (user_id,))
+
+        message = f"Your role was changed from '{old_role}' to '{new_role}'. For security reasons, all your active API keys have been revoked."
+        new_notif_id = str(uuid.uuid4())
+        cursor.execute("""
+            INSERT INTO notifications (id, user_id, message, type, created_at) VALUES (%s, %s, %s, 'REMOVAL', CURRENT_TIMESTAMP)
+        """, (new_notif_id, user_id, message))
 
     cursor.execute(
         '''UPDATE users 

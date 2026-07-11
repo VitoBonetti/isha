@@ -7,7 +7,7 @@ router = APIRouter(prefix="/api/system/logs", tags=["System Logs"])
 LOGS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs")
 
 
-@router.get("/")
+@router.get("/", summary="[Admin Only]")
 def list_audit_logs(current_user: dict = Depends(require_admin)):
     """Returns a list of all daily log files available for download."""
     if not os.path.exists(LOGS_DIR):
@@ -19,7 +19,7 @@ def list_audit_logs(current_user: dict = Depends(require_admin)):
     return {"files": files}
 
 
-@router.get("/{filename}")
+@router.get("/{filename}", summary="[Admin Only]")
 def download_audit_log(filename: str, current_user: dict = Depends(require_admin)):
     """Downloads a specific daily log file."""
     # Security check to prevent directory traversal attacks
@@ -34,7 +34,7 @@ def download_audit_log(filename: str, current_user: dict = Depends(require_admin
     return FileResponse(path=file_path, filename=filename, media_type="text/plain")
 
 
-@router.delete("/{filename}")
+@router.delete("/{filename}", summary="[Admin Only]")
 def delete_audit_log(filename: str, current_user: dict = Depends(require_admin)):
     """Deletes a specific daily log file."""
     if not filename.endswith(".txt") or "/" in filename or "\\" in filename:

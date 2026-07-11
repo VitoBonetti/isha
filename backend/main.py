@@ -5,7 +5,7 @@ import traceback
 import os
 import time
 from jose import jwt
-from routers import auth, services, users, regions, countries, assets, tests, board, logs, locations
+from routers import auth, services, users, regions, countries, assets, tests, board, logs, locations, insights
 from routers.auth import require_admin
 from database import get_db_connection, release_db_connection
 from websockets_manager import manager
@@ -14,7 +14,8 @@ from audit_logger import log_audit_event
 app = FastAPI(
     title="Isha Core API",
     description="Backend engine for pentest planning and asset management.",
-    version="1.0.0"
+    version="1.1.0",
+    swagger_ui_parameters={"defaultModelsExpandDepth": -1}
 )
 
 # CORS configuration for local React development
@@ -58,6 +59,7 @@ app.include_router(assets.router)
 app.include_router(tests.router)
 app.include_router(board.router)
 app.include_router(logs.router)
+app.include_router(insights.router)
 
 
 # --- WEBSOCKET FOR REACTIVE UI ---
@@ -93,7 +95,7 @@ async def websocket_endpoint(websocket: WebSocket):
         await manager.disconnect(websocket)
 
 
-@app.get("/api/system/ping")
+@app.get("/api/system/ping", include_in_schema=False)
 def ping_database(current_user: dict = Depends(require_admin)):
     """Measures actual round-trip latency to the PostgreSQL database."""
     start_time = time.time()
@@ -114,6 +116,6 @@ def ping_database(current_user: dict = Depends(require_admin)):
     return {"status": "online", "latency_ms": latency}
 
 
-@app.get("/api/health")
+@app.get("/api/health", include_in_schema=False)
 def health_check():
     return {"status": "online", "system": "Isha"}
