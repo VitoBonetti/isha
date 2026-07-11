@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, UUID4
 from typing import Optional
 from database import get_db_cursor
@@ -14,7 +14,7 @@ router = APIRouter(prefix="/api/countries", tags=["Countries"])
 @router.get("/")
 def get_countries(current_user: dict = Depends(get_current_user), cursor = Depends(get_db_cursor)):
     if current_user.get('role') == 'pentester':
-        raise HTTPException(status_code=403, detail="Pentesters cannot access country data.")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Pentesters cannot access country data.")
 
     cursor.execute("""
         SELECT c.id, c.code, c.name, c.is_active, c.region_id, r.name as region_name 
@@ -37,7 +37,7 @@ def create_country(c: CountryBase, current_user: dict = Depends(require_admin), 
         return {"id": new_country_id, "message": "Country created successfully."}
     except Exception as e:
         cursor.connection.rollback()
-        raise HTTPException(status_code=400, detail="Database error (Code might already exist)")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Database error (Code might already exist)")
 
 @router.put("/{country_id}", summary="[Admin Only]")
 def update_country(country_id: str, c: CountryBase, current_user: dict = Depends(require_admin), cursor = Depends(get_db_cursor)):
