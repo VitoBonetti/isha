@@ -165,6 +165,20 @@ export default function SettingsView() {
     return sortDir === 'asc' ? res : -res;
   });
 
+  const sortedRegions = [...(displayRegions || [])].sort((a, b) => {
+    let res = a.name.localeCompare(b.name);
+    return sortDir === 'asc' ? res : -res;
+  });
+
+  const sortedCountries = [...(countries || [])].sort((a, b) => {
+     let res = 0;
+     if (sortBy === 'code') res = (a.code || '').localeCompare(b.code || '');
+     else if (sortBy === 'name') res = (a.name || '').localeCompare(b.name || '');
+     else if (sortBy === 'region_name') res = (a.region_name || '').localeCompare(b.region_name || '');
+    return sortDir === 'asc' ? res : -res;
+
+  });
+
   const sortedCategories = [...(categories || [])].sort((a, b) => {
     let res = 0;
     if (sortBy === 'name') res = a.name.localeCompare(b.name);
@@ -564,12 +578,14 @@ export default function SettingsView() {
                 <table className="w-full text-left text-sm">
                   <thead className="bg-slate-50 dark:bg-zinc-900/50 border-b border-slate-200 dark:border-zinc-800">
                     <tr>
-                      <th className="p-4 font-bold text-slate-600 dark:text-zinc-400">Region Name</th>
+                      <th className="p-4 font-bold text-slate-600 dark:text-zinc-400 cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort('name')}>
+                        <div className="flex items-center gap-2">Region Name<SortIcon column="name" /></div>
+                      </th>
                       <th className="p-4 font-bold text-slate-600 dark:text-zinc-400 text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-zinc-800">
-                    {displayRegions.slice((regionPage - 1) * ITEMS_PER_PAGE, regionPage * ITEMS_PER_PAGE).map(r => (
+                    {sortedRegions.slice((regionPage - 1) * ITEMS_PER_PAGE, regionPage * ITEMS_PER_PAGE).map(r => (
                       <tr key={r.id} className="hover:bg-slate-50 dark:hover:bg-zinc-800/50 transition-colors">
                         <td className="p-4 font-bold text-base text-slate-900 dark:text-zinc-100">{r.name}</td>
                         <td className="p-4 text-right">
@@ -648,14 +664,20 @@ export default function SettingsView() {
                 <table className="w-full text-left text-sm">
                   <thead className="bg-slate-50 dark:bg-zinc-900/50 border-b border-slate-200 dark:border-zinc-800">
                     <tr>
-                      <th className="p-4 font-bold text-slate-600 dark:text-zinc-400">Code</th>
-                      <th className="p-4 font-bold text-slate-600 dark:text-zinc-400">Country Name</th>
-                      <th className="p-4 font-bold text-slate-600 dark:text-zinc-400">Region Mapping</th>
+                      <th className="p-4 font-bold text-slate-600 dark:text-zinc-400 cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort('code')}>
+                        <div className="flex items-center gap-2">Code<SortIcon column="code" /></div>
+                      </th>
+                      <th className="p-4 font-bold text-slate-600 dark:text-zinc-400 cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort('name')}>
+                        <div className="flex items-center gap-2">Country Name<SortIcon column="name" /></div>
+                      </th>
+                      <th className="p-4 font-bold text-slate-600 dark:text-zinc-400 cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort('region_name')}>
+                        <div className="flex items-center gap-2">Region<SortIcon column="region_name" /></div>
+                      </th>
                       <th className="p-4 font-bold text-slate-600 dark:text-zinc-400 text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-zinc-800">
-                    {displayCountries.slice((countryPage - 1) * ITEMS_PER_PAGE, countryPage * ITEMS_PER_PAGE).map(c => (
+                    {sortedCountries.slice((countryPage - 1) * ITEMS_PER_PAGE, countryPage * ITEMS_PER_PAGE).map(c => (
                       <tr key={c.id} className="hover:bg-slate-50 dark:hover:bg-zinc-800/50 transition-colors">
                         <td className="p-4 text-slate-500 dark:text-zinc-400 font-mono font-bold">{c.code}</td>
                         <td className="p-4 font-bold text-slate-900 dark:text-zinc-100">{c.name}</td>
