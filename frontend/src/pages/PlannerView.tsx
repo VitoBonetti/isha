@@ -66,6 +66,7 @@ export default function PlannerView({
   const displayWeeks = boardData?.weeks || [];
   const [isBacklogOpen, setIsBacklogOpen] = useState(false);
   const [draggingServiceId, setDraggingServiceId] = useState<string | null>(null);
+  const [draggingSourceId, setDraggingSourceId] = useState<string | null>(null);
   const [historyTest, setHistoryTest] = useState<Test | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
 
