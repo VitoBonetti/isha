@@ -401,6 +401,7 @@ export default function SettingsView() {
                     </div>
                     <label className="text-sm font-bold text-slate-700 dark:text-zinc-300">Default Credits <input type="number" step="0.1" className={inputClasses} value={serviceForm.default_credits} onChange={e => setServiceForm({...serviceForm, default_credits: parseFloat(e.target.value)})} required /></label>
                     <label className="text-sm font-bold text-slate-700 dark:text-zinc-300">Default Duration (Wks) <input type="number" className={inputClasses} value={serviceForm.default_duration_weeks} onChange={e => setServiceForm({...serviceForm, default_duration_weeks: parseInt(e.target.value)})} required /></label>
+                    <label className="text-sm font-bold text-slate-700 dark:text-zinc-300">Max Concurrent / Wk <input type="number" className={inputClasses} value={serviceForm.max_concurrent_per_week || ''} onChange={e => setServiceForm({...serviceForm, max_concurrent_per_week: parseInt(e.target.value)})} required /></label>
                     <label className="text-sm font-bold text-slate-700 dark:text-zinc-300 col-span-1 md:col-span-2">Match Keywords (comma separated) <input className={inputClasses} value={serviceForm.match_keywords} onChange={e => setServiceForm({...serviceForm, match_keywords: e.target.value})} placeholder="e.g. web, dast, external" /></label>
 
                     <div className="col-span-1 md:col-span-2 pt-2 mt-2 border-t border-slate-200 dark:border-zinc-800">
@@ -423,7 +424,7 @@ export default function SettingsView() {
                         {item.name}
                       </div>
                       <div className="mt-2 space-y-1">
-                        <div className="text-sm text-slate-500 dark:text-zinc-400 font-medium">Credits: <span className="text-slate-900 dark:text-zinc-200">{item.default_credits}cr</span> / Duration: <span className="text-slate-900 dark:text-zinc-200">{item.default_duration_weeks}w</span></div>
+                        <div className="text-sm text-slate-500 dark:text-zinc-400 font-medium">Credits: <span className="text-slate-900 dark:text-zinc-200">{item.default_credits}cr</span> / Duration: <span className="text-slate-900 dark:text-zinc-200">{item.default_duration_weeks}w</span> / Max: <span className="text-slate-900 dark:text-zinc-200">{item.max_concurrent_per_week || '∞'}</span></div>
                       </div>
                       <div className={`mt-4 px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-wider w-fit shadow-sm border ${item.is_active ? 'bg-emerald-100 dark:bg-emerald-500/10 border-emerald-200 dark:border-emerald-500/20 text-emerald-800 dark:text-emerald-400' : 'bg-slate-100 dark:bg-zinc-800 border-slate-200 dark:border-zinc-700 text-slate-500 dark:text-zinc-400'}`}>
                         {item.is_active ? 'Active' : 'Inactive'}

@@ -5,7 +5,7 @@ import axios from "axios";
 import TopNav from "../components/TopNav";
 import ConfirmModal from "../components/Modals/ConfirmModal";
 import toast, { Toaster } from "react-hot-toast";
-import { Search, Filter, MoveRight, Server, ChevronDown, Activity, Layers } from "lucide-react";
+import { Search, Filter, MoveRight, Server, ChevronDown as ChevronDownIcon, Activity, Layers, ChevronsUpDown, ChevronUp } from "lucide-react";
 
 interface PoolAsset {
   id: string;
@@ -25,6 +25,26 @@ export default function AssetsView() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState<"all" | "assigned" | "unassigned">("unassigned");
+
+  // Pagination & Sorting
+  const [page, setPage] = useState(1);
+  const ITEMS_PER_PAGE = 20;
+  const [sortBy, setSortBy] = useState("name");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+
+  useEffect(() => {
+    setPage(1);
+  }, [searchTerm, filterStatus, sortBy, sortDir]);
+
+  const handleSort = (column: string) => {
+    if (sortBy === column) setSortDir(sortDir === "asc" ? "desc" : "asc");
+    else { setSortBy(column); setSortDir("asc"); }
+  };
+
+  const SortIcon = ({ column }: { column: string }) => {
+    if (sortBy !== column) return <ChevronsUpDown className="opacity-30 inline-block" size="{14}"/>;
+    return sortDir === "asc" ? <ChevronUp className="text-emerald-500 inline-block" size="{14}"/> : <ChevronDownIcon className="text-emerald-500 inline-block" size="{14}"/>;
+  };
 
   // Selection & Bulk Actions
   const [selectedAssets, setSelectedAssets] = useState<string[]>([]);
@@ -147,6 +167,26 @@ export default function AssetsView() {
     if (filterStatus === "unassigned") return matchesSearch && isAvailableForTest;
     return matchesSearch;
   });
+
+  const sortedAssets = [...filteredAssets].sort((a, b) => {
+    let aVal = "";
+    let bVal = "";
+    if (sortBy === "name") { aVal = a.name; bVal = b.name; }
+    else if (sortBy === "type") { aVal = a.asset_type_name || ""; bVal = b.asset_type_name || ""; }
+    else if (sortBy === "country") { aVal = a.country || ""; bVal = b.country || ""; }
+    else if (sortBy === "service") { aVal = a.service_name || ""; bVal = b.service_name || ""; }
+    else if (sortBy === "status") {
+      aVal = a.is_assigned ? (a.duplicate_allowed ? "active (multi)" : "active test") : "ready";
+      bVal = b.is_assigned ? (b.duplicate_allowed ? "active (multi)" : "active test") : "ready";
+    }
+
+    if (aVal.toLowerCase() < bVal.toLowerCase()) return sortDir === "asc" ? -1 : 1;
+    if (aVal.toLowerCase() > bVal.toLowerCase()) return sortDir === "asc" ? 1 : -1;
+    return 0;
+  });
+
+  const totalPages = Math.ceil(sortedAssets.length / ITEMS_PER_PAGE);
+  const paginatedAssets = sortedAssets.slice((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE);
 
   const stats = {
     total: assets.length,
@@ -305,67 +345,80 @@ export default function AssetsView() {
           ) : (
             <>
               <table className="w-full">
-                <thead className="bg-slate-50 dark:bg-zinc-800/50 border-b border-slate-200 dark:border-zinc-700">
-                  <tr>
-                    <th className="p-4 w-12 text-center">
-                      <input
-                        type="checkbox"
-                        className="h-4 w-4 rounded text-blue-600 border-slate-300 disabled:opacity-50"
-                        onChange={(e) => {
-                          if(e.target.checked) setSelectedAssets(validForSelection.map(a => a.id));
-                          else setSelectedAssets([]);
-                        }}
-                        checked={selectedAssets.length === validForSelection.length && validForSelection.length > 0}
-                        disabled={validForSelection.length === 0}
-                      />
-                    </th>
-                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Asset Name</th>
-                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Type</th>
-                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Country</th>
-                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Service Lane</th>
-                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th>
-                    <th className="px-6 py-4 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Actions</th>
-                  </tr>
+                <thead
+                    className="bg-slate-50 dark:bg-zinc-800/50 border-b border-slate-200 dark:border-zinc-700 select-none">
+                <tr>
+                  <th className="p-4 w-12 text-center">
+                    <input type="checkbox" ... />
+                  </th>
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800/50 transition-colors"
+                      onClick={() => handleSort("name")}>
+                    <div className="flex items-center gap-1.5">Asset Name <SortIcon column="name"/></div>
+                  </th>
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800/50 transition-colors"
+                      onClick={() => handleSort("type")}>
+                    <div className="flex items-center gap-1.5">Type <SortIcon column="type"/></div>
+                  </th>
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800/50 transition-colors"
+                      onClick={() => handleSort("country")}>
+                    <div className="flex items-center gap-1.5">Country <SortIcon column="country"/></div>
+                  </th>
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800/50 transition-colors"
+                      onClick={() => handleSort("service")}>
+                    <div className="flex items-center gap-1.5">Service Lane <SortIcon column="service"/></div>
+                  </th>
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800/50 transition-colors"
+                      onClick={() => handleSort("status")}>
+                    <div className="flex items-center gap-1.5">Status <SortIcon column="status"/></div>
+                  </th>
+                  <th className="px-6 py-4 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Actions</th>
+                </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200 dark:divide-zinc-700">
-                  {filteredAssets.map((asset) => {
-                    const isSelected = selectedAssets.includes(asset.id);
-                    return (
-                      <tr key={asset.id} className={`hover:bg-slate-50 dark:hover:bg-zinc-800/30 transition-colors ${isSelected ? 'bg-blue-50 dark:bg-blue-900/10' : ''}`}>
+                {paginatedAssets.map((asset) => {
+                  const isSelected = selectedAssets.includes(asset.id);
+                  return (
+                      <tr key={asset.id}
+                          className={`hover:bg-slate-50 dark:hover:bg-zinc-800/30 transition-colors ${isSelected ? 'bg-blue-50 dark:bg-blue-900/10' : ''}`}>
                         <td className="p-4 text-center">
                           <input
-                            type="checkbox"
-                            disabled={(asset.is_assigned && !asset.duplicate_allowed)}
-                            checked={isSelected}
-                            onChange={() => toggleAssetSelection(asset.id)}
-                            className="h-4 w-4 text-blue-600 rounded border-slate-300 disabled:opacity-40"
+                              type="checkbox"
+                              disabled={(asset.is_assigned && !asset.duplicate_allowed)}
+                              checked={isSelected}
+                              onChange={() => toggleAssetSelection(asset.id)}
+                              className="h-4 w-4 text-blue-600 rounded border-slate-300 disabled:opacity-40"
                           />
                         </td>
                         <td className="px-6 py-4">
                           <div>
                             <Link
-                              to={`/raw/${asset.raw_asset_id}`}
-                              state={{ from: '/assets', label: 'Active Pool' }}
-                              className="text-sm font-bold text-blue-600 dark:text-blue-400 hover:underline"
+                                to={`/raw/${asset.raw_asset_id}`}
+                                state={{from: '/assets', label: 'Active Pool'}}
+                                className="text-sm font-bold text-blue-600 dark:text-blue-400 hover:underline"
                             >
                               {asset.name}
                             </Link>
-                            <div className="text-xs text-slate-500 dark:text-zinc-400 mt-1">Pool ID: {asset.id.substring(0, 8)}...</div>
+                            <div className="text-xs text-slate-500 dark:text-zinc-400 mt-1">Pool
+                              ID: {asset.id.substring(0, 8)}...
+                            </div>
                           </div>
                         </td>
                         <td className="px-6 py-4">
-                          <div className="text-sm font-medium text-slate-700 dark:text-zinc-300">{asset.asset_type_name || 'Unknown'}</div>
+                          <div
+                              className="text-sm font-medium text-slate-700 dark:text-zinc-300">{asset.asset_type_name || 'Unknown'}</div>
                         </td>
                         <td className="px-6 py-4">
-                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-50 dark:bg-indigo-900/30 text-indigo-800 dark:text-indigo-400">
+                          <span
+                              className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-50 dark:bg-indigo-900/30 text-indigo-800 dark:text-indigo-400">
                             {asset.country || 'N/A'}
                           </span>
                         </td>
                         <td className="px-6 py-4">
                           {asset.service_name ? (
-                            <div className="text-sm font-medium">{asset.service_name}</div>
+                              <div className="text-sm font-medium">{asset.service_name}</div>
                           ) : (
-                            <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-800 dark:bg-red-500/10 dark:text-red-400 border border-red-200 dark:border-red-500/20">
+                              <span
+                                  className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-800 dark:bg-red-500/10 dark:text-red-400 border border-red-200 dark:border-red-500/20">
                               MISSING SERVICE LANE
                             </span>
                           )}
@@ -373,23 +426,27 @@ export default function AssetsView() {
                         <td className="px-6 py-4">
                           <div className="flex flex-col gap-1.5 items-start">
                             {asset.is_assigned ? (
-                              asset.duplicate_allowed ? (
-                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-200">
+                                asset.duplicate_allowed ? (
+                                    <span
+                                        className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-200">
                                   <div className="w-1.5 h-1.5 rounded-full bg-purple-500 animate-pulse"></div> Active (Multi)
                                 </span>
-                              ) : (
-                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200">
+                                ) : (
+                                    <span
+                                        className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200">
                                   <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></div> Active Test
                                 </span>
-                              )
+                                )
                             ) : (
-                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 dark:bg-emerald-900/30 text-emerald-800 dark:text-emerald-200 shadow-sm border border-emerald-200 dark:border-emerald-800">
+                                <span
+                                    className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 dark:bg-emerald-900/30 text-emerald-800 dark:text-emerald-200 shadow-sm border border-emerald-200 dark:border-emerald-800">
                                 Ready
                               </span>
                             )}
 
                             {asset.completed_count > 0 && (
-                              <span className="text-[10px] font-bold text-slate-500 dark:text-zinc-400 bg-slate-100 dark:bg-zinc-800 px-2 py-0.5 rounded-md">
+                                <span
+                                    className="text-[10px] font-bold text-slate-500 dark:text-zinc-400 bg-slate-100 dark:bg-zinc-800 px-2 py-0.5 rounded-md">
                                 Tested {asset.completed_count} {asset.completed_count === 1 ? 'time' : 'times'}
                               </span>
                             )}
@@ -398,37 +455,51 @@ export default function AssetsView() {
                         <td className="px-6 py-4 text-right">
                           <div className="flex items-center justify-end gap-2">
                             {((!asset.is_assigned || asset.duplicate_allowed) && asset.service_name) && (
-                              <button
-                                onClick={() => handleGenerateSingleTest(asset.id)}
-                                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-blue-200 dark:border-blue-900/50 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors text-sm font-bold shadow-sm"
-                                title="Generate new test in Backlog"
-                              >
-                                <Activity className="h-3.5 w-3.5" />
-                                Generate
-                              </button>
+                                <button
+                                    onClick={() => handleGenerateSingleTest(asset.id)}
+                                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-blue-200 dark:border-blue-900/50 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors text-sm font-bold shadow-sm"
+                                    title="Generate new test in Backlog"
+                                >
+                                  <Activity className="h-3.5 w-3.5"/>
+                                  Generate
+                                </button>
                             )}
                             <button
-                              onClick={() => handleRemoveFromPool(asset.id, asset.name)}
-                              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 text-slate-500 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors text-sm"
-                              title="Return to Raw Pool"
+                                onClick={() => handleRemoveFromPool(asset.id, asset.name)}
+                                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 text-slate-500 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors text-sm"
+                                title="Return to Raw Pool"
                             >
-                              <MoveRight className="h-3.5 w-3.5" />
+                              <MoveRight className="h-3.5 w-3.5"/>
                             </button>
                           </div>
                         </td>
                       </tr>
-                    );
-                  })}
+                  );
+                })}
                 </tbody>
               </table>
-
-              {filteredAssets.length === 0 && !loading && (
+              {sortedAssets.length === 0 && !loading && (
                 <div className="p-12 text-center">
                   <p className="text-slate-500 mb-4">No assets found</p>
-                  <p className="text-sm text-slate-400">
-                    {searchTerm ? "Try adjusting your search" : "No assets in the pool yet"}
-                  </p>
+                  <p className="text-sm text-slate-400">{searchTerm ? "Try adjusting your search" : "No assets in the pool yet"}</p>
                 </div>
+              )}
+              {sortedAssets.length > 0 && !loading && (
+                <div className="px-6 py-4 border-t border-slate-200 dark:border-zinc-700 flex justify-between items-center bg-slate-50 dark:bg-zinc-950/50">
+                  <span className="text-sm text-slate-500">Page {page} of {totalPages || 1}</span>
+                  <div className="flex gap-2">
+                    <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} className="px-4 py-1.5 border border-slate-300 dark:border-zinc-700 rounded-lg hover:bg-slate-100 dark:hover:bg-zinc-800 disabled:opacity-50 text-sm font-medium transition-colors">Prev</button>
+                    <button onClick={() => setPage(p => p + 1)} disabled={page >= totalPages} className="px-4 py-1.5 border border-slate-300 dark:border-zinc-700 rounded-lg hover:bg-slate-100 dark:hover:bg-zinc-800 disabled:opacity-50 text-sm font-medium transition-colors">Next</button>
+                  </div>
+                </div>
+              )}
+              {filteredAssets.length === 0 && !loading && (
+                  <div className="p-12 text-center">
+                    <p className="text-slate-500 mb-4">No assets found</p>
+                    <p className="text-sm text-slate-400">
+                      {searchTerm ? "Try adjusting your search" : "No assets in the pool yet"}
+                    </p>
+                  </div>
               )}
             </>
           )}

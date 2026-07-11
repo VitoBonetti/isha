@@ -64,7 +64,7 @@ export default function PlannerView({
   const { currentUser } = useAppContext();
 
   const displayWeeks = boardData?.weeks || [];
-  const [isBacklogOpen, setIsBacklogOpen] = useState(true);
+  const [isBacklogOpen, setIsBacklogOpen] = useState(false);
   const [draggingServiceId, setDraggingServiceId] = useState<string | null>(null);
   const [historyTest, setHistoryTest] = useState<Test | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -76,15 +76,16 @@ export default function PlannerView({
 
   const handleDragStart = (start: DragStart) => {
     const { draggableId, source } = start;
+    setDraggingSourceId(source.droppableId);
     const draggedTest = source.droppableId === 'backlog'
       ? boardData?.backlog?.find(t => String(t.id) === String(draggableId))
       : boardData?.scheduled?.find(t => String(t.id) === String(draggableId));
-
     if (draggedTest) setDraggingServiceId(draggedTest.service_lane_id);
   };
 
   const handleDragEnd = (result: DropResult) => {
     setDraggingServiceId(null);
+    setDraggingSourceId(null);
     onDragEnd(result);
   };
 
@@ -109,13 +110,9 @@ export default function PlannerView({
                   value={targetYear}
                   onChange={(e) => setTargetYear(parseInt(e.target.value))}
                 >
-                  <option value={2025}>2025</option>
-                  <option value={2026}>2026</option>
-                  <option value={2027}>2027</option>
-                  <option value={2028}>2028</option>
-                  <option value={2029}>2029</option>
-                  <option value={2030}>2030</option>
-                  <option value={2031}>2031</option>
+                  {[2025, 2026, 2027, 2028, 2029, 2030, 2031].map(y => (
+                    <option key={y} value={y} className="bg-white dark:bg-zinc-800">{y}</option>
+                  ))}
                 </select>
               </div>
               <button className="p-1.5 hover:bg-slate-200 dark:hover:bg-zinc-800 rounded-md text-slate-500 transition-colors" onClick={handleNextQuarter}><ChevronRight size={16} /></button>
@@ -234,8 +231,9 @@ export default function PlannerView({
                     {displayWeeks.map(week => {
                       const cellId = `${service.id}_${week}`;
                       const testsInThisCell = boardData.scheduled.filter(t => t.service_lane_id === service.id && t.startYear === targetYear && week >= (t.startWeek || 0) && week < ((t.startWeek || 0) + t.duration));
-                      const isInvalidDropTarget = draggingServiceId && draggingServiceId !== service.id;
-                      const isValidDropTarget = draggingServiceId && draggingServiceId === service.id;
+                      const isAtCapacity = service.max_concurrent_per_week ? testsInThisCell.length >= service.max_concurrent_per_week : false;
+                      const isInvalidDropTarget = (draggingServiceId && draggingServiceId !== service.id) || (draggingSourceId && draggingSourceId !== cellId && isAtCapacity);
+                      const isValidDropTarget = draggingServiceId && draggingServiceId === service.id && !isInvalidDropTarget;
                       const isCurrent = week === currentRealWeek && targetYear === currentRealYear;
 
                       return (
