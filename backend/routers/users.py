@@ -115,7 +115,7 @@ def update_user(user_id: str, u: UserBase, background_tasks: BackgroundTasks,
         message = f"Your role was changed from '{old_role}' to '{new_role}'. For security reasons, all your active API keys have been revoked."
         new_notif_id = str(uuid.uuid4())
         cursor.execute("""
-            INSERT INTO notifications (id, user_id, message, type, created_at) VALUES (%s, %s, %s, 'REMOVAL', CURRENT_TIMESTAP)
+            INSERT INTO notifications (id, user_id, message, type, created_at) VALUES (%s, %s, %s, 'REMOVAL', CURRENT_TIMESTAMP)
         """, (new_notif_id, user_id, message))
 
     cursor.execute(
