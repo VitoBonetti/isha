@@ -232,7 +232,12 @@ export default function PlannerView({
                     {displayWeeks.map(week => {
                       const cellId = `${service.id}_${week}`;
                       const testsInThisCell = boardData.scheduled.filter(t => t.service_lane_id === service.id && t.startYear === targetYear && week >= (t.startWeek || 0) && week < ((t.startWeek || 0) + t.duration));
-                      const isAtCapacity = service.max_concurrent_per_week ? testsInThisCell.length >= service.max_concurrent_per_week : false;
+
+                      // Safely cast to number, default to 0
+                      const maxConcurrent = service.max_concurrent_per_week || 0;
+                      // If maxConcurrent is > 0, check if we hit the limit
+                      const isAtCapacity = maxConcurrent > 0 ? testsInThisCell.length >= maxConcurrent : false;
+
                       const isInvalidDropTarget = (draggingServiceId && draggingServiceId !== service.id) || (draggingSourceId && draggingSourceId !== cellId && isAtCapacity);
                       const isValidDropTarget = draggingServiceId && draggingServiceId === service.id && !isInvalidDropTarget;
                       const isCurrent = week === currentRealWeek && targetYear === currentRealYear;

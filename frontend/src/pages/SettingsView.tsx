@@ -70,7 +70,7 @@ export default function SettingsView() {
   const [locForm, setLocForm] = useState(defaultLocForm);
   const [editLocId, setEditLocId] = useState<string | null>(null);
 
-  const defaultServiceForm = { name: '', theme_color: '#3b82f6', default_credits: 2.0, default_duration_weeks: 1, max_concurrent_per_week: 5, match_keywords: '', display_order: 99, is_active: true };
+  const defaultServiceForm = { name: '', theme_color: '#3b82f6', default_credits: 2.0, default_duration_weeks: 1, max_concurrent_per_week: 5, display_order: 99, is_active: true };
   const [serviceForm, setServiceForm] = useState(defaultServiceForm);
   const [editServiceId, setEditServiceId] = useState<string | null>(null);
 
@@ -98,7 +98,14 @@ export default function SettingsView() {
     if (await handleSave('/api/users/', payload, !!editUserId, editUserId)) { setShowForm(null); setEditUserId(null); setUserForm(defaultUserForm); }
   };
   const submitLocation = async (e: React.FormEvent) => { e.preventDefault(); if (await handleSave('/api/locations/', locForm, !!editLocId, editLocId)) { setShowForm(null); setEditLocId(null); setLocForm(defaultLocForm); }};
-  const submitService = async (e: React.FormEvent) => { e.preventDefault(); const payload = { ...serviceForm, match_keywords: typeof serviceForm.match_keywords === 'string' ? serviceForm.match_keywords.split(',').map(s => s.trim()) : serviceForm.match_keywords }; if (await handleSave('/api/services/', payload, !!editServiceId, editServiceId)) { setShowForm(null); setEditServiceId(null); setServiceForm(defaultServiceForm); }};
+  const submitService = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (await handleSave('/api/services/', serviceForm, !!editServiceId, editServiceId)) {
+      setShowForm(null);
+      setEditServiceId(null);
+      setServiceForm(defaultServiceForm);
+    }
+  };
   const submitCategory = async (e: React.FormEvent) => { e.preventDefault(); const payload = { ...catForm, service_lane_id: catForm.service_lane_id === '' ? null : catForm.service_lane_id }; if (await handleSave('/api/board/categories/', payload, !!editCatId, editCatId)) { setShowForm(null); setEditCatId(null); setCatForm(defaultCatForm); }};
   const submitRegion = async (e: React.FormEvent) => { e.preventDefault(); if (await handleSave('/api/regions/', regionForm, !!editRegionId, editRegionId)) { setShowForm(null); setEditRegionId(null); setRegionForm(defaultRegionForm); }};
   const submitCountry = async (e: React.FormEvent) => { e.preventDefault(); const payload = { ...countryForm, region_id: countryForm.region_id === '' ? null : countryForm.region_id }; if (await handleSave('/api/countries/', payload, !!editCountryId, editCountryId)) { setShowForm(null); setEditCountryId(null); setCountryForm(defaultCountryForm); }};
@@ -402,7 +409,7 @@ export default function SettingsView() {
                     <label className="text-sm font-bold text-slate-700 dark:text-zinc-300">Default Credits <input type="number" step="0.1" className={inputClasses} value={serviceForm.default_credits} onChange={e => setServiceForm({...serviceForm, default_credits: parseFloat(e.target.value)})} required /></label>
                     <label className="text-sm font-bold text-slate-700 dark:text-zinc-300">Default Duration (Wks) <input type="number" className={inputClasses} value={serviceForm.default_duration_weeks} onChange={e => setServiceForm({...serviceForm, default_duration_weeks: parseInt(e.target.value)})} required /></label>
                     <label className="text-sm font-bold text-slate-700 dark:text-zinc-300">Max Concurrent / Wk <input type="number" className={inputClasses} value={serviceForm.max_concurrent_per_week || ''} onChange={e => setServiceForm({...serviceForm, max_concurrent_per_week: parseInt(e.target.value)})} required /></label>
-                    <label className="text-sm font-bold text-slate-700 dark:text-zinc-300 col-span-1 md:col-span-2">Match Keywords (comma separated) <input className={inputClasses} value={serviceForm.match_keywords} onChange={e => setServiceForm({...serviceForm, match_keywords: e.target.value})} placeholder="e.g. web, dast, external" /></label>
+                    <label className="text-sm font-bold text-slate-700 dark:text-zinc-300 col-span-1 md:col-span-2">Display Order <input type="number" className={inputClasses} value={serviceForm.display_order} onChange={e => setServiceForm({...serviceForm, display_order: parseInt(e.target.value)})} placeholder="e.g. 1" /></label>
 
                     <div className="col-span-1 md:col-span-2 pt-2 mt-2 border-t border-slate-200 dark:border-zinc-800">
                       <Toggle checked={serviceForm.is_active} onChange={(c) => setServiceForm({...serviceForm, is_active: c})} label="Service Lane is Active" />
@@ -436,7 +443,7 @@ export default function SettingsView() {
                         setServiceForm({
                           name: item.name, theme_color: item.theme_color, default_credits: item.default_credits,
                           default_duration_weeks: item.default_duration_weeks, max_concurrent_per_week: item.max_concurrent_per_week || 5,
-                          match_keywords: item.match_keywords || '', display_order: item.display_order, is_active: item.is_active
+                          display_order: item.display_order || 99, is_active: item.is_active
                         });
                         setShowForm('services');
                       }} className="text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-500/10 p-2 rounded-lg transition-colors"><Edit2 size={18} /></button>

@@ -15,6 +15,9 @@ export interface ServiceLane {
   id: string;
   name: string;
   theme_color: string;
+  is_active?: boolean;
+  max_concurrent_per_week?: number;
+  display_order?: number;
 }
 
 export interface Test {

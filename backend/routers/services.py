@@ -7,6 +7,7 @@ import uuid
 
 router = APIRouter(prefix="/api/services", tags=["Services"])
 
+
 @router.get("/")
 def get_services(current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
     cursor.execute('''
@@ -34,17 +35,17 @@ def create_service(s: ServiceLaneBase, background_tasks: BackgroundTasks,
     cursor.execute(
         '''INSERT INTO services_lanes 
            (id, name, max_concurrent_per_week, theme_color, default_credits, default_duration_weeks, display_order, is_active) 
-           VALUES (%s, %s, %s, %s, %s, %s, %s, TRUE)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
            ON CONFLICT (name) DO UPDATE 
-           SET is_active = TRUE,
+           SET is_active = EXCLUDED.is_active,
                max_concurrent_per_week = EXCLUDED.max_concurrent_per_week,
                theme_color = EXCLUDED.theme_color,
                default_credits = EXCLUDED.default_credits,
                default_duration_weeks = EXCLUDED.default_duration_weeks,
                display_order = EXCLUDED.display_order
            RETURNING id''',
-        (new_service_id, s.name, s.max_concurrent_per_week, s.theme_color, s.default_credits, s.default_duration_weeks,
-         s.display_order)
+        (new_service_id, s.name, s.max_concurrent_per_week, s.theme_color, s.default_credits,
+         s.default_duration_weeks, s.display_order, s.is_active)
     )
     cursor.connection.commit()
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
@@ -57,10 +58,10 @@ def update_service(service_id: str, s: ServiceLaneBase, background_tasks: Backgr
     cursor.execute(
         '''UPDATE services_lanes 
            SET name=%s, max_concurrent_per_week=%s, theme_color=%s, 
-               default_credits=%s, default_duration_weeks=%s, display_order=%s 
+               default_credits=%s, default_duration_weeks=%s, display_order=%s, is_active=%s 
            WHERE id=%s''',
-        (s.name, s.max_concurrent_per_week, s.theme_color, s.default_credits, s.default_duration_weeks, s.display_order,
-         service_id)
+        (s.name, s.max_concurrent_per_week, s.theme_color, s.default_credits,
+         s.default_duration_weeks, s.display_order, s.is_active, service_id)
     )
     cursor.connection.commit()
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
