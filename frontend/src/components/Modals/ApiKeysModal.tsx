@@ -27,6 +27,7 @@ export default function ApiKeysModal({ isOpen, onClose }: { isOpen: boolean, onC
       setNewKeyName("");
       fetchKeys();
       toast.success("API Key generated!");
+      window.dispatchEvent(new CustomEvent('refresh_api_keys')); // <-- ADD THIS
     } catch (err) { toast.error("Failed to generate key."); }
   };
 
@@ -35,6 +36,7 @@ export default function ApiKeysModal({ isOpen, onClose }: { isOpen: boolean, onC
       await axios.delete(`/api/auth/keys/${id}`);
       toast.success("Key revoked.");
       fetchKeys();
+      window.dispatchEvent(new CustomEvent('refresh_api_keys')); // <-- ADD THIS
     } catch (err) { toast.error("Failed to revoke key."); }
   };
 
@@ -107,7 +109,7 @@ export default function ApiKeysModal({ isOpen, onClose }: { isOpen: boolean, onC
             <tbody className="divide-y divide-slate-100 dark:divide-zinc-800">
               {keys.map(k => (
                 <tr key={k.id} className="hover:bg-slate-50 dark:hover:bg-zinc-800/30 transition-colors">
-                  <td className="p-3 font-bold text-slate-900 dark:text-zinc-100">{k.name}</td>
+                  <td className="p-3 font-bold text-slate-900 dark:text-zinc-100">{k.key_name}</td>
                   <td className="p-3 font-mono text-slate-500 dark:text-zinc-400 text-xs">{k.prefix}••••••••</td>
                   <td className="p-3 text-right"><button onClick={() => handleRevoke(k.id)} className="text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 p-1.5 rounded transition-colors"><Trash2 size={16}/></button></td>
                 </tr>

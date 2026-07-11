@@ -19,9 +19,9 @@ DB_NAME = os.environ.get("POSTGRES_DB")
 # Sqlalchemy orm setup for all the models
 # ---------------------------------------
 DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
-engine = create_engine(DATABASE_URL)  # The engine connects to the database
-Base = declarative_base()  # The Base class that all your models will inherit from
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)  # SessionLocal is used if you eventually want to write routes using the ORM
+engine = create_engine(DATABASE_URL)
+Base = declarative_base()
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 # raw psycopg2 setup for the routes
 # ---------------------------------

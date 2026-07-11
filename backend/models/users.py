@@ -40,4 +40,3 @@ class ApiKeys(Base):
     hashed_key = Column(String(255), unique=True, nullable=False)
     created_at = Column(DateTime(timezone=True), default=aware_utcnow)
     is_active = Column(Boolean, default=True)
-

@@ -44,4 +44,3 @@ class RawAssets(Base):
     service_categories = relationship("ServiceCategories", back_populates="raw_assets")
     assets = relationship("Assets", back_populates="raw_assets")
     asset_history = relationship("AssetHistory", back_populates="raw_assets", cascade="all, delete-orphan")
-

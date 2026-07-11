@@ -7,9 +7,9 @@ import uuid
 from fastapi.security import APIKeyHeader
 from fastapi import APIRouter, Depends, HTTPException, Response, Request, status, BackgroundTasks
 from jose import jwt, JWTError
-from schema import ApiKeyCreate
 from database import get_db_cursor
 from websockets_manager import manager
+from schema import ApiKeyCreate
 
 env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), '.env')
 load_dotenv(env_path)
@@ -24,7 +24,7 @@ ALGORITHM = "HS256"
 
 # --- 1. THE GITHUB OAUTH HANDSHAKE ---
 
-@router.get("/github/callback")
+@router.get("/github/callback", include_in_schema=False)
 async def github_callback(code: str, cursor=Depends(get_db_cursor)):
     # 1. Start the Async Client session
     async with httpx.AsyncClient() as client:
@@ -102,6 +102,8 @@ async def github_callback(code: str, cursor=Depends(get_db_cursor)):
     return response
 
 
+# --- 2. SECURITY MIDDLEWARE (DUAL-AUTH) ---
+
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 
@@ -178,10 +180,10 @@ def require_write_access(current_user: dict = Depends(get_current_user)):
 
 # --- 3. SESSION & API KEY MANAGEMENT ---
 @router.get("/keys")
-def list_api_keys(current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+def list_api_keys(global_view: bool = False, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
     """Lists API keys. Admins see all keys, regular users see only their own."""
 
-    if current_user['role'] == 'admin':
+    if global_view and current_user['role'] == 'admin':
         cursor.execute("""
             SELECT ak.id, ak.name as key_name, ak.prefix, ak.created_at, u.name as owner_name, u.email as owner_email
             FROM api_keys ak

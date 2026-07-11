@@ -23,4 +23,3 @@ class Assets(Base):
     countries = relationship("Country", back_populates="assets")
     services_lanes = relationship("ServiceLanes", back_populates="assets")
     service_categories = relationship("ServiceCategories", back_populates="assets")
-

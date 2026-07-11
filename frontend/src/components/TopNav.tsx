@@ -222,7 +222,7 @@ export default function TopNav() {
     <ApiKeysModal
         isOpen={isApiModalOpen}
         onClose={() => setIsApiModalOpen(false)}
-    />
-  </>
+      />
+    </>
   );
 }

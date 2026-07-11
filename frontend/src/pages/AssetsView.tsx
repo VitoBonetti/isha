@@ -5,7 +5,7 @@ import axios from "axios";
 import TopNav from "../components/TopNav";
 import ConfirmModal from "../components/Modals/ConfirmModal";
 import toast, { Toaster } from "react-hot-toast";
-import { Search, Filter, MoveRight, Server, ChevronDown, Activity, Layers } from "lucide-react";
+import { Search, Filter, MoveRight, Server, ChevronDown, Activity, Layers, ChevronsUpDown, ChevronUp } from "lucide-react";
 
 interface PoolAsset {
   id: string;
@@ -25,6 +25,26 @@ export default function AssetsView() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState<"all" | "assigned" | "unassigned">("unassigned");
+
+  // Pagination & Sorting
+  const [page, setPage] = useState(1);
+  const ITEMS_PER_PAGE = 20;
+  const [sortBy, setSortBy] = useState("name");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+
+  useEffect(() => {
+    setPage(1);
+  }, [searchTerm, filterStatus, sortBy, sortDir]);
+
+  const handleSort = (column: string) => {
+    if (sortBy === column) setSortDir(sortDir === "asc" ? "desc" : "asc");
+    else { setSortBy(column); setSortDir("asc"); }
+  };
+
+  const SortIcon = ({ column }: { column: string }) => {
+    if (sortBy !== column) return <ChevronsUpDown size={14} className="opacity-30" />;
+    return sortDir === "asc" ? <ChevronUp size={14} className="text-emerald-500" /> : <ChevronDown size={14} className="text-emerald-500" />;
+  };;
 
   // Selection & Bulk Actions
   const [selectedAssets, setSelectedAssets] = useState<string[]>([]);
@@ -147,6 +167,26 @@ export default function AssetsView() {
     if (filterStatus === "unassigned") return matchesSearch && isAvailableForTest;
     return matchesSearch;
   });
+
+  const sortedAssets = [...filteredAssets].sort((a, b) => {
+    let aVal = "";
+    let bVal = "";
+    if (sortBy === "name") { aVal = a.name; bVal = b.name; }
+    else if (sortBy === "type") { aVal = a.asset_type_name || ""; bVal = b.asset_type_name || ""; }
+    else if (sortBy === "country") { aVal = a.country || ""; bVal = b.country || ""; }
+    else if (sortBy === "service") { aVal = a.service_name || ""; bVal = b.service_name || ""; }
+    else if (sortBy === "status") {
+      aVal = a.is_assigned ? (a.duplicate_allowed ? "active (multi)" : "active test") : "ready";
+      bVal = b.is_assigned ? (b.duplicate_allowed ? "active (multi)" : "active test") : "ready";
+    }
+
+    if (aVal.toLowerCase() < bVal.toLowerCase()) return sortDir === "asc" ? -1 : 1;
+    if (aVal.toLowerCase() > bVal.toLowerCase()) return sortDir === "asc" ? 1 : -1;
+    return 0;
+  });
+
+  const totalPages = Math.ceil(sortedAssets.length / ITEMS_PER_PAGE);
+  const paginatedAssets = sortedAssets.slice((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE);
 
   const stats = {
     total: assets.length,
@@ -319,16 +359,26 @@ export default function AssetsView() {
                         disabled={validForSelection.length === 0}
                       />
                     </th>
-                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Asset Name</th>
-                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Type</th>
-                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Country</th>
-                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Service Lane</th>
-                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th>
+                    <th className="p-4 font-semibold text-slate-500 uppercase cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"  onClick={() => handleSort("name")}>
+                      <div className="flex items-center gap-2">Asset Name <SortIcon column="name"/></div>
+                    </th>
+                    <th className="p-4 font-semibold text-slate-500 uppercase cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"  onClick={() => handleSort("type")}>
+                      <div className="flex items-center gap-2">Type <SortIcon column="type"/></div>
+                    </th>
+                    <th className="p-4 font-semibold text-slate-500 uppercase cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"  onClick={() => handleSort("country")}>
+                      <div className="flex items-center gap-2">Country <SortIcon column="country"/></div>
+                    </th>
+                    <th className="p-4 font-semibold text-slate-500 uppercase cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"  onClick={() => handleSort("service")}>
+                      <div className="flex items-center gap-2">Service Lane <SortIcon column="service"/></div>
+                    </th>
+                    <th className="p-4 font-semibold text-slate-500 uppercase cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"  onClick={() => handleSort("status")}>
+                      <div className="flex items-center gap-2">Status <SortIcon column="status"/></div>
+                    </th>
                     <th className="px-6 py-4 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200 dark:divide-zinc-700">
-                  {filteredAssets.map((asset) => {
+                  {paginatedAssets.map((asset) => {
                     const isSelected = selectedAssets.includes(asset.id);
                     return (
                       <tr key={asset.id} className={`hover:bg-slate-50 dark:hover:bg-zinc-800/30 transition-colors ${isSelected ? 'bg-blue-50 dark:bg-blue-900/10' : ''}`}>
@@ -421,7 +471,21 @@ export default function AssetsView() {
                   })}
                 </tbody>
               </table>
-
+              {sortedAssets.length === 0 && !loading && (
+                <div className="p-12 text-center">
+                  <p className="text-slate-500 mb-4">No assets found</p>
+                  <p className="text-sm text-slate-400">{searchTerm ? "Try adjusting your search" : "No assets in the pool yet"}</p>
+                </div>
+              )}
+              {sortedAssets.length > 0 && !loading && (
+                <div className="px-6 py-4 border-t border-slate-200 dark:border-zinc-700 flex justify-between items-center bg-slate-50 dark:bg-zinc-950/50">
+                  <span className="text-sm text-slate-500">Page {page} of {totalPages || 1}</span>
+                  <div className="flex gap-2">
+                    <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} className="px-4 py-1.5 border border-slate-300 dark:border-zinc-700 rounded-lg hover:bg-slate-100 dark:hover:bg-zinc-800 disabled:opacity-50 text-sm font-medium transition-colors">Prev</button>
+                    <button onClick={() => setPage(p => p + 1)} disabled={page >= totalPages} className="px-4 py-1.5 border border-slate-300 dark:border-zinc-700 rounded-lg hover:bg-slate-100 dark:hover:bg-zinc-800 disabled:opacity-50 text-sm font-medium transition-colors">Next</button>
+                  </div>
+                </div>
+              )}
               {filteredAssets.length === 0 && !loading && (
                 <div className="p-12 text-center">
                   <p className="text-slate-500 mb-4">No assets found</p>

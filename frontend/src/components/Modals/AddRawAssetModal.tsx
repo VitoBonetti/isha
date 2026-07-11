@@ -19,7 +19,7 @@ export default function AddRawAssetModal({ isOpen, onClose, onSuccess, countries
     description: "",
     asset_type_id: "",
     facing_internet: false,
-    duplicate_allowed: false, // <-- 1. ADDED HERE
+    duplicate_allowed: false,
     country_id: "",
     service_forecast_id: "",
     category_id: "",
