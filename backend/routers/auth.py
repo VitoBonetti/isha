@@ -180,10 +180,10 @@ def require_write_access(current_user: dict = Depends(get_current_user)):
 
 # --- 3. SESSION & API KEY MANAGEMENT ---
 @router.get("/keys")
-def list_api_keys(current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+def list_api_keys(global_view: bool = False, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
     """Lists API keys. Admins see all keys, regular users see only their own."""
 
-    if current_user['role'] == 'admin':
+    if global_view and current_user['role'] == 'admin':
         cursor.execute("""
             SELECT ak.id, ak.name as key_name, ak.prefix, ak.created_at, u.name as owner_name, u.email as owner_email
             FROM api_keys ak

@@ -44,11 +44,20 @@ export default function SettingsView() {
 
   // Fetch API keys whenever the admin clicks the tab
   useEffect(() => {
-    if (activeTab === 'api_keys') {
-      axios.get('/api/auth/keys')
+    const fetchGlobalKeys = () => {
+      axios.get('/api/auth/keys?global_view=true')
         .then(res => setGlobalApiKeys(res.data))
         .catch(() => toast.error("Failed to load global API keys."));
-    }
+    };
+
+    if (activeTab === 'api_keys') fetchGlobalKeys();
+
+    const handleRefresh = () => {
+      if (activeTab === 'api_keys') fetchGlobalKeys();
+    };
+
+    window.addEventListener('refresh_api_keys', handleRefresh);
+    return () => window.removeEventListener('refresh_api_keys', handleRefresh);
   }, [activeTab]);
 
   const handleRevokeGlobalKey = async (id: string) => {
