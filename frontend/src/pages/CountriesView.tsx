@@ -69,9 +69,18 @@ export default function AnalyticsDashboard() {
   const pageTitle = countryName ? `${countryName} Analytics` : regionName ? `${regionName} Analytics` : "Worldwide Analytics";
 
   // Coverage Math
-  const pool = data?.kpis?.pool || 0;
-  const testsRun = (data?.kpis?.completed || 0) + (data?.kpis?.backlog || 0);
-  const coveragePct = pool > 0 ? Math.min(100, (testsRun / pool) * 100) : 0;
+  const totalTestsYear = data?.kpis?.total_tests_year || 0;
+  const completed = data?.kpis?.completed || 0;
+  const planned = data?.kpis?.planned || 0;
+  const trueBacklog = data?.kpis?.true_backlog || 0;
+
+  // Bar Width Percentages
+  const pctCompleted = totalTestsYear > 0 ? (completed / totalTestsYear) * 100 : 0;
+  const pctPlanned = totalTestsYear > 0 ? (planned / totalTestsYear) * 100 : 0;
+  const pctBacklog = totalTestsYear > 0 ? (trueBacklog / totalTestsYear) * 100 : 0;
+
+  // Hero Coverage Metric
+  const coveragePct = totalTestsYear > 0 ? Math.min(100, (completed / totalTestsYear) * 100) : 0;
 
   return (
     <div className="min-h-screen text-slate-900 dark:text-zinc-100 pb-12 bg-slate-50/50 dark:bg-[#09090b]">
@@ -153,27 +162,64 @@ export default function AnalyticsDashboard() {
               <div className="bg-white dark:bg-zinc-900 p-6 rounded-2xl border border-slate-200 dark:border-zinc-800 shadow-sm flex items-center gap-4">
                 <div className="p-3 bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-xl border border-amber-100 dark:border-amber-500/20"><Activity size={24}/></div>
                 <div>
-                  <p className="text-xs text-slate-500 font-bold uppercase tracking-wider">Backlog ({targetYear})</p>
+                  <p className="text-xs text-slate-500 font-bold uppercase tracking-wider">Not Completed</p>
                   <p className="text-2xl font-black text-amber-600 dark:text-amber-400">{data.kpis.backlog}</p>
                 </div>
               </div>
             </div>
 
-            {/* Row 2: Hero Coverage Ratio */}
+            {/* Row 2: Coverage Ratio */}
             <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-slate-200 dark:border-zinc-800 shadow-sm p-8 mb-8">
-              <div className="flex justify-between items-end mb-4">
+              <div className="flex justify-between items-end mb-6">
                 <div>
-                  <h2 className="text-lg font-bold text-slate-900 dark:text-zinc-100">Testing Coverage Ratio</h2>
-                  <p className="text-sm text-slate-500 dark:text-zinc-400 mt-1">Percentage of Active Pool assets tested or scheduled for testing.</p>
+                  <h2 className="text-xl font-black text-slate-900 dark:text-zinc-100">Testing Coverage Ratio</h2>
+                  <p className="text-sm text-slate-500 dark:text-zinc-400 mt-1">
+                    Breakdown of the <strong className="text-slate-700 dark:text-zinc-300">{totalTestsYear} total tests</strong> tracked for {targetYear}.
+                  </p>
                 </div>
-                <div className="text-3xl font-black text-blue-600 dark:text-blue-400">{coveragePct.toFixed(1)}%</div>
+                <div className="text-4xl font-black text-emerald-500 dark:text-emerald-400">
+                  {coveragePct.toFixed(1)}% <span className="text-sm font-bold text-slate-400 tracking-normal">Completed</span>
+                </div>
               </div>
-              <div className="w-full bg-slate-100 dark:bg-zinc-950 rounded-full h-8 overflow-hidden flex border border-slate-200 dark:border-zinc-800 shadow-inner relative">
-                <div className="bg-emerald-500 h-full transition-all duration-1000 ease-out flex items-center justify-center text-xs font-bold text-white shadow-[inset_0_-2px_4px_rgba(0,0,0,0.2)]" style={{ width: `${pool > 0 ? (data.kpis.completed / pool) * 100 : 0}%` }}>
-                  {data.kpis.completed > 0 && `${data.kpis.completed} Completed`}
+
+              {/* Segment Progress Bar */}
+              <div className="w-full bg-slate-100 dark:bg-zinc-950 rounded-full h-10 overflow-hidden flex border border-slate-200 dark:border-zinc-800 shadow-inner relative">
+                <div
+                  className="bg-emerald-500 h-full transition-all duration-1000 ease-out flex items-center justify-center text-sm font-bold text-white shadow-[inset_0_-2px_4px_rgba(0,0,0,0.2)]"
+                  style={{ width: `${pctCompleted}%` }}
+                  title={`${completed} Completed`}
+                >
+                  {pctCompleted > 5 && `${completed} Completed`}
                 </div>
-                <div className="bg-amber-400 h-full transition-all duration-1000 ease-out flex items-center justify-center text-xs font-bold text-amber-900 shadow-[inset_0_-2px_4px_rgba(0,0,0,0.1)]" style={{ width: `${pool > 0 ? (data.kpis.backlog / pool) * 100 : 0}%` }}>
-                  {data.kpis.backlog > 0 && `${data.kpis.backlog} Backlog`}
+                <div
+                  className="bg-blue-500 h-full transition-all duration-1000 ease-out flex items-center justify-center text-sm font-bold text-white shadow-[inset_0_-2px_4px_rgba(0,0,0,0.2)] border-l border-white/20"
+                  style={{ width: `${pctPlanned}%` }}
+                  title={`${planned} Planned`}
+                >
+                  {pctPlanned > 5 && `${planned} Planned`}
+                </div>
+                <div
+                  className="bg-amber-400 h-full transition-all duration-1000 ease-out flex items-center justify-center text-sm font-bold text-amber-900 shadow-[inset_0_-2px_4px_rgba(0,0,0,0.1)] border-l border-white/20"
+                  style={{ width: `${pctBacklog}%` }}
+                  title={`${trueBacklog} Backlog`}
+                >
+                  {pctBacklog > 5 && `${trueBacklog} Backlog`}
+                </div>
+              </div>
+
+              {/* Status Legend */}
+              <div className="flex items-center gap-6 mt-5 pl-2">
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-full bg-emerald-500 shadow-sm"></div>
+                  <span className="text-sm font-bold text-slate-700 dark:text-zinc-300">{completed} <span className="text-slate-500 dark:text-zinc-500 font-medium">Completed ({targetYear})</span></span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-full bg-blue-500 shadow-sm"></div>
+                  <span className="text-sm font-bold text-slate-700 dark:text-zinc-300">{planned} <span className="text-slate-500 dark:text-zinc-500 font-medium">Planned ({targetYear})</span></span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-full bg-amber-400 shadow-sm"></div>
+                  <span className="text-sm font-bold text-slate-700 dark:text-zinc-300">{trueBacklog} <span className="text-slate-500 dark:text-zinc-500 font-medium">Backlog (Unscheduled)</span></span>
                 </div>
               </div>
             </div>
