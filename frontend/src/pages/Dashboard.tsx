@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAppContext } from '../context/AppContext';
 import TopNav from '../components/TopNav';
 import {
-  CalendarDays, Palmtree, Globe, Database,
+  CalendarDays, Palmtree, ChartNoAxesCombined, Database,
   Server, ShieldAlert, LineChart, Settings, ChevronRight
 } from 'lucide-react';
 
@@ -43,14 +43,14 @@ export default function Dashboard() {
     {
       name: "Asset Management",
       features: [
-        { title: 'Countries', desc: 'Regional market logic and aggregated analytics.', icon: <Globe size={24} />, view: 'countries', color: 'text-emerald-600', allowedRoles: ['admin', 'read_only'] },
-        { title: 'Raw Data Lab', desc: 'Data staging, sheet importation, and asset promotion pipeline.', icon: <Database size={24} />, view: 'raw', color: 'text-slate-600 dark:text-slate-400', allowedRoles: ['admin', 'read_only'] },
+        { title: 'Raw Data Lab', desc: 'Data staging, sheet importation, and asset promotion pipeline.', icon: <Database size={24} />, view: 'raw', color: 'text-slate-600 dark:text-slate-400', allowedRoles: ['admin'] },
         { title: 'Active Pool', desc: 'Centralized inventory of applications prioritized for testing.', icon: <Server size={24} />, view: 'assets', color: 'text-emerald-500', allowedRoles: ['admin', 'read_only'] },
       ]
     },
     {
       name: "System Data",
       features: [
+        { title: 'Analytics', desc: 'Regional/country logic and aggregated analytics.', icon: <ChartNoAxesCombined size={24} />, view: 'countries', color: 'text-emerald-600', allowedRoles: ['admin', 'read_only'] },
         { title: 'Insights', desc: 'Analyze throughput, workload distribution, and goal tracking.', icon: <LineChart size={24} />, view: 'insights', color: 'text-amber-500', allowedRoles: ['admin', 'read_only'] },
         { title: 'Settings', desc: 'Manage user accounts, roles, capacities, and global platform logic.', icon: <Settings size={24} />, view: 'settings', color: 'text-red-500', allowedRoles: ['admin'] }
       ]
