@@ -30,7 +30,12 @@ export default function TestHistoryModal({ test, onClose }: TestHistoryModalProp
   }, [test.id]);
 
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+    if (!dateString) return "N/A";
+    // Ensure the timestamp is treated as valid ISO by appending Z if no timezone is specified
+    const safeDateStr = dateString.endsWith('Z') || dateString.includes('+') ? dateString : dateString + 'Z';
+    const d = new Date(safeDateStr);
+    if (isNaN(d.getTime())) return "Invalid Date";
+    return d.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
   };
 
   return (

@@ -4,7 +4,7 @@ import { useSettings } from '../hooks/useSettings';
 import TopNav from '../components/TopNav';
 import ConfirmModal from '../components/Modals/ConfirmModal';
 import { Toaster } from 'react-hot-toast';
-import { Key, Users, MapPin, Activity, Tags, Globe, Flag, Server, Trash2, Download, AlertTriangle, Plus, Database, Terminal, Edit2, LayoutTemplate } from 'lucide-react';
+import { Key, Users, MapPin, Activity, Tags, Globe, Flag, Server, Trash2, Download, AlertTriangle, Plus, Database, Terminal, Edit2, LayoutTemplate, ChevronsUpDown, ChevronUp, ChevronDown } from 'lucide-react';
 
 // Sleek Custom Toggle Component
 const Toggle = ({ checked, onChange, label, disabled = false }: { checked: boolean, onChange: (c: boolean) => void, label: string, disabled?: boolean }) => (
@@ -27,6 +27,7 @@ export default function SettingsView() {
 
   const [showForm, setShowForm] = useState<string | null>(null);
   const [deleteModal, setDeleteModal] = useState<{ isOpen: boolean; endpoint: string; id: string; name: string } | null>(null);
+  const [actionModal, setActionModal] = useState<{isOpen: boolean, title: string, message: string, confirmText: string, variant: 'danger'|'warning', onConfirm: () => void} | null>(null);
 
   // Pagination & Sub-Tab States
   const ITEMS_PER_PAGE = 15;
@@ -41,6 +42,31 @@ export default function SettingsView() {
 
   const [globalApiKeys, setGlobalApiKeys] = useState<any[]>([]);
   const [apiKeyPage, setApiKeyPage] = useState(1);
+
+  const [locPage, setLocPage] = useState(1);
+  const [catPage, setCatPage] = useState(1);
+
+  // Sorting States
+  const [sortBy, setSortBy] = useState<string>("name");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+
+  // Reset sorting when switching tabs
+  useEffect(() => {
+    if (activeTab === 'api_keys') setSortBy('owner_name');
+    else setSortBy('name');
+    setSortDir('asc');
+  }, [activeTab]);
+
+  const handleSort = (column: string) => {
+    if (sortBy === column) setSortDir(sortDir === "asc" ? "desc" : "asc");
+    else { setSortBy(column); setSortDir("asc"); }
+  };
+
+  const SortIcon = ({ column }: { column: string }) => {
+    if (sortBy !== column) return <ChevronsUpDown size={14} className="opacity-30 inline-block" />;
+    return sortDir === "asc" ? <ChevronUp size={14} className="text-emerald-500 inline-block" /> : <ChevronDown size={14} className="text-emerald-500 inline-block" />;
+  };
+
 
   // Fetch API keys whenever the admin clicks the tab
   useEffect(() => {
@@ -129,6 +155,46 @@ export default function SettingsView() {
   const displayRegions = regions?.filter(r => regionTab === 'active' ? r.is_active : !r.is_active) || [];
   const displayCountries = countries?.filter(c => countryTab === 'active' ? c.is_active : !c.is_active) || [];
 
+  const sortedLocations = [...(locations || [])].sort((a, b) => {
+    let res = a.name.localeCompare(b.name);
+    return sortDir === 'asc' ? res : -res;
+  });
+
+  const sortedAssetTypes = [...(assetTypes || [])].sort((a, b) => {
+    let res = a.name.localeCompare(b.name);
+    return sortDir === 'asc' ? res : -res;
+  });
+
+  const sortedRegions = [...(displayRegions || [])].sort((a, b) => {
+    let res = a.name.localeCompare(b.name);
+    return sortDir === 'asc' ? res : -res;
+  });
+
+  const sortedCountries = [...(countries || [])].sort((a, b) => {
+     let res = 0;
+     if (sortBy === 'code') res = (a.code || '').localeCompare(b.code || '');
+     else if (sortBy === 'name') res = (a.name || '').localeCompare(b.name || '');
+     else if (sortBy === 'region_name') res = (a.region_name || '').localeCompare(b.region_name || '');
+    return sortDir === 'asc' ? res : -res;
+
+  });
+
+  const sortedCategories = [...(categories || [])].sort((a, b) => {
+    let res = 0;
+    if (sortBy === 'name') res = a.name.localeCompare(b.name);
+    else if (sortBy === 'target_goal') res = a.target_goal - b.target_goal;
+    else if (sortBy === 'service_lane') res = (a.service_lane_name || '').localeCompare(b.service_lane_name || '');
+    return sortDir === 'asc' ? res : -res;
+  });
+
+  const sortedApiKeys = [...(globalApiKeys || [])].sort((a, b) => {
+    let res = 0;
+    if (sortBy === 'owner_name') res = (a.owner_name || '').localeCompare(b.owner_name || '');
+    else if (sortBy === 'key_name') res = (a.key_name || '').localeCompare(b.key_name || '');
+    else if (sortBy === 'prefix') res = (a.prefix || '').localeCompare(b.prefix || '');
+    return sortDir === 'asc' ? res : -res;
+  });
+
   return (
     <div className="min-h-screen text-slate-900 dark:text-zinc-100 flex flex-col transition-colors duration-300">
       <TopNav />
@@ -141,7 +207,15 @@ export default function SettingsView() {
         onConfirm={executeDelete}
         onCancel={() => setDeleteModal(null)}
       />
-
+      <ConfirmModal
+        isOpen={actionModal?.isOpen || false}
+        title={actionModal?.title || ""}
+        message={actionModal?.message || ""}
+        confirmText={actionModal?.confirmText}
+        variant={actionModal?.variant}
+        onConfirm={() => { if(actionModal) actionModal.onConfirm(); setActionModal(null); }}
+        onCancel={() => setActionModal(null)}
+      />
       {/* Nuke Modal */}
       {nukeModalOpen && (
         <div className="fixed inset-0 bg-slate-900/50 dark:bg-zinc-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in">
@@ -190,7 +264,7 @@ export default function SettingsView() {
             <div className="fade-in flex-1 flex flex-col">
               <div className="flex justify-between items-center mb-6">
                 <div>
-                  <h2 className="text-xl font-bold text-slate-900 dark:text-zinc-100">User Management</h2>
+                  <h2 className="text-xl font-bold text-slate-900 dark:text-zinc-100 flex items-center gap-2"><Users size={20} className="text-blue-500"/> User Management</h2>
                   <p className="text-sm text-slate-500 dark:text-zinc-400">Manage access roles, capacities, and active intervals.</p>
                 </div>
                 <button onClick={() => { setEditUserId(null); setUserForm(defaultUserForm); setShowForm('users'); }} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2">
@@ -322,7 +396,7 @@ export default function SettingsView() {
             <div className="fade-in flex-1 flex flex-col">
               <div className="flex justify-between items-center mb-6">
                 <div>
-                  <h2 className="text-xl font-bold text-slate-900 dark:text-zinc-100">Asset Types</h2>
+                  <h2 className="text-xl font-bold text-slate-900 dark:text-zinc-100 flex items-center gap-2"><LayoutTemplate size={20} className="text-blue-500"/> Asset Types</h2>
                   <p className="text-sm text-slate-500 dark:text-zinc-400">Manage categories of applications (APIs, Web, Mobile, etc.).</p>
                 </div>
                 <button onClick={() => { setEditCatId(null); setCatForm({name: '', target_goal: 0, service_lane_id: ''}); setShowForm('asset_types'); }} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors">
@@ -343,14 +417,16 @@ export default function SettingsView() {
 
               <div className="border border-slate-200 dark:border-zinc-800 rounded-2xl overflow-hidden shadow-sm flex flex-col flex-1">
                 <table className="w-full text-left text-sm">
-                  <thead className="bg-slate-50 dark:bg-zinc-900/50 border-b border-slate-200 dark:border-zinc-800">
+                  <thead className="bg-slate-50 dark:bg-zinc-900/50 border-b border-slate-200 dark:border-zinc-800 select-none">
                     <tr>
-                      <th className="p-4 font-bold text-slate-600 dark:text-zinc-400">Type Name</th>
+                      <th className="p-4 font-bold text-slate-600 dark:text-zinc-400 cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort('name')}>
+                        <div className="flex items-center gap-2">Type Name <SortIcon column="name" /></div>
+                      </th>
                       <th className="p-4 font-bold text-slate-600 dark:text-zinc-400 text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-zinc-800">
-                    {(assetTypes || []).slice((assetTypePage - 1) * ITEMS_PER_PAGE, assetTypePage * ITEMS_PER_PAGE).map((at: any) => (
+                    {sortedAssetTypes.slice((assetTypePage - 1) * ITEMS_PER_PAGE, assetTypePage * ITEMS_PER_PAGE).map((at: any) => (
                       <tr key={at.id} className="hover:bg-slate-50 dark:hover:bg-zinc-800/50 transition-colors">
                         <td className="p-4 font-bold text-base text-slate-900 dark:text-zinc-100">{at.name}</td>
                         <td className="p-4 text-right">
@@ -383,7 +459,7 @@ export default function SettingsView() {
             <div>
               <div className="flex justify-between items-center mb-6">
                 <div>
-                  <h2 className="text-xl font-bold text-slate-900 dark:text-zinc-100">Dynamic Service Lanes</h2>
+                  <h2 className="text-xl font-bold text-slate-900 dark:text-zinc-100 flex items-center gap-2"><Activity size={20} className="text-blue-500"/> Dynamic Service Lanes</h2>
                   <p className="text-sm text-slate-500 dark:text-zinc-400">Define distinct testing lanes, default credits, and visual themes.</p>
                 </div>
                 <button onClick={() => { setShowForm('services'); setEditServiceId(null); setServiceForm(defaultServiceForm); }} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors">
@@ -470,7 +546,7 @@ export default function SettingsView() {
             <div className="fade-in flex-1 flex flex-col">
               <div className="flex justify-between items-center mb-6">
                 <div>
-                  <h2 className="text-xl font-bold text-slate-900 dark:text-zinc-100">Regions</h2>
+                  <h2 className="text-xl font-bold text-slate-900 dark:text-zinc-100 flex items-center gap-2"><Globe size={20} className="text-blue-500"/> Regions</h2>
                   <p className="text-sm text-slate-500 dark:text-zinc-400">Broad operational boundaries.</p>
                 </div>
                 <button onClick={() => { setEditRegionId(null); setRegionForm(defaultRegionForm); setShowForm('regions'); }} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors">
@@ -502,12 +578,14 @@ export default function SettingsView() {
                 <table className="w-full text-left text-sm">
                   <thead className="bg-slate-50 dark:bg-zinc-900/50 border-b border-slate-200 dark:border-zinc-800">
                     <tr>
-                      <th className="p-4 font-bold text-slate-600 dark:text-zinc-400">Region Name</th>
+                      <th className="p-4 font-bold text-slate-600 dark:text-zinc-400 cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort('name')}>
+                        <div className="flex items-center gap-2">Region Name<SortIcon column="name" /></div>
+                      </th>
                       <th className="p-4 font-bold text-slate-600 dark:text-zinc-400 text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-zinc-800">
-                    {displayRegions.slice((regionPage - 1) * ITEMS_PER_PAGE, regionPage * ITEMS_PER_PAGE).map(r => (
+                    {sortedRegions.slice((regionPage - 1) * ITEMS_PER_PAGE, regionPage * ITEMS_PER_PAGE).map(r => (
                       <tr key={r.id} className="hover:bg-slate-50 dark:hover:bg-zinc-800/50 transition-colors">
                         <td className="p-4 font-bold text-base text-slate-900 dark:text-zinc-100">{r.name}</td>
                         <td className="p-4 text-right">
@@ -545,7 +623,7 @@ export default function SettingsView() {
             <div className="fade-in flex-1 flex flex-col">
               <div className="flex justify-between items-center mb-6">
                 <div>
-                  <h2 className="text-xl font-bold text-slate-900 dark:text-zinc-100">Countries</h2>
+                  <h2 className="text-xl font-bold text-slate-900 dark:text-zinc-100 flex items-center gap-2"><Flag size={20} className="text-blue-500"/> Countries</h2>
                   <p className="text-sm text-slate-500 dark:text-zinc-400">Manage operating countries and analytics mappings.</p>
                 </div>
                 <button onClick={() => { setEditCountryId(null); setCountryForm(defaultCountryForm); setShowForm('countries'); }} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors">
@@ -586,14 +664,20 @@ export default function SettingsView() {
                 <table className="w-full text-left text-sm">
                   <thead className="bg-slate-50 dark:bg-zinc-900/50 border-b border-slate-200 dark:border-zinc-800">
                     <tr>
-                      <th className="p-4 font-bold text-slate-600 dark:text-zinc-400">Code</th>
-                      <th className="p-4 font-bold text-slate-600 dark:text-zinc-400">Country Name</th>
-                      <th className="p-4 font-bold text-slate-600 dark:text-zinc-400">Region Mapping</th>
+                      <th className="p-4 font-bold text-slate-600 dark:text-zinc-400 cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort('code')}>
+                        <div className="flex items-center gap-2">Code<SortIcon column="code" /></div>
+                      </th>
+                      <th className="p-4 font-bold text-slate-600 dark:text-zinc-400 cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort('name')}>
+                        <div className="flex items-center gap-2">Country Name<SortIcon column="name" /></div>
+                      </th>
+                      <th className="p-4 font-bold text-slate-600 dark:text-zinc-400 cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort('region_name')}>
+                        <div className="flex items-center gap-2">Region<SortIcon column="region_name" /></div>
+                      </th>
                       <th className="p-4 font-bold text-slate-600 dark:text-zinc-400 text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-zinc-800">
-                    {displayCountries.slice((countryPage - 1) * ITEMS_PER_PAGE, countryPage * ITEMS_PER_PAGE).map(c => (
+                    {sortedCountries.slice((countryPage - 1) * ITEMS_PER_PAGE, countryPage * ITEMS_PER_PAGE).map(c => (
                       <tr key={c.id} className="hover:bg-slate-50 dark:hover:bg-zinc-800/50 transition-colors">
                         <td className="p-4 text-slate-500 dark:text-zinc-400 font-mono font-bold">{c.code}</td>
                         <td className="p-4 font-bold text-slate-900 dark:text-zinc-100">{c.name}</td>
@@ -632,14 +716,12 @@ export default function SettingsView() {
             </div>
           )}
 
-          {/* ... (Categories, Locations, System Logs logic remains untouched below this block) ... */}
-
           {/* CATEGORIES (Table View) */}
           {activeTab === 'categories' && (
             <div className="fade-in">
               <div className="flex justify-between items-center mb-6">
                 <div>
-                  <h2 className="text-xl font-bold text-slate-900 dark:text-zinc-100">Service Forecasts</h2>
+                  <h2 className="text-xl font-bold text-slate-900 dark:text-zinc-100 flex items-center gap-2"><Tags size={20} className="text-blue-500"/> Service Forecasts</h2>
                   <p className="text-sm text-slate-500 dark:text-zinc-400">Specific target goals mapped to service lanes.</p>
                 </div>
                 <button onClick={() => { setEditCatId(null); setCatForm(defaultCatForm); setShowForm('categories'); }} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors">
@@ -669,16 +751,22 @@ export default function SettingsView() {
 
               <div className="border border-slate-200 dark:border-zinc-800 rounded-2xl overflow-hidden shadow-sm">
                 <table className="w-full text-left text-sm">
-                  <thead className="bg-slate-50 dark:bg-zinc-900/50 border-b border-slate-200 dark:border-zinc-800">
+                  <thead className="bg-slate-50 dark:bg-zinc-900/50 border-b border-slate-200 dark:border-zinc-800 select-none">
                     <tr>
-                      <th className="p-4 font-bold text-slate-600 dark:text-zinc-400">Category Name</th>
-                      <th className="p-4 font-bold text-slate-600 dark:text-zinc-400">Target Goal</th>
-                      <th className="p-4 font-bold text-slate-600 dark:text-zinc-400">Service Lane</th>
+                      <th className="p-4 font-bold text-slate-600 dark:text-zinc-400 cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort('name')}>
+                        <div className="flex items-center gap-2">Category Name <SortIcon column="name" /></div>
+                      </th>
+                      <th className="p-4 font-bold text-slate-600 dark:text-zinc-400 cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort('target_goal')}>
+                        <div className="flex items-center gap-2">Target Goal <SortIcon column="target_goal" /></div>
+                      </th>
+                      <th className="p-4 font-bold text-slate-600 dark:text-zinc-400 cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort('service_lane')}>
+                        <div className="flex items-center gap-2">Service Lane <SortIcon column="service_lane" /></div>
+                      </th>
                       <th className="p-4 font-bold text-slate-600 dark:text-zinc-400 text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-zinc-800">
-                    {categories?.map(c => (
+                    {sortedCategories.slice((catPage - 1) * ITEMS_PER_PAGE, catPage * ITEMS_PER_PAGE).map(c => (
                       <tr key={c.id} className="hover:bg-slate-50 dark:hover:bg-zinc-800/50 transition-colors">
                         <td className="p-4 font-bold text-slate-900 dark:text-zinc-100">{c.name}</td>
                         <td className="p-4 text-slate-700 dark:text-zinc-300 font-medium">{c.target_goal}</td>
@@ -701,7 +789,15 @@ export default function SettingsView() {
                     ))}
                   </tbody>
                 </table>
-                {(!categories || categories.length === 0) && <div className="p-12 text-center text-slate-500 dark:text-zinc-500 bg-slate-50/50 dark:bg-zinc-900/50">No categories found.</div>}
+                {sortedCategories.length > 0 && (
+                  <div className="px-6 py-4 border-t border-slate-200 dark:border-zinc-700 flex justify-between items-center bg-slate-50 dark:bg-zinc-950/50 mt-auto">
+                    <span className="text-sm text-slate-500">Page {catPage} of {Math.ceil(sortedCategories.length / ITEMS_PER_PAGE) || 1}</span>
+                    <div className="flex gap-2">
+                      <button onClick={() => setCatPage(p => Math.max(1, p - 1))} disabled={catPage === 1} className="px-4 py-1.5 border border-slate-300 dark:border-zinc-700 rounded-lg hover:bg-slate-100 dark:hover:bg-zinc-800 disabled:opacity-50 text-sm font-medium transition-colors">Prev</button>
+                      <button onClick={() => setCatPage(p => p + 1)} disabled={catPage >= Math.ceil(sortedCategories.length / ITEMS_PER_PAGE)} className="px-4 py-1.5 border border-slate-300 dark:border-zinc-700 rounded-lg hover:bg-slate-100 dark:hover:bg-zinc-800 disabled:opacity-50 text-sm font-medium transition-colors">Next</button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -711,7 +807,7 @@ export default function SettingsView() {
             <div className="fade-in">
               <div className="flex justify-between items-center mb-6">
                 <div>
-                  <h2 className="text-xl font-bold text-slate-900 dark:text-zinc-100">Locations</h2>
+                  <h2 className="text-xl font-bold text-slate-900 dark:text-zinc-100 flex items-center gap-2"><MapPin size={20} className="text-blue-500"/> Locations</h2>
                   <p className="text-sm text-slate-500 dark:text-zinc-400">Geographic bases for calculating national holidays.</p>
                 </div>
                 <button onClick={() => { setEditLocId(null); setLocForm(defaultLocForm); setShowForm('locations'); }} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2">
@@ -732,14 +828,16 @@ export default function SettingsView() {
 
               <div className="border border-slate-200 dark:border-zinc-800 rounded-2xl overflow-hidden shadow-sm">
                 <table className="w-full text-left text-sm">
-                  <thead className="bg-slate-50 dark:bg-zinc-900/50 border-b border-slate-200 dark:border-zinc-800">
+                  <thead className="bg-slate-50 dark:bg-zinc-900/50 border-b border-slate-200 dark:border-zinc-800 select-none">
                     <tr>
-                      <th className="p-4 font-bold text-slate-600 dark:text-zinc-400">Location Name</th>
+                      <th className="p-4 font-bold text-slate-600 dark:text-zinc-400 cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort('name')}>
+                        <div className="flex items-center gap-2">Location Name <SortIcon column="name" /></div>
+                      </th>
                       <th className="p-4 font-bold text-slate-600 dark:text-zinc-400 text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-zinc-800">
-                    {locations?.map(loc => (
+                    {sortedLocations.slice((locPage - 1) * ITEMS_PER_PAGE, locPage * ITEMS_PER_PAGE).map(loc => (
                       <tr key={loc.id} className="hover:bg-slate-50 dark:hover:bg-zinc-800/50 transition-colors">
                         <td className="p-4 font-bold text-base text-slate-900 dark:text-zinc-100">{loc.name}</td>
                         <td className="p-4 text-right">
@@ -760,7 +858,15 @@ export default function SettingsView() {
                     ))}
                   </tbody>
                 </table>
-                {(!locations || locations.length === 0) && <div className="p-12 text-center text-slate-500 dark:text-zinc-500 bg-slate-50/50 dark:bg-zinc-900/50">No locations found.</div>}
+                {sortedLocations.length > 0 && (
+                  <div className="px-6 py-4 border-t border-slate-200 dark:border-zinc-700 flex justify-between items-center bg-slate-50 dark:bg-zinc-950/50 mt-auto">
+                    <span className="text-sm text-slate-500">Page {locPage} of {Math.ceil(sortedLocations.length / ITEMS_PER_PAGE) || 1}</span>
+                    <div className="flex gap-2">
+                      <button onClick={() => setLocPage(p => Math.max(1, p - 1))} disabled={locPage === 1} className="px-4 py-1.5 border border-slate-300 dark:border-zinc-700 rounded-lg hover:bg-slate-100 dark:hover:bg-zinc-800 disabled:opacity-50 text-sm font-medium transition-colors">Prev</button>
+                      <button onClick={() => setLocPage(p => p + 1)} disabled={locPage >= Math.ceil(sortedLocations.length / ITEMS_PER_PAGE)} className="px-4 py-1.5 border border-slate-300 dark:border-zinc-700 rounded-lg hover:bg-slate-100 dark:hover:bg-zinc-800 disabled:opacity-50 text-sm font-medium transition-colors">Next</button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -770,23 +876,29 @@ export default function SettingsView() {
             <div className="fade-in flex-1 flex flex-col">
               <div className="flex justify-between items-center mb-6">
                 <div>
-                  <h2 className="text-xl font-bold text-slate-900 dark:text-zinc-100"><Key size={20} className="text-blue-500"/>Global API Keys</h2>
+                  <h2 className="text-xl font-bold text-slate-900 dark:text-zinc-100 flex items-center gap-2"><Key size={20} className="text-blue-500"/> Global API Keys</h2>
                   <p className="text-sm text-slate-500 dark:text-zinc-400">Monitor and revoke active API keys across the entire platform.</p>
                 </div>
               </div>
 
               <div className="border border-slate-200 dark:border-zinc-800 rounded-2xl overflow-hidden shadow-sm flex flex-col flex-1 bg-white dark:bg-zinc-900">
                 <table className="w-full text-left text-sm">
-                  <thead className="bg-slate-50 dark:bg-zinc-900/50 border-b border-slate-200 dark:border-zinc-800">
+                  <thead className="bg-slate-50 dark:bg-zinc-900/50 border-b border-slate-200 dark:border-zinc-800 select-none">
                     <tr>
-                      <th className="p-4 font-bold text-slate-600 dark:text-zinc-400">Key Owner</th>
-                      <th className="p-4 font-bold text-slate-600 dark:text-zinc-400">Key Name</th>
-                      <th className="p-4 font-bold text-slate-600 dark:text-zinc-400 font-mono">Prefix</th>
+                      <th className="p-4 font-bold text-slate-600 dark:text-zinc-400 cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort('owner_name')}>
+                        <div className="flex items-center gap-2">Key Owner <SortIcon column="owner_name" /></div>
+                      </th>
+                      <th className="p-4 font-bold text-slate-600 dark:text-zinc-400 cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort('key_name')}>
+                        <div className="flex items-center gap-2">Key Name <SortIcon column="key_name" /></div>
+                      </th>
+                      <th className="p-4 font-bold text-slate-600 dark:text-zinc-400 cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort('prefix')}>
+                        <div className="flex items-center gap-2">Prefix <SortIcon column="prefix" /></div>
+                      </th>
                       <th className="p-4 font-bold text-slate-600 dark:text-zinc-400 text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-zinc-800">
-                    {globalApiKeys.slice((apiKeyPage - 1) * ITEMS_PER_PAGE, apiKeyPage * ITEMS_PER_PAGE).map(k => (
+                    {sortedApiKeys.slice((apiKeyPage - 1) * ITEMS_PER_PAGE, apiKeyPage * ITEMS_PER_PAGE).map(k => (
                       <tr key={k.id} className="hover:bg-slate-50 dark:hover:bg-zinc-800/50 transition-colors">
                         <td className="p-4">
                           <div className="font-bold text-slate-900 dark:text-zinc-100">{k.owner_name}</div>
@@ -796,9 +908,11 @@ export default function SettingsView() {
                         <td className="p-4 text-slate-500 dark:text-zinc-400 font-mono text-xs">{k.prefix}••••••••</td>
                         <td className="p-4 text-right">
                           <button onClick={() => {
-                             if(confirm(`Are you sure you want to revoke the key "${k.key_name}" owned by ${k.owner_name}? Any scripts using this key will immediately fail.`)) {
-                               handleRevokeGlobalKey(k.id);
-                             }
+                             setActionModal({
+                               isOpen: true, variant: 'danger', confirmText: "Revoke Key", title: "Revoke API Key",
+                               message: `Are you sure you want to revoke the key "${k.key_name}" owned by ${k.owner_name}? Any scripts using this key will immediately fail.`,
+                               onConfirm: () => handleRevokeGlobalKey(k.id)
+                             });
                           }} className="text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 p-2 rounded-lg transition-colors" title="Revoke Key">
                             <Trash2 size={18} />
                           </button>
@@ -866,7 +980,14 @@ export default function SettingsView() {
               <div className="pt-6 border-t border-slate-200 dark:border-zinc-800">
                 <h2 className="text-xl font-bold text-red-600 dark:text-red-500 mb-2 flex items-center gap-2"><AlertTriangle size={20} /> Danger Zone</h2>
                 <button onClick={() => setNukeModalOpen(true)} className="bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-8 rounded-xl shadow-sm mt-4 transition-colors focus:ring-4 focus:ring-red-500/20">Execute Factory Reset</button>
-                <button onClick={() => { if(confirm("Permanently wipe ALL encrypted notes?")) { axios.delete('/api/board/system/wipe-secrets'); toast.success("Notes wiped."); } }} className="bg-orange-600 hover:bg-orange-700 text-white font-bold py-3 px-8 rounded-xl shadow-sm mt-4 ml-4 transition-colors">Wipe All Secure Notes</button>
+                <button onClick={() => {
+                  setActionModal({
+                    isOpen: true, variant: 'danger', confirmText: "Wipe Secrets", title: "Wipe All Secure Notes",
+                    message: "Are you sure you want to permanently wipe ALL encrypted notes from the vault? This action cannot be reversed.",
+                    onConfirm: async () => { await axios.delete('/api/board/system/wipe-secrets'); toast.success("Notes wiped."); }
+                  });
+                }} className="bg-orange-600 hover:bg-orange-700 text-white font-bold py-3 px-8 rounded-xl shadow-sm mt-4 ml-4 transition-colors">Wipe All Secure Notes
+                </button>
               </div>
             </div>
           )}
