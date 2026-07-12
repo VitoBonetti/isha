@@ -51,7 +51,15 @@ export default function AssetsView() {
   const [showBulkActions, setShowBulkActions] = useState(false);
   const bulkActionsRef = useRef<HTMLDivElement>(null);
 
-  const [confirmModal, setConfirmModal] = useState<{isOpen: boolean, title: string, message: string, action: 'generate'|null}>({
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    action: 'generate' | 'remove' | null;
+    targetId?: string;
+    confirmText?: string;
+    variant?: 'danger' | 'warning' | 'info' | 'secure';
+  }>({
     isOpen: false, title: "", message: "", action: null
   });
 
@@ -86,36 +94,44 @@ export default function AssetsView() {
     }
   };
 
-  const handleRemoveFromPool = async (assetId: string, assetName: string) => {
-    if (!confirm(`Are you sure you want to return "${assetName}" to the raw data pool?`)) return;
-
-    try {
-      await axios.delete(`/api/assets/${assetId}`);
-      setAssets(prev => prev.filter(asset => asset.id !== assetId));
-      setSelectedAssets(prev => prev.filter(id => id !== assetId));
-      toast.success("Asset returned to Raw Pool");
-    } catch (error) {
-      toast.error("Failed to remove asset");
-    }
+  const handleRemoveFromPool = (assetId: string, assetName: string) => {
+    setConfirmModal({
+      isOpen: true,
+      title: "Return to Raw Pool",
+      message: `Are you sure you want to return "${assetName}" to the raw data pool?`,
+      action: 'remove',
+      targetId: assetId,
+      confirmText: "Return to Pool",
+      variant: "warning"
+    });
   };
 
-  const executeBulkAction = async () => {
-    if (selectedAssets.length === 0 || !confirmModal.action) return;
+  const handleConfirmAction = async () => {
+    if (!confirmModal.action) return;
 
-    try {
-      if (confirmModal.action === 'generate') {
+    if (confirmModal.action === 'generate') {
+      if (selectedAssets.length === 0) return;
+      try {
         const toastId = toast.loading("Generating tests...");
         await axios.post("/api/tests/bulk", { asset_ids: selectedAssets });
         toast.dismiss(toastId);
         toast.success(`Generated tests for ${selectedAssets.length} assets! Check the Planner Backlog.`);
+        setSelectedAssets([]);
+        fetchPoolAssets();
+      } catch (error) {
+        toast.error("Failed to process bulk action");
       }
-      setSelectedAssets([]);
-      fetchPoolAssets();
-    } catch (error) {
-      toast.error("Failed to process bulk action");
-    } finally {
-      setConfirmModal({ ...confirmModal, isOpen: false });
+    } else if (confirmModal.action === 'remove' && confirmModal.targetId) {
+      try {
+        await axios.delete(`/api/assets/${confirmModal.targetId}`);
+        setAssets(prev => prev.filter(asset => asset.id !== confirmModal.targetId));
+        setSelectedAssets(prev => prev.filter(id => id !== confirmModal.targetId));
+        toast.success("Asset returned to Raw Pool");
+      } catch (error) {
+        toast.error("Failed to remove asset");
+      }
     }
+    setConfirmModal({ ...confirmModal, isOpen: false });
   };
 
   // NEW: Handle Bulk Service Lane Update
@@ -207,8 +223,9 @@ export default function AssetsView() {
         isOpen={confirmModal.isOpen}
         title={confirmModal.title}
         message={confirmModal.message}
-        confirmText="Confirm"
-        onConfirm={executeBulkAction}
+        confirmText={confirmModal.confirmText || "Confirm"}
+        variant={confirmModal.variant || "danger"}
+        onConfirm={handleConfirmAction}
         onCancel={() => setConfirmModal({ ...confirmModal, isOpen: false })}
       />
 
@@ -315,7 +332,14 @@ export default function AssetsView() {
                           toast.error(`${missingLanes.length} selected assets are missing a Service Lane! Please assign one first.`);
                           return;
                         }
-                        setConfirmModal({isOpen: true, action: 'generate', title: "Generate Tests", message: `Are you sure you want to generate Planner Tests for these ${selectedAssets.length} assets? This will move them to the Planner Backlog.`});
+                        setConfirmModal({
+                          isOpen: true,
+                          action: 'generate',
+                          title: "Generate Tests",
+                          message: `Are you sure you want to generate Planner Tests for these ${selectedAssets.length} assets? This will move them to the Planner Backlog.`,
+                          confirmText: "Generate",
+                          variant: "info"
+                        });
                       }}
                       className="w-full flex items-center gap-2 px-4 py-2.5 text-sm font-bold hover:bg-slate-50 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300 transition-colors"
                     >

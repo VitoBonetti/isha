@@ -99,3 +99,72 @@ def get_country_analytics(year: Optional[int] = None, current_user: dict = Depen
 
     columns = [col[0] for col in cursor.description]
     return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+
+@router.get("/dashboard", summary="[Admin Only]")
+def get_dashboard_analytics(year: Optional[int] = None, country_id: Optional[str] = None,
+                            region_id: Optional[str] = None, current_user: dict = Depends(require_admin),
+                            cursor=Depends(get_db_cursor)):
+    if not year:
+        year = datetime.now().year
+
+    # Safe SQL p[arameters
+    params = {'year': year, 'cid': country_id, 'rid': region_id}
+
+    # Metrics
+    cursor.execute(f"""
+        SELECT 
+            COUNT(DISTINCT ra.id) as raw,
+            COUNT(DISTINCT a.id) as pool,
+            COUNT(DISTINCT CASE WHEN t.stages::text = 'COMPLETED' AND t.start_year = %(year)s THEN t.id END) as completed,
+            COUNT(DISTINCT CASE WHEN t.stages::text IN ('SCHEDULED', 'IN_PROGRESS') AND t.start_year = %(year)s THEN t.id END) as backlog
+        FROM raw_assets ra
+        {'LEFT JOIN countries c ON ra.country_id = c.id' if region_id else ''}
+        LEFT JOIN assets a ON ra.id = a.raw_asset_id
+        LEFT JOIN test_assets ta ON a.id = ta.asset_id
+        LEFT JOIN tests t ON ta.test_id = t.id
+        WHERE 1=1
+        {' AND ra.country_id = %(cid)s' if country_id else ''}
+        {' AND c.region_id = %(rid)s' if region_id else ''}
+    """, params)
+    kpi_row = cursor.fetchone()
+    kpis = {"raw": kpi_row[0], "pool": kpi_row[1], "completed": kpi_row[2], "backlog": kpi_row[3]}
+
+    # service lanes piechart
+    cursor.execute(f"""
+        SELECT COALESCE(sl.name, 'Not Set') as name, COUNT(DISTINCT a.id) as value
+        FROM assets a
+        JOIN raw_assets ra ON a.raw_asset_id = ra.id
+        {'LEFT JOIN countries c ON ra.country_id = c.id' if region_id else ''}
+        LEFT JOIN services_lanes sl ON a.service_forecast_id = sl.id
+        WHERE 1=1
+        {' AND ra.country_id = %(cid)s' if country_id else ''}
+        {' AND c.region_id = %(rid)s' if region_id else ''}
+        GROUP BY sl.name
+        ORDER BY value DESC
+    """, params)
+    pie_data = [{"name": r[0], "value": r[1]} for r in cursor.fetchall()]
+
+    # monthly thrends
+    cursor.execute(f"""
+        SELECT 
+            EXTRACT(MONTH FROM TO_DATE(t.start_year::text || '0101', 'YYYYMMDD') + ((t.start_week - 1) * 7)) as month_num,
+            COUNT(DISTINCT t.id) as tests
+        FROM tests t
+        JOIN test_assets ta ON t.id = ta.test_id
+        JOIN assets a ON ta.asset_id = a.id
+        JOIN raw_assets ra ON a.raw_asset_id = ra.id
+        {'LEFT JOIN countries c ON ra.country_id = c.id' if region_id else ''}
+        WHERE t.start_year = %(year)s 
+          AND t.stages::text IN ('SCHEDULED', 'IN_PROGRESS', 'COMPLETED')
+        {' AND ra.country_id = %(cid)s' if country_id else ''}
+        {' AND c.region_id = %(rid)s' if region_id else ''}
+        GROUP BY month_num
+        ORDER BY month_num
+    """, params)
+
+    months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    monthly_data = {int(r[0]): r[1] for r in cursor.fetchall() if r[0]}
+    trend_data = [{"month": months[i - 1], "tests": monthly_data.get(i, 0)} for i in range(1, 13)]
+
+    return {"kpis": kpis, "pie_data": pie_data, "trend_data": trend_data}
