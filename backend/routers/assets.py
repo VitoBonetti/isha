@@ -222,7 +222,7 @@ def get_single_raw_asset(raw_id: str, current_user: dict = Depends(get_current_u
     columns = [col[0] for col in cursor.description]
     asset_data = dict(zip(columns, row))
 
-    # Fetch History (Already ordered DESC, so newest is always at the top)
+    # History
     cursor.execute("""
         SELECT h.id, h.action, h.details, h.timestamp, u.name as user_name
         FROM asset_history h
@@ -232,6 +232,21 @@ def get_single_raw_asset(raw_id: str, current_user: dict = Depends(get_current_u
     """, (raw_id,))
     hist_cols = [col[0] for col in cursor.description]
     asset_data["history"] = [dict(zip(hist_cols, h_row)) for h_row in cursor.fetchall()]
+
+    # completed tests
+    cursor.execute("""
+        SELECT t.id, t.name, t.start_week, t.start_year, sl.name as service_lane, 
+            (SELECT string_agg(DISTINCT u.name, ', ') FROM assignments a JOIN users u ON a.user_id = u.id WHERE a.test_id = t.id) as pentesters,
+            (SELECT timestamp FROM test_history th WHERE th.test_id = t.id AND th.action = 'COMPLETED' ORDER BY timestamp DESC LIMIT 1) as completion_date
+        FROM tests t
+        JOIN test_assets ta ON t.id = ta.test_id
+        JOIN assets a ON ta.asset_id = a.id
+        LEFT JOIN services_lanes sl ON t.service_lane_id = sl.id
+        WHERE a.raw_asset_id = %s AND t.stages::text = 'COMPLETED'
+        ORDER BY completion_date DESC NULLS LAST
+    """, (raw_id,))
+    tests_cols = [col[0] for col in cursor.description]
+    asset_data["completed_tests"] = [dict(zip(tests_cols, t_row)) for t_row in cursor.fetchall()]
 
     return asset_data
 
@@ -435,6 +450,8 @@ def process_excel_import_sync(contents: bytes, filename: str, current_user: dict
                             WHERE id=%s
                         """,
                         (desc, business_critical, c_val, i_val, a_val, service_id, cat_id, type_id, facing_internet, existing_id))
+                        insert_asset_history(cursor, existing_id, str(current_user["id"]), "IMPORTED",
+                                             "Asset metadata updated via bulk Excel import.")
                     else:
                         new_id = str(uuid.uuid4())
                         cursor.execute("""
@@ -444,6 +461,8 @@ def process_excel_import_sync(contents: bytes, filename: str, current_user: dict
                                 country_id, service_forecast_id, category_id, asset_type_id, facing_internet, create_date
                             ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
                         """, (new_id, name, desc, business_critical, c_val, i_val, a_val, country_id, service_id, cat_id, type_id, facing_internet))
+                        insert_asset_history(cursor, new_id, str(current_user["id"]), "IMPORTED",
+                                             "Asset created via bulk Excel import.")
 
                     success_count += 1
                 except Exception:
