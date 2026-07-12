@@ -452,8 +452,10 @@ def wipe_system_data(background_tasks: BackgroundTasks,
             TRUNCATE TABLE tests CASCADE;
             TRUNCATE TABLE assets CASCADE;
             TRUNCATE TABLE raw_assets CASCADE;
-            TRUNCATE TABLE service_lanes CASCADE;
+            TRUNCATE TABLE services_lanes CASCADE;
             TRUNCATE TABLE service_categories CASCADE;
+            TRUNCATE TABLE asset_history CASCADE;
+            TRUNCATE TABLE test_history CASCADE;
         """)
         cursor.connection.commit()
 
