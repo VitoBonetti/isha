@@ -16,6 +16,7 @@ class ServiceLanes(Base):
     default_duration_weeks = Column(Integer, default=1)
     is_active = Column(Boolean, default=True)
     display_order = Column(Integer, default=99)
+    target_goal = Column(Integer, default=0)
 
     # relationship
     service_categories = relationship('ServiceCategories', back_populates='services_lanes')
