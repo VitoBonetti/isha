@@ -31,7 +31,7 @@ def get_user_provision_internal(cursor, user_id, year, week_number):
     if end_year and year > end_year: return 0.0
     if end_year and year == end_year and end_week and week_number > end_week: return 0.0
 
-    # FIX: Safely cast the location ID to prevent the "None" UUID crash
+    #  cast the location ID to prevent the "None" UUID crash
     safe_loc_id = str(user_location_id) if user_location_id is not None else None
 
     # Fetch relevant events (Personal PTO, Team Days, or Local/Global National Holidays)
@@ -42,6 +42,7 @@ def get_user_provision_internal(cursor, user_id, year, week_number):
            OR event_type = 'team_day'
            OR (event_type = 'national_holiday' AND (
                location_id = %s OR 
+               location_id IS NULL OR 
                location_id = (SELECT id FROM locations WHERE name = 'Global' LIMIT 1)
            ))
     """, (str(user_id), safe_loc_id))
