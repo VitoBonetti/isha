@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, Field, UUID4
+from pydantic import BaseModel, EmailStr, UUID4
 from typing import Optional, List
 from datetime import date, datetime
 from enum import Enum
@@ -40,6 +40,7 @@ class ServiceLaneBase(BaseModel):
     theme_color: str = "#3b82f6"
     default_credits: float = 2.0
     default_duration_weeks: int = 1
+    target_goal: Optional[int] = 0
     is_active: bool = True
     display_order: int = 99
 

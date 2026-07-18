@@ -42,6 +42,7 @@ def get_user_provision_internal(cursor, user_id, year, week_number):
            OR event_type = 'team_day'
            OR (event_type = 'national_holiday' AND (
                location_id = %s OR 
+               location_id IS NULL OR 
                location_id = (SELECT id FROM locations WHERE name = 'Global' LIMIT 1)
            ))
     """, (str(user_id), safe_loc_id))
