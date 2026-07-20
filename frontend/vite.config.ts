@@ -15,9 +15,6 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:8000', // Uses Docker internal DNS to hit the backend container
         changeOrigin: true,
-      },
-      '/ws': {
-        target: 'ws://localhost:8000',
         ws: true,
       },
       '/docs': {

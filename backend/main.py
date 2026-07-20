@@ -100,8 +100,9 @@ app.include_router(insights.router)
 
 
 # --- WEBSOCKET FOR REACTIVE UI ---
-@app.websocket("/ws/board")
-async def websocket_endpoint(websocket: WebSocket):
+
+# Centralized handler logic
+async def handle_websocket_logic(websocket: WebSocket):
     # CSRF Protection
     origin = websocket.headers.get("origin")
     if origin not in ALLOWED_ORIGINS and os.environ.get("ENV") != "local":
@@ -112,7 +113,6 @@ async def websocket_endpoint(websocket: WebSocket):
 
     # Read the secure JWT header attached by Google IAP
     iap_jwt = websocket.headers.get("x-goog-iap-jwt-assertion")
-
     if not iap_jwt:
         if os.environ.get("ENV") == "local":
             email = os.environ.get("MASTER_ADMIN_EMAIL")
@@ -125,10 +125,8 @@ async def websocket_endpoint(websocket: WebSocket):
             kid = jwt.get_unverified_header(iap_jwt).get("kid")
             public_keys = get_google_public_keys()
             public_key = public_keys.get(kid)
-
             if not public_key:
                 raise ValueError("Invalid IAP Token Header Key ID")
-
             payload = jwt.decode(
                 iap_jwt,
                 public_key,
@@ -138,19 +136,29 @@ async def websocket_endpoint(websocket: WebSocket):
             email = payload.get("email")
             if not email:
                 raise ValueError("No email found in IAP payload")
-
         except Exception as e:
             await websocket.close(code=1008, reason=f"Unauthorized: {str(e)}")
             return
 
     # Connect the verified user to the board manager
     await manager.connect(websocket, email)
-
     try:
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:
         await manager.disconnect(websocket)
+
+
+# Route 1
+@app.websocket("/ws/board")
+async def websocket_endpoint_legacy(websocket: WebSocket):
+    await handle_websocket_logic(websocket)
+
+
+# Route 2 (The one your frontend is actively hitting)
+@app.websocket("/api/ws/board")
+async def websocket_endpoint_api(websocket: WebSocket):
+    await handle_websocket_logic(websocket)
 
 
 # --- SYSTEM ENDPOINTS ---

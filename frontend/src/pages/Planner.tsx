@@ -41,7 +41,7 @@ export default function Planner() {
 
     // 1. Establish WebSocket connection automatically
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws/board`;
+    const wsUrl = `${protocol}//${window.location.host}/api/ws/board`;
 
     const socket = new WebSocket(wsUrl);
     ws.current = socket;

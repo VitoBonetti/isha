@@ -382,6 +382,7 @@ def create_event(e: EventCreate, background_tasks: BackgroundTasks,
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"status": "ok"}
 
+
 @router.put("/events/{event_id}")
 def update_event(event_id: str, e: EventBase, background_tasks: BackgroundTasks,
                  current_user: dict = Depends(require_write_access), cursor=Depends(get_db_cursor)):
