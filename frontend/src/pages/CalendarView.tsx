@@ -274,7 +274,7 @@ export default function CalendarView() {
                           style={{ gridColumn: `${startCol} / ${endCol}` }}
                           className={`mx-1 px-2.5 py-1.5 rounded-lg text-xs font-bold truncate pointer-events-auto shadow-sm transition-transform hover:scale-[1.01] flex items-center gap-1.5 ${bgClass} ${textClass} ${canEdit ? 'cursor-pointer hover:opacity-80' : 'cursor-default'} ${startCol !== 1 || eStart >= trueWeekStartStr ? `border-l-4 ${borderClass}` : ''}`}
                         >
-                          {eType === 'personal_time_off' && user?.avatar_url && (
+                          {eType === 'personal_time_off' && user?.name && (
                             <div className="w-4 h-4 rounded-full shadow-sm shrink-0 bg-black/20 flex items-center justify-center text-[10px] font-bold">
                               {user?.name?.charAt(0).toUpperCase() || 'U'}
                             </div>

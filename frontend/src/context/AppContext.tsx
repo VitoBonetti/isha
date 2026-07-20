@@ -8,7 +8,6 @@ export interface User {
   name: string;
   role: 'admin' | 'pentester' | 'read_only';
   location_id: string;
-  avatar_url: string | null;
 }
 
 interface AppContextType {
