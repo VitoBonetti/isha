@@ -116,15 +116,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
   }, [currentUser, navigate]);
 
+
   const handleLogout = async () => {
-    try {
-      await axios.post('/api/auth/logout');
-    } catch (err) {
-      console.error("Logout failed", err);
-    } finally {
-      setCurrentUser(null);
-      navigate('/login');
-    }
+    const response = await api.post('/api/auth/logout');
+    window.location.href = response.data.iap_logout_url;
   };
 
   return (

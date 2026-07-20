@@ -68,6 +68,7 @@ export default function TopNav() {
   };
 
   const unreadCount = notifications?.length || 0;
+  const userInitial = currentUser?.name ? currentUser.name.charAt(0).toUpperCase() : "";
 
   return (
     <>
@@ -78,7 +79,7 @@ export default function TopNav() {
         <div className="bg-emerald-500/10 p-2 rounded-full border border-emerald-500/20 group-hover:bg-emerald-500/20 transition-colors">
           <LogoIcon className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
         </div>
-        <span className="font-bold tracking-widest text-sm text-slate-900 dark:text-zinc-100 uppercase">Isha</span>
+        <span className="font-bold tracking-widest text-sm text-slate-900 dark:text-zinc-100 uppercase">Mario</span>
       </Link>
 
       {/* Nav Links */}
@@ -189,13 +190,9 @@ export default function TopNav() {
         {/* User Profile */}
         <div className="relative" ref={userRef}>
           <button onClick={() => setIsUserOpen(!isUserOpen)} className="ml-2 relative cursor-pointer hover:opacity-80 transition-opacity outline-none">
-            {currentUser?.avatar_url ? (
-              <img src={currentUser.avatar_url} alt="Profile" className="h-8 w-8 rounded-full border border-slate-300 dark:border-zinc-700 ring-2 ring-white dark:ring-zinc-900 object-cover" />
-            ) : (
-              <div className="h-8 w-8 rounded-full bg-gradient-to-tr from-emerald-500 to-indigo-500 border border-slate-300 dark:border-zinc-800 ring-2 ring-white dark:ring-zinc-900 flex items-center justify-center text-white">
-                <UserIcon className="h-4 w-4" />
-              </div>
-            )}
+            <div className="h-8 w-8 rounded-full bg-gradient-to-tr from-emerald-500 to-indigo-500 border border-slate-300 dark:border-zinc-800 ring-2 ring-white dark:ring-zinc-900 flex items-center justify-center text-white font-semibold text-sm">
+              {userInitial}
+            </div>
           </button>
 
           {isUserOpen && (

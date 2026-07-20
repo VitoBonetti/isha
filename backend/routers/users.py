@@ -90,6 +90,7 @@ def delete_user(user_id: str, background_tasks: BackgroundTasks,
         background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
         return {"message": "User successfully offboarded."}
 
+
 @router.put("/{user_id}", summary="[Admin Only]")
 def update_user(user_id: str, u: UserBase, background_tasks: BackgroundTasks,
                 current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):

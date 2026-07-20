@@ -145,22 +145,21 @@ export default function PlannerView({
               <div className="w-px h-5 bg-slate-200 dark:bg-zinc-800 mx-1"></div>
               <div className="flex -space-x-2">
                 <div title="You" className="w-7 h-7 rounded-full bg-blue-500 text-white flex items-center justify-center text-xs font-bold border-2 border-white dark:border-zinc-900 z-10 shadow-sm overflow-hidden">
-                  {currentUser?.avatar_url ? (
-                    <img src={currentUser.avatar_url} alt="You" className="w-full h-full object-cover" />
-                  ) : (
-                    currentUser?.name?.charAt(0).toUpperCase() || 'U'
-                  )}
+                  {currentUser?.name?.charAt(0).toUpperCase() || 'U'}
                 </div>
+
                 {onlineUsers.filter(email => email !== currentUser?.email).map((email, idx) => {
                   const userDetails = boardData.pentesters.find(p => p.email === email);
                   const initial = userDetails?.name?.charAt(0).toUpperCase() || (typeof email === 'string' ? email.charAt(0).toUpperCase() : '?');
+
                   return (
-                    <div key={email || idx} title={userDetails?.name || email} className="w-7 h-7 rounded-full bg-emerald-500 text-white flex items-center justify-center text-xs font-bold border-2 border-white dark:border-zinc-900 shadow-sm overflow-hidden" style={{ zIndex: 9 - idx }}>
-                      {userDetails?.avatar_url ? (
-                        <img src={userDetails.avatar_url} alt={userDetails?.name} className="w-full h-full object-cover" />
-                      ) : (
-                        initial
-                      )}
+                    <div
+                      key={email || idx}
+                      title={userDetails?.name || email}
+                      className="w-7 h-7 rounded-full bg-emerald-500 text-white flex items-center justify-center text-xs font-bold border-2 border-white dark:border-zinc-900 shadow-sm overflow-hidden"
+                      style={{ zIndex: 9 - idx }}
+                    >
+                      {initial}
                     </div>
                   );
                 })}

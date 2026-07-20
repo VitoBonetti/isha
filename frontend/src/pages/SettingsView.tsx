@@ -328,13 +328,9 @@ export default function SettingsView() {
                       <tr key={u.id} className="hover:bg-slate-50 dark:hover:bg-zinc-800/50 transition-colors">
                         <td className="p-4">
                           <div className="flex items-center gap-3">
-                            {u.avatar_url ? (
-                              <img src={u.avatar_url} alt={u.name} className="w-9 h-9 rounded-full border border-slate-200 dark:border-zinc-700 object-cover" />
-                            ) : (
-                              <div className="w-9 h-9 rounded-full bg-slate-200 dark:bg-zinc-800 text-slate-500 dark:text-zinc-400 flex items-center justify-center font-bold">
-                                {u.name.charAt(0)}
-                              </div>
-                            )}
+                            <div className="w-9 h-9 rounded-full bg-slate-200 dark:bg-zinc-800 text-slate-500 dark:text-zinc-400 flex items-center justify-center font-bold">
+                              {u.name?.charAt(0).toUpperCase() || 'U'}
+                            </div>
                             <div>
                               <div className="font-bold text-base text-slate-900 dark:text-zinc-100">{u.name}</div>
                               <div className="text-slate-500 dark:text-zinc-500 mt-0.5">{u.email}</div>

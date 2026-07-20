@@ -1,8 +1,10 @@
-# Use an official Python runtime as a parent image
 FROM python:3.13-slim
 
-# Set the working directory in the container
+# Create a non-root user and group
+RUN addgroup --system appgroup && adduser --system --group appuser
+
 WORKDIR /app
+
 
 # Copy the requirements file first to leverage Docker cache
 COPY requirements.txt .
@@ -13,8 +15,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy the rest of the application code
 COPY . /app/
 
-# Expose the port FastAPI runs on (default is 8000, but we'll make it configurable)
-EXPOSE 8000
+# Create the data directory and give ownership ONLY to the non-root user
+RUN mkdir -p /app/data && chown -R appuser:appgroup /app
 
-# Run the app using Uvicorn (as listed in requirements [10])
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Drop root privileges!
+USER appuser
+
+# Run the server using the dynamic $PORT provided by Cloud Run
+CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080}"]

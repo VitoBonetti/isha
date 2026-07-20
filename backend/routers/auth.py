@@ -16,94 +16,39 @@ load_dotenv(env_path)
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 
-GITHUB_CLIENT_ID = os.environ.get("GITHUB_CLIENT_ID")
-GITHUB_CLIENT_SECRET = os.environ.get("GITHUB_CLIENT_SECRET")
-SECRET_KEY = os.environ.get("SECRET_KEY")
+IAP_AUDIENCE = os.environ.get("IAP_AUDIENCE")
 ALGORITHM = "HS256"
+# Global cache for Google IAP Public Keys
+IAP_PUBLIC_KEYS = {}
+IAP_KEYS_LAST_REFRESH = 0
 
 
-# --- 1. THE GITHUB OAUTH HANDSHAKE ---
+def get_google_public_keys() -> dict:
+    """Fetches and caches Google IAP public keys safely using httpx."""
+    global IAP_PUBLIC_KEYS, IAP_KEYS_LAST_REFRESH
+    import time
 
-@router.get("/github/callback", include_in_schema=False)
-async def github_callback(code: str, cursor=Depends(get_db_cursor)):
-    # 1. Start the Async Client session
-    async with httpx.AsyncClient() as client:
-        # Exchange code for token
-        token_resp = await client.post(
-            "https://github.com/login/oauth/access_token",
-            data={
-                "client_id": GITHUB_CLIENT_ID,
-                "client_secret": GITHUB_CLIENT_SECRET,
-                "code": code
-            },
-            headers={"Accept": "application/json"}
-        )
-        token_data = token_resp.json()
-        access_token = token_data.get("access_token")
+    # Refresh if empty or if 1 hour has passed
+    if not IAP_PUBLIC_KEYS or (time.time() - IAP_KEYS_LAST_REFRESH > 3600):
+        try:
+            # Using synchronous client context manager for the dependency flow
+            with httpx.Client() as client:
+                resp = client.get("https://www.gstatic.com/iap/verify/public_key")
+                if resp.status_code == 200:
+                    IAP_PUBLIC_KEYS = resp.json()
+                    IAP_KEYS_LAST_REFRESH = time.time()
+                else:
+                    # Fallback to current cache if Google is down or rate-limiting
+                    if not IAP_PUBLIC_KEYS:
+                        raise HTTPException(status_code=500, detail="Failed to fetch IAP public keys from Google")
+        except Exception as e:
+            if not IAP_PUBLIC_KEYS:
+                raise HTTPException(status_code=500, detail=f"IAP Key Fetch Error: {str(e)}")
 
-        if not access_token:
-            raise HTTPException(status_code=400, detail="Failed to authenticate with GitHub")
-
-        # Get User info
-        user_resp = await client.get(
-            "https://api.github.com/user",
-            headers={"Authorization": f"token {access_token}"}
-        )
-        gh_user = user_resp.json()
-
-        # Fallback for private emails (Notice this is safely INSIDE the 'async with' block now)
-        email = gh_user.get("email")
-        if not email:
-            email_resp = await client.get(
-                "https://api.github.com/user/emails",
-                headers={"Authorization": f"token {access_token}"}
-            )
-            emails = email_resp.json()
-            primary = next((e for e in emails if e.get('primary')), None)
-            email = primary['email'] if primary else None
-
-    # --- CLIENT SAFELY CLOSES HERE ---
-
-    if not email:
-        return Response(status_code=302, headers={"Location": "http://localhost:5173/login?error=no_email"})
-
-    avatar_url = gh_user.get("avatar_url")
-    github_id = str(gh_user.get("id"))
-    name = gh_user.get("name") or gh_user.get("login")
-
-    # --- 2-STEP VERIFICATION LOGIC ---
-    cursor.execute("SELECT id, role FROM users WHERE email = %s", (email,))
-    existing_user = cursor.fetchone()
-
-    if existing_user:
-        # User Exists: Update their GitHub-specific fields
-        cursor.execute(
-            "UPDATE users SET github_id = %s, avatar_url = %s, name = %s WHERE email = %s",
-            (github_id, avatar_url, name, email)
-        )
-        cursor.connection.commit()
-    else:
-        # User NOT Found: Redirect to login with "Not Invited" error
-        return Response(status_code=302, headers={"Location": "http://localhost:5173/login?error=not_invited"})
-
-    # Issue JWT
-    token = jwt.encode({"sub": email}, SECRET_KEY, algorithm=ALGORITHM)
-
-    # Redirect to dashboard and set cookie
-    response = Response(status_code=302, headers={"Location": "http://localhost:5173/dashboard"})
-    response.set_cookie(
-        key="access_token",
-        value=token,
-        httponly=True,
-        secure=False,
-        samesite="lax",
-        max_age=86400
-    )
-    return response
+    return IAP_PUBLIC_KEYS
 
 
-# --- 2. SECURITY MIDDLEWARE (DUAL-AUTH) ---
-
+# --- 1. SECURITY MIDDLEWARE (DUAL-AUTH) ---
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 
@@ -117,7 +62,7 @@ def get_current_user(request: Request, api_key: str = Depends(api_key_header), c
     if api_key:
         hashed = hash_api_key(api_key)
         cursor.execute("""
-            SELECT u.id, u.email, u.name, u.role, u.location_id, u.avatar_url 
+            SELECT u.id, u.email, u.name, u.role, u.location_id
             FROM users u
             JOIN api_keys ak ON u.id = ak.user_id
             WHERE ak.hashed_key = %s AND ak.is_active = TRUE
@@ -128,40 +73,58 @@ def get_current_user(request: Request, api_key: str = Depends(api_key_header), c
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or revoked API Key")
 
         return {
-            "id": user[0], "email": user[1], "name": user[2], "role": user[3], "location_id": user[4],
-            "avatar_url": user[5]
+            "id": user[0], "email": user[1], "name": user[2], "role": user[3], "location_id": user[4]
         }
 
-    # METHOD B: JWT COOKIE AUTHENTICATION (For the React Frontend)
-    token = request.cookies.get("access_token")
+    # METHOD B: GOOGLE IAP HEADER AUTHENTICATION (For the React Frontend)
+    iap_jwt = request.headers.get("X-Goog-IAP-JWT-Assertion")
 
-    if not token:
+    if not iap_jwt:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Not authenticated. Provide a valid Cookie or X-API-Key header."
+            detail="Not authenticated. Request must go through the IAP Load Balancer or provide X-API-Key."
         )
 
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        email: str = payload.get("sub")
+        # 1. Grab the key ID (kid) without verifying the signature yet
+        unverified_header = jwt.get_unverified_header(iap_jwt)
+        kid = unverified_header.get("kid")
+        # 2. Get our cached public keys and pull the specific matching key
+        public_keys = get_google_public_keys()
+        public_key = public_keys.get(kid)
+
+        if not public_key:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid IAP Token Header Key ID")
+
+        # 3. Decode and cryptographically verify the JWT token
+        # This checks expiry, signature validity, and ensures the token belongs to your project
+        payload = jwt.decode(
+            iap_jwt,
+            public_key,
+            algorithms=["ES256"],  # Google IAP tokens strictly use ES256
+            audience=IAP_AUDIENCE
+        )
+
+        email: str = payload.get("email")
         if email is None:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
+                                detail="Invalid identity layout in IAP payload")
+
     except JWTError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
 
-    cursor.execute("SELECT id, email, name, role, location_id, avatar_url FROM users WHERE email = %s", (email,))
+    cursor.execute("SELECT id, email, name, role, location_id FROM users WHERE email = %s", (email,))
     user = cursor.fetchone()
 
     if not user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User no longer exists.")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User account is authenticated via Google, but has not been invited to this system.")
 
     return {
         "id": user[0],
         "email": user[1],
         "name": user[2],
         "role": user[3],
-        "location_id": user[4],
-        "avatar_url": user[5]
+        "location_id": user[4]
     }
 
 
@@ -178,7 +141,22 @@ def require_write_access(current_user: dict = Depends(get_current_user)):
     return current_user
 
 
-# --- 3. SESSION & API KEY MANAGEMENT ---
+@router.post("/logout")
+def logout(background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user)):
+    # 1. We still want to announce the user left via websockets
+    background_tasks.add_task(
+        manager.broadcast,
+        f'{{"action": "USER_LEFT", "email": "{current_user["email"]}"}}'
+    )
+
+    #  send the required Google IAP logout URL back to the React frontend.
+    return {
+        "message": "Successfully logged out of backend.",
+        "iap_logout_url": "/_gcp_iap/clear_login_cookie"
+    }
+
+
+# --- 2. SESSION & API KEY MANAGEMENT ---
 @router.get("/keys")
 def list_api_keys(global_view: bool = False, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
     """Lists API keys. Admins see all keys, regular users see only their own."""
@@ -236,13 +214,3 @@ def revoke_api_key(key_id: str, current_user: dict = Depends(get_current_user), 
         cursor.execute("DELETE FROM api_keys WHERE id = %s AND user_id = %s", (key_id, str(current_user['id'])))
     cursor.connection.commit()
     return {"message": "API Key successfully revoked."}
-
-
-@router.post("/logout")
-def logout(response: Response, background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user)):
-    response.delete_cookie(key="access_token", httponly=True, secure=False, samesite="lax")
-    background_tasks.add_task(
-        manager.broadcast,
-        f'{{"action": "USER_LEFT", "email": "{current_user["email"]}"}}'
-    )
-    return {"message": "Successfully logged out"}

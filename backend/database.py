@@ -1,6 +1,6 @@
 import os
 from dotenv import load_dotenv
-from psycopg2 import pool
+from google.cloud.sql.connector import Connector, IPTypes
 from fastapi import HTTPException
 from contextlib import contextmanager
 from sqlalchemy import create_engine
@@ -9,45 +9,57 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 env_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env')
 load_dotenv(env_path)
 
-# Read from environment variables, fallback to local Docker defaults
-DB_USER = os.environ.get("POSTGRES_USER")
-DB_PASSWORD = os.environ.get("POSTGRES_PASSWORD")
-DB_HOST = os.environ.get("DB_HOST")
-DB_PORT = os.environ.get("DB_PORT",)
+PROJECT_ID = os.environ.get("GCP_PROJECT_ID")
+LOCATION = os.environ.get("LOCATION")
+INSTANCE_NAME = os.environ.get("DB_INSTANCE_NAME")
 DB_NAME = os.environ.get("POSTGRES_DB")
+DB_USER = os.environ.get("IAM_SA_EMAIL")
 
-# Sqlalchemy orm setup for all the models
-# ---------------------------------------
-DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
-engine = create_engine(DATABASE_URL)
+instance_connection_name = f"{PROJECT_ID}:{LOCATION}:{INSTANCE_NAME}"
+
+# Initialize the Cloud SQL Connector
+connector = Connector()
+
+
+def getconn():
+    """Generates a raw pg8000 connection via the Cloud SQL proxy natively in Python."""
+    return connector.connect(
+        instance_connection_name,
+        "pg8000",
+        user=DB_USER,
+        db=DB_NAME,
+        enable_iam_auth=True,
+        ip_type=IPTypes.PRIVATE
+    )
+
+
+# --- SQLAlchemy ORM & Pool Setup ---
+# We pass 'creator=getconn' instead of a traditional postgres:// database URL
+engine = create_engine(
+    "postgresql+pg8000://",
+    creator=getconn,
+    pool_size=10,
+    max_overflow=20,
+    pool_timeout=30,
+    pool_recycle=900,  # Safely recycles old connections
+    pool_pre_ping=True  # Natively handles Mario's 'SELECT 1' check & retry logic!
+)
+
 Base = declarative_base()
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# raw psycopg2 setup for the routes
-# ---------------------------------
-try:
-    connection_pool = pool.ThreadedConnectionPool(
-        minconn=1, maxconn=20,
-        user=DB_USER, password=DB_PASSWORD, host=DB_HOST, port=DB_PORT, database=DB_NAME
-    )
-    print("✅ Successfully connected to PostgreSQL Pool")
-except Exception as e:
-    print(f"🚨 Failed to initialize database pool: {e}")
-    connection_pool = None
 
+# --- Raw Cursor Setup for Routes ---
 
 def get_db_connection():
-    if not connection_pool:
-        return None
+    """Fetches a raw, healthy pg8000 connection from the SQLAlchemy engine pool."""
     try:
-        return connection_pool.getconn()
+        # Using the engine's raw_connection taps directly into the QueuePool
+        return engine.raw_connection()
     except Exception as e:
-        print(f"🚨 Failed to get connection from pool: {e}")
+        print(f"🚨 Failed to connect to Cloud SQL: {e}")
         return None
 
-def release_db_connection(conn):
-    if connection_pool and conn:
-        connection_pool.putconn(conn)
 
 def get_db_cursor():
     conn = get_db_connection()
@@ -62,7 +74,8 @@ def get_db_cursor():
         raise e
     finally:
         cursor.close()
-        release_db_connection(conn)
+        conn.close()
+
 
 @contextmanager
 def db_cursor_context():
@@ -79,4 +92,36 @@ def db_cursor_context():
         raise e
     finally:
         cursor.close()
-        release_db_connection(conn)
+        conn.close()
+
+
+def run_alembic_migrations():
+    """Triggered on Cloud Run boot"""
+    conn = get_db_connection()
+    if not conn:
+        return
+    c = conn.cursor()
+    c.execute(
+        "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'schema_migrations');"
+    )
+    old_system_exists = c.fetchone()[0]
+
+    c.execute(
+        "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'alembic_version');"
+    )
+    alembic_exists = c.fetchone()[0]
+    c.close()
+    conn.close()
+
+    from alembic.config import Config
+    from alembic import command
+
+    alembic_cfg_path = os.path.join(os.path.dirname(__file__), "alembic.ini")
+    alembic_cfg = Config(alembic_cfg_path)
+
+    if old_system_exists and not alembic_exists:
+        print("Stamping existing database...")
+        command.stamp(alembic_cfg, "head")
+
+    print("Running remaining Alembic migrations...")
+    command.upgrade(alembic_cfg, "head")

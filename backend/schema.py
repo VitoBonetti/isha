@@ -60,13 +60,10 @@ class UserBase(BaseModel):
 
 class UserCreate(UserBase):
     email: EmailStr  # We invite by email now
-    # github_id and avatar_url will be populated automatically during first login
 
 class UserResponse(UserBase):
     id: UUID4
     email: EmailStr
-    github_id: Optional[str] = None
-    avatar_url: Optional[str] = None
 
 class NotificationResponse(BaseModel):
     id: UUID4

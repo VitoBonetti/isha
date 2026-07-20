@@ -1,7 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate, Link, useLocation } from "react-router-dom";
 import { ThemeProvider } from "./components/ThemeProvider";
 import { AppProvider, useAppContext } from "./context/AppContext";
-import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import SettingsView from "./pages/SettingsView";
 import CalendarView from "./pages/CalendarView";
@@ -40,7 +39,6 @@ function AppContent() {
 
 
       <Routes>
-        <Route path="/login" element={<Login />} />
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/settings" element={<SettingsView />} />
         <Route path="/calendar" element={<CalendarView />} />

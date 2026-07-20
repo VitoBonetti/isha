@@ -11,10 +11,8 @@ class Users(Base):
 
     # Using uuid4 to automatically generate the gen_random_uuid() equivalent in Python
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    github_id = Column(String(255), unique=True)
     email = Column(String(255), unique=True, nullable=False)
     name = Column(String(255), nullable=False)
-    avatar_url = Column(String(500))
     role = Column(String(50), nullable=False)
     location_id = Column(UUID(as_uuid=True), ForeignKey("locations.id", ondelete='SET NULL'), nullable=True)
     base_capacity = Column(Float, default=1.0)
