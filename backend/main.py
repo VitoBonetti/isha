@@ -39,9 +39,12 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Isha Core API",
     description="Backend engine for pentest planning and asset management.",
-    version="1.1.0",
+    version="1.2.0",
     swagger_ui_parameters={"defaultModelsExpandDepth": -1},
-    lifespan=lifespan
+    lifespan=lifespan,
+    docs_url="/api/docs",
+    openapi_url="/api/openapi.json",
+    redoc_url="/api/redoc"
 )
 
 env_origins = os.environ.get("ALLOWED_ORIGINS")

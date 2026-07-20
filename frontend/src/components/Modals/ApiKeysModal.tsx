@@ -72,7 +72,7 @@ export default function ApiKeysModal({ isOpen, onClose }: { isOpen: boolean, onC
             <p className="text-sm text-slate-500 dark:text-zinc-400">View endpoints, schemas, and test queries directly from the browser.</p>
           </div>
           <a
-            href="/docs"
+            href="/api/docs"
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-2 px-4 py-2 bg-indigo-50 dark:bg-indigo-500/10 text-indigo-700 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-500/30 font-bold text-sm rounded-lg hover:bg-indigo-100 transition-colors"
