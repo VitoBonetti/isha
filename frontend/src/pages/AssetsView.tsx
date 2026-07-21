@@ -1,4 +1,3 @@
-// frontend/src/pages/AssetsView.tsx
 import { useState, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 import axios from "axios";
@@ -21,10 +20,14 @@ interface PoolAsset {
 
 export default function AssetsView() {
   const [assets, setAssets] = useState<PoolAsset[]>([]);
-  const [services, setServices] = useState<any[]>([]); // NEW: Fetch services for the dropdown
+  const [services, setServices] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Filtering States
   const [searchTerm, setSearchTerm] = useState("");
-  const [filterStatus, setFilterStatus] = useState<"all" | "assigned" | "unassigned">("unassigned");
+  const [filterStatus, setFilterStatus] = useState<"all" | "assigned" | "ready_untested" | "ready_tested">("all");
+  const [filterService, setFilterService] = useState<string>("all");
+  const [filterCountry, setFilterCountry] = useState<string>("all");
 
   // Pagination & Sorting
   const [page, setPage] = useState(1);
@@ -32,9 +35,10 @@ export default function AssetsView() {
   const [sortBy, setSortBy] = useState("name");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
 
+  // Reset pagination when any filter changes
   useEffect(() => {
     setPage(1);
-  }, [searchTerm, filterStatus, sortBy, sortDir]);
+  }, [searchTerm, filterStatus, filterService, filterCountry, sortBy, sortDir]);
 
   const handleSort = (column: string) => {
     if (sortBy === column) setSortDir(sortDir === "asc" ? "desc" : "asc");
@@ -44,7 +48,7 @@ export default function AssetsView() {
   const SortIcon = ({ column }: { column: string }) => {
     if (sortBy !== column) return <ChevronsUpDown size={14} className="opacity-30" />;
     return sortDir === "asc" ? <ChevronUp size={14} className="text-emerald-500" /> : <ChevronDown size={14} className="text-emerald-500" />;
-  };;
+  };
 
   // Selection & Bulk Actions
   const [selectedAssets, setSelectedAssets] = useState<string[]>([]);
@@ -63,12 +67,10 @@ export default function AssetsView() {
     isOpen: false, title: "", message: "", action: null
   });
 
-  // NEW: Bulk Service Lane Modal State
   const [serviceModal, setServiceModal] = useState({ isOpen: false, selectedServiceId: "" });
 
   useEffect(() => {
     fetchPoolAssets();
-    // Fetch Services for the new Bulk Update Modal
     axios.get('/api/services/').then(res => setServices(res.data)).catch(console.error);
 
     const handleClickOutside = (e: MouseEvent) => {
@@ -134,7 +136,6 @@ export default function AssetsView() {
     setConfirmModal({ ...confirmModal, isOpen: false });
   };
 
-  // NEW: Handle Bulk Service Lane Update
   const handleBulkServiceUpdate = async () => {
     if (!serviceModal.selectedServiceId || selectedAssets.length === 0) return;
     const toastId = toast.loading("Updating service lanes...");
@@ -172,16 +173,33 @@ export default function AssetsView() {
     setSelectedAssets(prev => prev.includes(assetId) ? prev.filter(id => id !== assetId) : [...prev, assetId]);
   };
 
+  // Extract unique countries dynamically from the assets data
+  const uniqueCountries = Array.from(new Set(assets.map(a => a.country).filter(Boolean))).sort();
+
+  // Advanced Filtering Logic
   const filteredAssets = assets.filter(asset => {
+    // 1. Search Term
     const matchesSearch = !searchTerm ||
       asset.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (asset.country && asset.country.toLowerCase().includes(searchTerm.toLowerCase()));
 
-    const isAvailableForTest = !asset.is_assigned || asset.duplicate_allowed;
+    // 2. Service Lane & Country
+    const matchesService = filterService === "all" || asset.service_name === filterService;
+    const matchesCountry = filterCountry === "all" || asset.country === filterCountry;
 
-    if (filterStatus === "assigned") return matchesSearch && asset.is_assigned;
-    if (filterStatus === "unassigned") return matchesSearch && isAvailableForTest;
-    return matchesSearch;
+    // 3. Status Check
+    const isAvailableForTest = !asset.is_assigned || asset.duplicate_allowed;
+    let matchesStatus = true;
+
+    if (filterStatus === "assigned") {
+      matchesStatus = asset.is_assigned;
+    } else if (filterStatus === "ready_untested") {
+      matchesStatus = isAvailableForTest && asset.completed_count === 0;
+    } else if (filterStatus === "ready_tested") {
+      matchesStatus = isAvailableForTest && asset.completed_count > 0;
+    }
+
+    return matchesSearch && matchesService && matchesCountry && matchesStatus;
   });
 
   const sortedAssets = [...filteredAssets].sort((a, b) => {
@@ -211,8 +229,9 @@ export default function AssetsView() {
     completed: assets.filter(a => a.completed_count > 0).length
   };
 
-  // UNLOCKED: Users can now select unassigned assets even if they are missing a Service Lane!
   const validForSelection = filteredAssets.filter(a => !a.is_assigned || a.duplicate_allowed);
+
+  const selectStyles = "px-3 py-2 rounded-lg border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-sm text-slate-700 dark:text-zinc-300 focus:ring-2 focus:ring-emerald-500 focus:border-transparent outline-none cursor-pointer";
 
   return (
     <div className="min-h-screen text-slate-900 dark:text-zinc-100">
@@ -229,7 +248,6 @@ export default function AssetsView() {
         onCancel={() => setConfirmModal({ ...confirmModal, isOpen: false })}
       />
 
-      {/* NEW: Bulk Service Lane Modal */}
       {serviceModal.isOpen && (
         <div className="fixed inset-0 bg-slate-900/50 dark:bg-zinc-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in">
           <div className="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-2xl p-6 w-full max-w-sm shadow-2xl animate-in zoom-in-95">
@@ -275,44 +293,67 @@ export default function AssetsView() {
             <p className="text-sm text-slate-500 dark:text-zinc-400 mb-1">Total Assets</p>
             <p className="text-3xl font-bold text-emerald-600">{stats.total}</p>
           </div>
-
           <div className="bg-white dark:bg-zinc-900 p-6 rounded-xl border border-slate-200 dark:border-zinc-800 shadow-sm">
             <p className="text-sm text-slate-500 dark:text-zinc-400 mb-1">Actively Testing</p>
             <p className="text-3xl font-bold text-blue-600">{stats.assigned}</p>
           </div>
-
           <div className="bg-white dark:bg-zinc-900 p-6 rounded-xl border border-slate-200 dark:border-zinc-800 shadow-sm">
             <p className="text-sm text-slate-500 dark:text-zinc-400 mb-1">Ready for Generation</p>
             <p className="text-3xl font-bold text-amber-600">{stats.unassigned}</p>
           </div>
-
           <div className="bg-white dark:bg-zinc-900 p-6 rounded-xl border border-slate-200 dark:border-zinc-800 shadow-sm">
             <p className="text-sm text-slate-500 dark:text-zinc-400 mb-1">Successfully Tested</p>
             <p className="text-3xl font-bold text-emerald-600">{stats.completed}</p>
           </div>
         </div>
 
-        {/* Actions Bar */}
+        {/* Updated Actions Bar with Dropdown Filters */}
         <div className="flex flex-wrap gap-4 items-center justify-between bg-white dark:bg-zinc-900 p-4 rounded-xl border border-slate-200 dark:border-zinc-800 shadow-sm">
-          <div className="flex items-center gap-3 flex-1 min-w-[300px]">
-            <div className="relative flex-1 max-w-md">
+
+          <div className="flex flex-wrap items-center gap-3 flex-1">
+            <div className="relative w-full max-w-xs">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
               <input
                 type="text"
                 placeholder="Search assets..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 rounded-lg border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 focus:ring-2 focus:ring-emerald-500 focus:border-transparent outline-none"
+                className="w-full pl-10 pr-4 py-2 rounded-lg border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 focus:ring-2 focus:ring-emerald-500 focus:border-transparent outline-none text-sm"
               />
             </div>
 
-            <button
-              onClick={() => setFilterStatus(filterStatus === "all" ? "assigned" : filterStatus === "assigned" ? "unassigned" : "all")}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg border transition-colors text-sm font-medium ${filterStatus !== 'all' ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400' : 'border-slate-300 dark:border-zinc-700 hover:bg-slate-100 dark:hover:bg-zinc-800'}`}
-            >
-              <Filter className="h-4 w-4" />
-              {filterStatus === "all" ? "All Statuses" : filterStatus === "assigned" ? "Active Tests Only" : "Ready Only"}
-            </button>
+            <div className="flex items-center gap-2">
+              <Filter className="h-4 w-4 text-slate-400" />
+
+              <select
+                value={filterStatus}
+                onChange={(e) => setFilterStatus(e.target.value as any)}
+                className={selectStyles}
+              >
+                <option value="all">All Statuses</option>
+                <option value="assigned">Active Tests Only</option>
+                <option value="ready_untested">Ready (Never Tested)</option>
+                <option value="ready_tested">Ready (Previously Tested)</option>
+              </select>
+
+              <select
+                value={filterService}
+                onChange={(e) => setFilterService(e.target.value)}
+                className={selectStyles}
+              >
+                <option value="all">All Service Lanes</option>
+                {services.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
+              </select>
+
+              <select
+                value={filterCountry}
+                onChange={(e) => setFilterCountry(e.target.value)}
+                className={selectStyles}
+              >
+                <option value="all">All Countries</option>
+                {uniqueCountries.map(c => <option key={c as string} value={c as string}>{c as string}</option>)}
+              </select>
+            </div>
           </div>
 
           <div className="flex items-center gap-3">
@@ -326,7 +367,6 @@ export default function AssetsView() {
                     <button
                       onClick={() => {
                         setShowBulkActions(false);
-                        // PROTECTION: Check if any selected asset is missing a lane!
                         const missingLanes = selectedAssets.filter(id => !assets.find(a => a.id === id)?.service_name);
                         if (missingLanes.length > 0) {
                           toast.error(`${missingLanes.length} selected assets are missing a Service Lane! Please assign one first.`);
@@ -359,7 +399,7 @@ export default function AssetsView() {
                 )}
               </div>
             )}
-            <span className="text-sm text-slate-500 dark:text-zinc-400">
+            <span className="text-sm font-medium text-slate-500 dark:text-zinc-400">
               {filteredAssets.length} results
             </span>
           </div>
@@ -514,14 +554,6 @@ export default function AssetsView() {
                     <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} className="px-4 py-1.5 border border-slate-300 dark:border-zinc-700 rounded-lg hover:bg-slate-100 dark:hover:bg-zinc-800 disabled:opacity-50 text-sm font-medium transition-colors">Prev</button>
                     <button onClick={() => setPage(p => p + 1)} disabled={page >= totalPages} className="px-4 py-1.5 border border-slate-300 dark:border-zinc-700 rounded-lg hover:bg-slate-100 dark:hover:bg-zinc-800 disabled:opacity-50 text-sm font-medium transition-colors">Next</button>
                   </div>
-                </div>
-              )}
-              {filteredAssets.length === 0 && !loading && (
-                <div className="p-12 text-center">
-                  <p className="text-slate-500 mb-4">No assets found</p>
-                  <p className="text-sm text-slate-400">
-                    {searchTerm ? "Try adjusting your search" : "No assets in the pool yet"}
-                  </p>
                 </div>
               )}
             </>

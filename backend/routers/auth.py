@@ -185,7 +185,7 @@ def create_api_key(req: ApiKeyCreate, current_user: dict = Depends(get_current_u
     """Generates a new API Key. The raw key is ONLY returned once."""
     # Generate a cryptographically secure string (e.g. isha_abc123xyz...)
     raw_key = "isha_" + secrets.token_urlsafe(32)
-    prefix = raw_key[:10]  # e.g. "isha_ab"
+    prefix = raw_key[:10]
     hashed = hash_api_key(raw_key)
     new_id = str(uuid.uuid4())
 
