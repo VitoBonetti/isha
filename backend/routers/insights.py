@@ -46,7 +46,7 @@ def get_yearly_insights(year: Optional[int] = None, current_user: dict = Depends
     total_time_off = sum(events_cost.values())
 
     # ---  FORECAST BREAKDOWNS (ACTIVE SERVICES ONLY) ---
-    # Scheduled
+    # Scheduled (Assigned)
     cursor.execute("""
         SELECT sl.name, SUM(a.allocated_credits) 
         FROM assignments a 
@@ -57,6 +57,22 @@ def get_yearly_insights(year: Optional[int] = None, current_user: dict = Depends
     """, (year,))
     scheduled_breakdown = {row[0]: float(row[1]) for row in cursor.fetchall()}
     total_scheduled = sum(scheduled_breakdown.values())
+
+    # Scheduled (Unassigned - missing pentesters)
+    cursor.execute("""
+        SELECT sl.name, SUM(t.credits_per_week * t.duration_weeks)
+        FROM tests t
+        JOIN services_lanes sl ON t.service_lane_id = sl.id
+        WHERE t.start_year = %s 
+          AND t.stages::text IN ('SCHEDULED', 'IN_PROGRESS') 
+          AND sl.is_active = TRUE
+          AND NOT EXISTS (
+              SELECT 1 FROM assignments a WHERE a.test_id = t.id AND a.year = %s
+          )
+        GROUP BY sl.name
+    """, (year, year))
+    unassigned_sched_breakdown = {row[0]: float(row[1]) for row in cursor.fetchall()}
+    total_unassigned_sched = sum(unassigned_sched_breakdown.values())
 
     # Backlog
     cursor.execute("""
@@ -151,9 +167,10 @@ def get_yearly_insights(year: Optional[int] = None, current_user: dict = Depends
         },
         "forecast": {
             "scheduled": {"total": total_scheduled, "breakdown": scheduled_breakdown},
+            "unassigned_scheduled": {"total": total_unassigned_sched, "breakdown": unassigned_sched_breakdown},
             "backlog": {"total": total_backlog, "breakdown": backlog_breakdown},
             "time_off": {"total": total_time_off, "breakdown": events_cost},
-            "net_capacity": total_gross_credits - (total_scheduled + total_backlog + total_time_off)
+            "net_capacity": total_gross_credits - (total_scheduled + total_unassigned_sched + total_backlog + total_time_off)
         },
         "services": services_data
     }
