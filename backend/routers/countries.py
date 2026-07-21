@@ -108,16 +108,16 @@ def get_dashboard_analytics(year: Optional[int] = None, country_id: Optional[str
     params = {'year': year, 'cid': country_id, 'rid': region_id}
 
     # Metrics
-    cursor.execute(f"""
+    kpi_query = f"""
         SELECT 
             COUNT(DISTINCT ra.id) as raw,
             COUNT(DISTINCT a.id) as pool,
-            COUNT(DISTINCT CASE WHEN t.stages::text = 'COMPLETED' AND t.start_year = %(year)s THEN t.id END) as completed,
+            COUNT(DISTINCT CASE WHEN t.stages::text = 'COMPLETED' AND t.start_year = %s THEN t.id END) as completed,
             COUNT(DISTINCT CASE WHEN t.stages::text IN ('NOT_PLANNED', 'SCHEDULED', 'IN_PROGRESS') THEN t.id END) as backlog,
-            COUNT(DISTINCT CASE WHEN t.stages::text IN ('SCHEDULED', 'IN_PROGRESS') AND t.start_year = %(year)s THEN t.id END) as planned,
-            COUNT(DISTINCT CASE WHEN t.stages::text IN ('NOT_PLANNED', 'SCHEDULED', 'IN_PROGRESS') AND (t.start_year IS NULL OR t.start_year != %(year)s) THEN t.id END) as true_backlog,
+            COUNT(DISTINCT CASE WHEN t.stages::text IN ('SCHEDULED', 'IN_PROGRESS') AND t.start_year = %s THEN t.id END) as planned,
+            COUNT(DISTINCT CASE WHEN t.stages::text IN ('NOT_PLANNED', 'SCHEDULED', 'IN_PROGRESS') AND (t.start_year IS NULL OR t.start_year != %s) THEN t.id END) as true_backlog,
             COUNT(DISTINCT CASE 
-                WHEN (t.stages::text = 'COMPLETED' AND t.start_year = %(year)s) 
+                WHEN (t.stages::text = 'COMPLETED' AND t.start_year = %s) 
                 OR (t.stages::text IN ('NOT_PLANNED', 'SCHEDULED', 'IN_PROGRESS')) 
                 THEN t.id 
             END) as total_tests_year
@@ -127,9 +127,18 @@ def get_dashboard_analytics(year: Optional[int] = None, country_id: Optional[str
         LEFT JOIN test_assets ta ON a.id = ta.asset_id
         LEFT JOIN tests t ON ta.test_id = t.id
         WHERE 1=1
-        {' AND ra.country_id = %(cid)s' if country_id else ''}
-        {' AND c.region_id = %(rid)s' if region_id else ''}
-    """, params)
+    """
+
+    kpi_params = [year, year, year, year]
+
+    if country_id:
+        kpi_query += " AND ra.country_id = %s"
+        kpi_params.append(country_id)
+    if region_id:
+        kpi_query += " AND c.region_id = %s"
+        kpi_params.append(region_id)
+
+    cursor.execute(kpi_query, tuple(kpi_params))
 
     kpi_row = cursor.fetchone()
     kpis = {
@@ -143,7 +152,7 @@ def get_dashboard_analytics(year: Optional[int] = None, country_id: Optional[str
     }
 
     # pie chart service lane
-    cursor.execute(f"""
+    pie_query = f"""
         SELECT COALESCE(sl.name, 'Not Set') as name, COUNT(DISTINCT t.id) as value
         FROM tests t
         JOIN test_assets ta ON t.id = ta.test_id
@@ -153,30 +162,48 @@ def get_dashboard_analytics(year: Optional[int] = None, country_id: Optional[str
         LEFT JOIN services_lanes sl ON t.service_lane_id = sl.id
         WHERE 1=1
           AND t.stages::text != 'STOPPED'
-        {' AND ra.country_id = %(cid)s' if country_id else ''}
-        {' AND c.region_id = %(rid)s' if region_id else ''}
-        GROUP BY sl.name
-        ORDER BY value DESC
-    """, params)
+    """
+
+    pie_params = []
+
+    if country_id:
+        pie_query += " AND ra.country_id = %s"
+        pie_params.append(country_id)
+    if region_id:
+        pie_query += " AND c.region_id = %s"
+        pie_params.append(region_id)
+
+    pie_query += " GROUP BY sl.name ORDER BY value DESC"
+
+    cursor.execute(pie_query, tuple(pie_params))
     pie_data = [{"name": r[0], "value": r[1]} for r in cursor.fetchall()]
 
     # monthly trends
-    cursor.execute(f"""
+    trend_query = f"""
         SELECT 
-            EXTRACT(MONTH FROM TO_DATE(t.start_year::text || '0101', '%%YYYY%%MM%%DD') + ((t.start_week - 1) * 7)) as month_num,
+            EXTRACT(MONTH FROM TO_DATE(t.start_year::text || '0101', 'YYYYMMDD') + ((t.start_week - 1) * 7)) as month_num,
             COUNT(DISTINCT t.id) as tests
         FROM tests t
         JOIN test_assets ta ON t.id = ta.test_id
         JOIN assets a ON ta.asset_id = a.id
         JOIN raw_assets ra ON a.raw_asset_id = ra.id
         {'LEFT JOIN countries c ON ra.country_id = c.id' if region_id else ''}
-        WHERE t.start_year = %(year)s 
+        WHERE t.start_year = %s 
           AND t.stages::text IN ('SCHEDULED', 'IN_PROGRESS', 'COMPLETED')
-        {' AND ra.country_id = %(cid)s' if country_id else ''}
-        {' AND c.region_id = %(rid)s' if region_id else ''}
-        GROUP BY month_num
-        ORDER BY month_num
-    """, params)
+    """
+
+    trend_params = [year]
+
+    if country_id:
+        trend_query += " AND ra.country_id = %s"
+        trend_params.append(country_id)
+    if region_id:
+        trend_query += " AND c.region_id = %s"
+        trend_params.append(region_id)
+
+    trend_query += " GROUP BY month_num ORDER BY month_num"
+
+    cursor.execute(trend_query, tuple(trend_params))
 
     months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
     monthly_data = {int(r[0]): r[1] for r in cursor.fetchall() if r[0]}
