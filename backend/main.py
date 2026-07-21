@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 import traceback
 import os
 import time
+import json
 from jose import jwt, JWTError
 from routers import auth, services, users, regions, countries, assets, tests, board, logs, locations, insights
 from routers.auth import require_admin, get_google_public_keys
@@ -147,7 +148,13 @@ async def handle_websocket_logic(websocket: WebSocket):
     await manager.connect(websocket, email)
     try:
         while True:
-            await websocket.receive_text()
+            data = await websocket.receive_text()
+            try:
+                payload = json.loads(data)
+                if payload.get("action") == "ping":
+                    continue  # Do nothing, just loop back
+            except Exception:
+                pass
     except WebSocketDisconnect:
         await manager.disconnect(websocket)
 

@@ -152,9 +152,9 @@ export default function RawAssetsView() {
   };
 
   const handleDownloadTemplate = () => {
-    const csvContent = "Name,Description,Asset Type,Country,Service Lane,Category,Facing Internet,Confidentiality,Integrity,Availability\n" +
-                       "Primary Banking API,Handles routing.,API,United States,,,TRUE,4,4,1\n" +
-                       "Internal HR Portal,Employee management system.,Web Application/Website,GB,,,FALSE,3,2,1";
+    const csvContent = "ID,Name,Description,Asset Type,Country,Service Lane,Category,Facing Internet,Confidentiality,Integrity,Availability\n" +
+                       ",Primary Banking API,Handles routing.,API,United States,,,TRUE,4,4,1\n" +
+                       "550e8400-e29b-41d4-a716-446655440000,Internal HR Portal,Employee management system.,Web Application/Website,GB,,,FALSE,3,2,1";
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");

@@ -359,6 +359,16 @@ def bulk_delete_raw_assets(req: BulkAssetRequest, background_tasks: BackgroundTa
     return {"message": f"Successfully deleted {len(req.raw_asset_ids)} assets."}
 
 
+def is_valid_uuid(val: str):
+    """Helper to ensure provided CSV IDs are valid UUIDs to prevent DB crashes."""
+    try:
+        uuid.UUID(str(val))
+        return True
+    except ValueError:
+        return False
+
+
+
 # --- SYNCHRONOUS IMPORT IN BACKGROUND THREAD ---
 def process_excel_import_sync(contents: bytes, filename: str, current_user: dict):
     with db_cursor_context() as cursor:
@@ -387,16 +397,26 @@ def process_excel_import_sync(contents: bytes, filename: str, current_user: dict
             cursor.execute("SELECT LOWER(name), id FROM service_categories")
             categories_map = {row[0]: row[1] for row in cursor.fetchall()}
 
-            cursor.execute("SELECT LOWER(name), country_id, id FROM raw_assets")
-            existing_assets = {(row[0], str(row[1])): str(row[2]) for row in cursor.fetchall()}
+            # UPDATED: Fetch existing IDs to match against the CSV
+            cursor.execute("SELECT id FROM raw_assets")
+            existing_ids = {str(row[0]) for row in cursor.fetchall()}
 
             success_count = 0
             failed_items = []
 
             for _, row in df.iterrows():
+                # Extract and validate ID
+                raw_id_str = str(row.get('ID', '')).strip()
+                asset_id = sanitize_csv_injection(raw_id_str)
+
                 raw_name = str(row.get('Name', '')).strip()
                 if not raw_name: continue
                 name = sanitize_csv_injection(raw_name)
+
+                # Validate UUID format if one was provided in the CSV
+                if asset_id and not is_valid_uuid(asset_id):
+                    failed_items.append(f"{name} (Invalid ID format: Must be a standard UUID)")
+                    continue
 
                 raw_desc = str(row.get('Description', '')).strip()
                 desc = sanitize_csv_injection(raw_desc)
@@ -438,31 +458,38 @@ def process_excel_import_sync(contents: bytes, filename: str, current_user: dict
                     failed_items.append(f"{name} (Unknown Country: '{country_str}')")
                     continue
 
-                # Check if it already exists (UPSERT logic)
-                existing_id = existing_assets.get((name.lower(), str(country_id)))
-
                 try:
-                    if existing_id:
+                    # UPSERT LOGIC VIA ID
+                    if asset_id and asset_id in existing_ids:
+                        # UPDATE: Now updates Name and Country too, since ID is the anchor
                         cursor.execute("""
-                            UPDATE raw_assets SET description=%s, business_critical=%s, 
+                            UPDATE raw_assets SET name=%s, description=%s, business_critical=%s, 
                             confidentiality_rating=%s, integrity_rating=%s, availability_rating=%s, 
-                            service_forecast_id=%s, category_id=%s, asset_type_id=%s, facing_internet=%s
+                            country_id=%s, service_forecast_id=%s, category_id=%s, asset_type_id=%s, facing_internet=%s,
+                            update_date=CURRENT_TIMESTAMP
                             WHERE id=%s
                         """,
-                        (desc, business_critical, c_val, i_val, a_val, service_id, cat_id, type_id, facing_internet, existing_id))
-                        insert_asset_history(cursor, existing_id, str(current_user["id"]), "IMPORTED",
+                                       (name, desc, business_critical, c_val, i_val, a_val, country_id, service_id,
+                                        cat_id, type_id, facing_internet, asset_id))
+                        insert_asset_history(cursor, asset_id, str(current_user["id"]), "IMPORTED",
                                              "Asset metadata updated via bulk Excel import.")
                     else:
-                        new_id = str(uuid.uuid4())
+                        # INSERT: Use provided ID, or generate a new one if blank
+                        new_id = asset_id if asset_id else str(uuid.uuid4())
                         cursor.execute("""
                             INSERT INTO raw_assets (
                                 id, name, description, business_critical, 
                                 confidentiality_rating, integrity_rating, availability_rating, 
                                 country_id, service_forecast_id, category_id, asset_type_id, facing_internet, create_date
                             ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
-                        """, (new_id, name, desc, business_critical, c_val, i_val, a_val, country_id, service_id, cat_id, type_id, facing_internet))
+                        """, (new_id, name, desc, business_critical, c_val, i_val, a_val, country_id, service_id,
+                              cat_id, type_id, facing_internet))
+
                         insert_asset_history(cursor, new_id, str(current_user["id"]), "IMPORTED",
                                              "Asset created via bulk Excel import.")
+
+                        # Add new ID to the tracking set so subsequent rows in this same file don't duplicate
+                        existing_ids.add(new_id)
 
                     success_count += 1
                 except Exception:

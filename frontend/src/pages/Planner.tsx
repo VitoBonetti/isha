@@ -42,7 +42,6 @@ export default function Planner() {
     // 1. Establish WebSocket connection automatically
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}/api/ws/board`;
-
     const socket = new WebSocket(wsUrl);
     ws.current = socket;
 
@@ -53,11 +52,9 @@ export default function Planner() {
     socket.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-
         // 2. Listen for Database Changes
         if (data.action === 'REFRESH_BOARD') {
           fetchBoardData();
-
           // Dispatch a global event so your TopNav knows to re-fetch notifications!
           window.dispatchEvent(new CustomEvent('refresh_notifications'));
         }
@@ -74,7 +71,15 @@ export default function Planner() {
       console.log("🔴 Disconnected from live board");
     };
 
+    // Send a ping every 10 seconds to bypass the GCP Load Balancer idle timeout
+    const pingInterval = setInterval(() => {
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ action: "ping" }));
+      }
+    }, 10000);
+
     return () => {
+      clearInterval(pingInterval); // Clear the interval on unmount
       socket.close();
     };
   }, [targetYear, targetQuarter]);
