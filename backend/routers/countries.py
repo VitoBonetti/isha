@@ -65,15 +65,12 @@ def get_country_analytics(year: Optional[int] = None, current_user: dict = Depen
     cursor.execute("""
         SELECT 
             c.id, c.code, c.name, r.name as region_name,
-            -- 1. Total Raw Assets linked to this country
             (SELECT COUNT(*) FROM raw_assets ra WHERE ra.country_id = c.id) as raw_assets_count,
 
-            -- 2. Assets currently in the Active Pool
             (SELECT COUNT(*) FROM assets a 
              JOIN raw_assets ra ON a.raw_asset_id = ra.id 
              WHERE ra.country_id = c.id) as pool_assets_count,
 
-            -- 3. Tests Completed IN THIS SPECIFIC YEAR
             (SELECT COUNT(*) FROM test_assets ta
              JOIN tests t ON ta.test_id = t.id
              JOIN assets a ON ta.asset_id = a.id
@@ -82,7 +79,6 @@ def get_country_analytics(year: Optional[int] = None, current_user: dict = Depen
                AND t.stages::text = 'COMPLETED' 
                AND t.start_year = %s) as completed_tests_count,
 
-            -- 4. Tests Scheduled/In Progress IN THIS SPECIFIC YEAR
             (SELECT COUNT(*) FROM test_assets ta
              JOIN tests t ON ta.test_id = t.id
              JOIN assets a ON ta.asset_id = a.id
@@ -111,18 +107,18 @@ def get_dashboard_analytics(year: Optional[int] = None, country_id: Optional[str
     # SQL Parameters
     params = {'year': year, 'cid': country_id, 'rid': region_id}
 
-    #Metrics
+    # Metrics
     cursor.execute(f"""
         SELECT 
             COUNT(DISTINCT ra.id) as raw,
             COUNT(DISTINCT a.id) as pool,
             COUNT(DISTINCT CASE WHEN t.stages::text = 'COMPLETED' AND t.start_year = %(year)s THEN t.id END) as completed,
-            COUNT(DISTINCT CASE WHEN t.stages::text IN ('NOT_PLANNED', 'SCHEDULED', 'IN_PROGRESS', 'STOPPED') THEN t.id END) as backlog,
-            COUNT(DISTINCT CASE WHEN t.stages::text IN ('SCHEDULED', 'IN_PROGRESS', 'STOPPED') AND t.start_year = %(year)s THEN t.id END) as planned,
-            COUNT(DISTINCT CASE WHEN t.stages::text IN ('NOT_PLANNED', 'SCHEDULED', 'IN_PROGRESS', 'STOPPED') AND (t.start_year IS NULL OR t.start_year != %(year)s) THEN t.id END) as true_backlog,
+            COUNT(DISTINCT CASE WHEN t.stages::text IN ('NOT_PLANNED', 'SCHEDULED', 'IN_PROGRESS') THEN t.id END) as backlog,
+            COUNT(DISTINCT CASE WHEN t.stages::text IN ('SCHEDULED', 'IN_PROGRESS') AND t.start_year = %(year)s THEN t.id END) as planned,
+            COUNT(DISTINCT CASE WHEN t.stages::text IN ('NOT_PLANNED', 'SCHEDULED', 'IN_PROGRESS') AND (t.start_year IS NULL OR t.start_year != %(year)s) THEN t.id END) as true_backlog,
             COUNT(DISTINCT CASE 
                 WHEN (t.stages::text = 'COMPLETED' AND t.start_year = %(year)s) 
-                OR (t.stages::text IN ('NOT_PLANNED', 'SCHEDULED', 'IN_PROGRESS', 'STOPPED')) 
+                OR (t.stages::text IN ('NOT_PLANNED', 'SCHEDULED', 'IN_PROGRESS')) 
                 THEN t.id 
             END) as total_tests_year
         FROM raw_assets ra
@@ -156,6 +152,7 @@ def get_dashboard_analytics(year: Optional[int] = None, country_id: Optional[str
         {'LEFT JOIN countries c ON ra.country_id = c.id' if region_id else ''}
         LEFT JOIN services_lanes sl ON t.service_lane_id = sl.id
         WHERE 1=1
+          AND t.stages::text != 'STOPPED'
         {' AND ra.country_id = %(cid)s' if country_id else ''}
         {' AND c.region_id = %(rid)s' if region_id else ''}
         GROUP BY sl.name
@@ -163,10 +160,10 @@ def get_dashboard_analytics(year: Optional[int] = None, country_id: Optional[str
     """, params)
     pie_data = [{"name": r[0], "value": r[1]} for r in cursor.fetchall()]
 
-    # monthly trehds
+    # monthly trends
     cursor.execute(f"""
         SELECT 
-            EXTRACT(MONTH FROM TO_DATE(t.start_year::text || '0101', 'YYYYMMDD') + ((t.start_week - 1) * 7)) as month_num,
+            EXTRACT(MONTH FROM TO_DATE(t.start_year::text || '0101', '%%YYYY%%MM%%DD') + ((t.start_week - 1) * 7)) as month_num,
             COUNT(DISTINCT t.id) as tests
         FROM tests t
         JOIN test_assets ta ON t.id = ta.test_id

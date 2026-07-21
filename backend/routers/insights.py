@@ -52,7 +52,7 @@ def get_yearly_insights(year: Optional[int] = None, current_user: dict = Depends
         FROM assignments a 
         JOIN tests t ON a.test_id = t.id 
         JOIN services_lanes sl ON t.service_lane_id = sl.id 
-        WHERE a.year = %s AND sl.is_active = TRUE
+        WHERE a.year = %s AND sl.is_active = TRUE AND t.stages::text != 'STOPPED'
         GROUP BY sl.name
     """, (year,))
     scheduled_breakdown = {row[0]: float(row[1]) for row in cursor.fetchall()}
@@ -86,7 +86,7 @@ def get_yearly_insights(year: Optional[int] = None, current_user: dict = Depends
         cursor.execute("""
                 SELECT 
                     COUNT(DISTINCT CASE WHEN stages::text = 'NOT_PLANNED' THEN id END),
-                    COUNT(DISTINCT CASE WHEN stages::text IN ('SCHEDULED', 'IN_PROGRESS', 'STOPPED') AND start_year = %s THEN id END),
+                    COUNT(DISTINCT CASE WHEN stages::text IN ('SCHEDULED', 'IN_PROGRESS') AND start_year = %s THEN id END),
                     COUNT(DISTINCT CASE WHEN stages::text = 'COMPLETED' AND start_year = %s THEN id END)
                 FROM tests WHERE service_lane_id = %s
             """, (year, year, str(s_id)))
@@ -105,7 +105,7 @@ def get_yearly_insights(year: Optional[int] = None, current_user: dict = Depends
                 cursor.execute("""
                         SELECT 
                             COUNT(DISTINCT CASE WHEN t.stages::text = 'NOT_PLANNED' THEN t.id END),
-                            COUNT(DISTINCT CASE WHEN t.stages::text IN ('SCHEDULED', 'IN_PROGRESS', 'STOPPED') AND t.start_year = %s THEN t.id END),
+                            COUNT(DISTINCT CASE WHEN t.stages::text IN ('SCHEDULED', 'IN_PROGRESS') AND t.start_year = %s THEN t.id END),
                             COUNT(DISTINCT CASE WHEN t.stages::text = 'COMPLETED' AND t.start_year = %s THEN t.id END)
                         FROM tests t
                         LEFT JOIN test_assets ta ON t.id = ta.test_id
@@ -123,7 +123,7 @@ def get_yearly_insights(year: Optional[int] = None, current_user: dict = Depends
             cursor.execute("""
                     SELECT 
                         COUNT(DISTINCT CASE WHEN t.stages::text = 'NOT_PLANNED' THEN t.id END),
-                        COUNT(DISTINCT CASE WHEN t.stages::text IN ('SCHEDULED', 'IN_PROGRESS', 'STOPPED') AND t.start_year = %s THEN t.id END),
+                        COUNT(DISTINCT CASE WHEN t.stages::text IN ('SCHEDULED', 'IN_PROGRESS') AND t.start_year = %s THEN t.id END),
                         COUNT(DISTINCT CASE WHEN t.stages::text = 'COMPLETED' AND t.start_year = %s THEN t.id END)
                     FROM tests t
                     LEFT JOIN test_assets ta ON t.id = ta.test_id

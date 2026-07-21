@@ -96,6 +96,7 @@ def get_all_tests(current_user: dict = Depends(get_current_user), cursor=Depends
                COALESCE((SELECT string_agg(DISTINCT u.name, ', ') FROM assignments a JOIN users u ON a.user_id = u.id WHERE a.test_id = t.id), 'Unassigned') as assigned_pentesters,
                EXISTS(SELECT 1 FROM secret_notes WHERE test_id = t.id) as has_secret
         FROM tests t LEFT JOIN services_lanes s ON t.service_lane_id = s.id
+        WHERE t.stages::text != 'STOPPED'
         ORDER BY t.start_year DESC NULLS LAST, t.start_week DESC NULLS LAST, t.name ASC
     ''')
     columns = [col[0] for col in cursor.description]
