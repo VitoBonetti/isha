@@ -120,7 +120,8 @@ def get_dashboard_analytics(year: Optional[int] = None, country_id: Optional[str
                 WHEN (t.stages::text = 'COMPLETED' AND t.start_year = %s) 
                 OR (t.stages::text IN ('NOT_PLANNED', 'SCHEDULED', 'IN_PROGRESS')) 
                 THEN t.id 
-            END) as total_tests_year
+            END) as total_tests_year,
+            COUNT(DISTINCT CASE WHEN t.stages::text = 'STOPPED' THEN t.id END) as stopped
         FROM raw_assets ra
         {'LEFT JOIN countries c ON ra.country_id = c.id' if region_id else ''}
         LEFT JOIN assets a ON ra.id = a.raw_asset_id
@@ -148,7 +149,8 @@ def get_dashboard_analytics(year: Optional[int] = None, country_id: Optional[str
         "backlog": kpi_row[3],
         "planned": kpi_row[4],
         "true_backlog": kpi_row[5],
-        "total_tests_year": kpi_row[6]
+        "total_tests_year": kpi_row[6],
+        "stopped": kpi_row[7]
     }
 
     # pie chart service lane

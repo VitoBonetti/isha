@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import axios from "axios";
 import TopNav from "../components/TopNav";
 import toast, { Toaster } from "react-hot-toast";
-import { Database, CheckCircle, Activity, Layers, MapPin, Map, ChartNoAxesCombined } from "lucide-react";
+import { Database, CheckCircle, Activity, Layers, MapPin, Map, ChartNoAxesCombined, XCircle } from "lucide-react";
 import { PieChart, Pie, Cell, ComposedChart, Bar, Line, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#6366f1', '#ec4899', '#8b5cf6', '#14b8a6', '#f43f5e'];
@@ -137,7 +137,7 @@ export default function AnalyticsDashboard() {
         ) : (
           <>
             {/* Row 1: Global KPIs */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-6 mb-8">
               <div className="bg-white dark:bg-zinc-900 p-6 rounded-2xl border border-slate-200 dark:border-zinc-800 shadow-sm flex items-center gap-4">
                 <div className="p-3 bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400 rounded-xl"><Database size={24}/></div>
                 <div>
@@ -164,6 +164,14 @@ export default function AnalyticsDashboard() {
                 <div>
                   <p className="text-xs text-slate-500 font-bold uppercase tracking-wider">Not Completed</p>
                   <p className="text-2xl font-black text-amber-600 dark:text-amber-400">{data.kpis.backlog}</p>
+                </div>
+              </div>
+              {/* New Stopped Card */}
+              <div className="bg-white dark:bg-zinc-900 p-6 rounded-2xl border border-slate-200 dark:border-zinc-800 shadow-sm flex items-center gap-4">
+                <div className="p-3 bg-red-50 dark:bg-red-500/10 text-red-600 dark:text-red-400 rounded-xl border border-red-100 dark:border-red-500/20"><XCircle size={24}/></div>
+                <div>
+                  <p className="text-xs text-slate-500 font-bold uppercase tracking-wider">Stopped</p>
+                  <p className="text-2xl font-black text-red-600 dark:text-red-400">{data.kpis.stopped}</p>
                 </div>
               </div>
             </div>
