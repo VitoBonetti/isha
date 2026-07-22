@@ -29,6 +29,15 @@ export default function SettingsView() {
   const [deleteModal, setDeleteModal] = useState<{ isOpen: boolean; endpoint: string; id: string; name: string } | null>(null);
   const [actionModal, setActionModal] = useState<{isOpen: boolean, title: string, message: string, confirmText: string, variant: 'danger'|'warning', onConfirm: () => void} | null>(null);
 
+  // Add the state for the server time near the top of the component
+  const [serverTime, setServerTime] = useState({ year: new Date().getFullYear(), week: 1 });
+
+  useEffect(() => {
+    axios.get('/api/users/system/time')
+      .then(res => setServerTime(res.data))
+      .catch(console.error);
+  }, []);
+
   // Pagination & Sub-Tab States
   const ITEMS_PER_PAGE = 15;
   const [userTab, setUserTab] = useState<'active' | 'offboarded'>('active');
@@ -150,7 +159,14 @@ export default function SettingsView() {
   const PREDEFINED_COLORS = ['#ef4444', '#f97316', '#f59e0b', '#84cc16', '#10b981', '#14b8a6', '#06b6d4', '#3b82f6', '#6366f1', '#8b5cf6', '#a855f7', '#ec4899', '#f43f5e', '#64748b', '#000000', '#ffffff', '#cccccc', '#eeeeee'];
 
   // FILTERED LISTS
-  const displayUsers = users?.filter(u => userTab === 'active' ? !u.end_year : !!u.end_year) || [];
+  const isOffboarded = (u: any) => {
+    if (!u.end_year || !u.end_week) return false;
+    if (serverTime.year > u.end_year) return true;
+    if (serverTime.year === u.end_year && serverTime.week > u.end_week) return true;
+    return false;
+  };
+
+  const displayUsers = users?.filter(u => userTab === 'active' ? !isOffboarded(u) : isOffboarded(u)) || [];
   const displayRegions = regions?.filter(r => regionTab === 'active' ? r.is_active : !r.is_active) || [];
   const displayCountries = countries?.filter(c => countryTab === 'active' ? c.is_active : !c.is_active) || [];
 

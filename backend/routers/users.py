@@ -17,6 +17,13 @@ def check_system_status(current_user: dict = Depends(require_admin), cursor=Depe
     return {"setup_required": count == 0}
 
 
+@router.get("/system/time", summary="Get Server Time")
+def get_system_time(current_user: dict = Depends(get_current_user)):
+    now = datetime.now()
+    iso = now.isocalendar()
+    return {"year": iso[0], "week": iso[1]}
+
+
 @router.get("/", summary="[Admin Only]")
 def get_all_users(current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     cursor.execute("""

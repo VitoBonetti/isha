@@ -108,6 +108,28 @@ export default function CalendarView() {
   const events = boardData?.events || [];
   const localPentesters = pentesters.length > 0 ? pentesters : (boardData?.pentesters || []);
 
+  const getIsoWeek = (date: Date) => {
+    const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+    const dayNum = d.getUTCDay() || 7;
+    d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+    const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+    return Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+  };
+
+  const isUserActiveOnDate = (user: any, dateStr: string) => {
+    if (!dateStr) return true;
+    const d = new Date(dateStr);
+    const eventYear = d.getFullYear();
+    const eventWeek = getIsoWeek(d);
+
+    if (user.start_year > eventYear || (user.start_year === eventYear && user.start_week > eventWeek)) return false;
+    if (user.end_year && (user.end_year < eventYear || (user.end_year === eventYear && user.end_week < eventWeek))) return false;
+    return true;
+  };
+
+  // Filter the pentesters dynamically based on the modal's selected start date
+  const activeHolidayPentesters = localPentesters.filter(p => isUserActiveOnDate(p, activeHoliday?.start_date));
+
   return (
     <div className="min-h-screen dark:bg-[#09090b] text-slate-900 dark:text-zinc-100 flex flex-col relative overflow-hidden transition-colors duration-300">
 
@@ -295,7 +317,7 @@ export default function CalendarView() {
           onClose={() => setModalOpen(false)}
           holidayData={activeHoliday}
           setHolidayData={setActiveHoliday}
-          pentesters={localPentesters}
+          pentesters={activeHolidayPentesters}
           locations={locations}
           currentUser={currentUser}
           onSave={async () => {

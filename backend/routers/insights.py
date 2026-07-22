@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends
-from datetime import datetime
+from datetime import datetime, timedelta
 from database import get_db_cursor
 from typing import Optional
 from routers.auth import require_admin
@@ -13,7 +13,7 @@ def get_yearly_insights(year: Optional[int] = None, current_user: dict = Depends
     if not year: year = datetime.now().year
 
     # ---  GROSS CAPACITY & TIME OFF ---
-    cursor.execute("SELECT id, base_capacity, start_year, start_week, end_year, end_week FROM users")
+    cursor.execute("SELECT id, base_capacity, start_year, start_week, end_year, end_week, location_id FROM users")
     users = cursor.fetchall()
 
     total_gross_credits = 0.0
@@ -21,7 +21,7 @@ def get_yearly_insights(year: Optional[int] = None, current_user: dict = Depends
     event_mapping = {"national_holiday": "National Holiday", "team_day": "Team Day",
                      "personal_time_off": "Personal Time Off", "sick_day": "Sick Day"}
 
-    for u_id, base_cap, s_year, s_week, e_year, e_week in users:
+    for u_id, base_cap, s_year, s_week, e_year, e_week, loc_id in users:
         base = float(base_cap or 0.0)
         start = s_week if s_year == year else 1
         end = e_week if e_year == year else 52
@@ -30,15 +30,37 @@ def get_yearly_insights(year: Optional[int] = None, current_user: dict = Depends
         active_weeks = max(0, end - start + 1)
         total_gross_credits += (active_weeks * base)
 
+        safe_loc_id = str(loc_id) if loc_id else None
+
         cursor.execute("""
             SELECT event_type, start_date, end_date FROM events 
-            WHERE (user_id = %s OR event_type IN ('team_day', 'national_holiday'))
+            WHERE (user_id = %s 
+               OR event_type = 'team_day' 
+               OR (event_type = 'national_holiday' AND (
+                   location_id = %s OR 
+                   location_id IS NULL OR 
+                   location_id = (SELECT id FROM locations WHERE name = 'Global' LIMIT 1)
+               )))
               AND EXTRACT(YEAR FROM start_date) = %s
-        """, (str(u_id), year))
+        """, (str(u_id), safe_loc_id, year))
+
+        def is_active(y, w):
+            if s_year and (y < s_year or (y == s_year and w < s_week)): return False
+            if e_year and (y > e_year or (y == e_year and e_week and w > e_week)): return False
+            return True
 
         for e_type, e_start, e_end in cursor.fetchall():
-            days_off = (e_end - e_start).days + 1
-            cost = days_off * (base * 0.2)
+            actual_days_off = 0
+            d = e_start
+
+            # Check day-by-day to ensure the event falls inside the user's active tenure
+            while d <= e_end:
+                iso = d.isocalendar()
+                if is_active(iso[0], iso[1]) and d.weekday() < 5:  # Weekdays only
+                    actual_days_off += 1
+                d += timedelta(days=1)
+
+            cost = actual_days_off * (base * 0.2)
             friendly_name = event_mapping.get(e_type, e_type)
             if friendly_name in events_cost:
                 events_cost[friendly_name] += cost
