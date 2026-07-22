@@ -1,4 +1,3 @@
-// frontend/src/pages/TestsView.tsx
 import { useState, useEffect } from "react";
 import axios from "axios";
 import TopNav from "../components/TopNav";
@@ -15,8 +14,13 @@ export default function TestsView() {
   const [tests, setTests] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
-  const [historyTest, setHistoryTest] = useState<Test | null>(null);
+
+  // Filtering States
   const [filterYear, setFilterYear] = useState<string>("All");
+  const [filterService, setFilterService] = useState<string>("All");
+  const [filterStatus, setFilterStatus] = useState<string>("All");
+
+  const [historyTest, setHistoryTest] = useState<Test | null>(null);
 
   // Pagination State
   const [page, setPage] = useState(1);
@@ -26,7 +30,7 @@ export default function TestsView() {
   const [sortBy, setSortBy] = useState<string>("name");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
 
-  //Secret note
+  // Secret note
   const [secretTarget, setSecretTarget] = useState<Test | null>(null);
   const [secretConfirmOpen, setSecretConfirmOpen] = useState<Test | null>(null);
 
@@ -34,10 +38,10 @@ export default function TestsView() {
     fetchTests();
   }, []);
 
-  // Reset to page 1 whenever the search term or sort order changes
+  // Reset to page 1 whenever any filter or sort order changes
   useEffect(() => {
     setPage(1);
-  }, [searchTerm, sortBy, sortDir]);
+  }, [searchTerm, filterYear, filterService, filterStatus, sortBy, sortDir]);
 
   const fetchTests = async () => {
     try {
@@ -61,18 +65,32 @@ export default function TestsView() {
   };
 
   const SortIcon = ({ column }: { column: string }) => {
-    if (sortBy !== column) return <ChevronsUpDown size={14} className="opacity-30" />;
-    return sortDir === "asc" ? <ChevronUp size={14} className="text-emerald-500" /> : <ChevronDown size={14} className="text-emerald-500" />;
+    if (sortBy !== column) return <ChevronsUpDown size={14} className="opacity-30 inline-block" />;
+    return sortDir === "asc" ? <ChevronUp size={14} className="text-emerald-500 inline-block" /> : <ChevronDown size={14} className="text-emerald-500 inline-block" />;
   };
+
+  // Extract unique services dynamically for the dropdown
+  const uniqueServices = Array.from(new Set(tests.map(t => t.service_lane_name).filter(Boolean))).sort();
 
   // 1. Filter
   const filteredTests = tests.filter(test => {
+    // Text Search
     const matchesSearch = test.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (test.assigned_pentesters && test.assigned_pentesters.toLowerCase().includes(searchTerm.toLowerCase()));
 
+    // Dropdown Filters
     const matchesYear = filterYear === "All" || String(test.start_year) === filterYear;
+    const matchesService = filterService === "All" || test.service_lane_name === filterService;
 
-    return matchesSearch && matchesYear;
+    // Status Logic
+    let matchesStatus = true;
+    if (filterStatus !== "All") {
+      const s = test.status.toUpperCase();
+      if (filterStatus === "Backlog") matchesStatus = (s === "NOT_PLANNED" || s === "NOT PLANNED");
+      else matchesStatus = (s === filterStatus.toUpperCase());
+    }
+
+    return matchesSearch && matchesYear && matchesService && matchesStatus;
   });
 
   // 2. Sort
@@ -108,6 +126,8 @@ export default function TestsView() {
     return <span className="px-2.5 py-1 rounded-md text-[10px] font-black uppercase tracking-wider bg-blue-100 text-blue-800 dark:bg-blue-500/10 dark:text-blue-400 border border-blue-200 dark:border-blue-500/20">Scheduled</span>;
   };
 
+  const selectStyles = "px-4 py-2 rounded-lg border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-sm font-bold text-slate-700 dark:text-zinc-300 outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer";
+
   return (
     <div className="min-h-screen text-slate-900 dark:text-zinc-100 pb-12">
       <TopNav />
@@ -132,18 +152,28 @@ export default function TestsView() {
         </h1>
         <p className="text-slate-500 dark:text-zinc-400 mb-8">Comprehensive read-only log of all tests, stages, and assignments.</p>
 
-        <div className="bg-white dark:bg-zinc-900 p-4 rounded-xl border border-slate-200 dark:border-zinc-800 shadow-sm mb-6 flex justify-between items-center gap-4">
-          <div className="relative w-full max-w-md">
+        {/* Action Bar with New Filters */}
+        <div className="bg-white dark:bg-zinc-900 p-4 rounded-xl border border-slate-200 dark:border-zinc-800 shadow-sm mb-6 flex flex-col md:flex-row justify-between items-center gap-4">
+          <div className="relative w-full max-w-md shrink-0">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-            <input type="text" placeholder="Search by test name or pentester..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2 rounded-lg border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 focus:ring-2 focus:ring-indigo-500 outline-none" />
+            <input type="text" placeholder="Search by test name or pentester..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2 rounded-lg border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 focus:ring-2 focus:ring-indigo-500 outline-none text-sm" />
           </div>
 
-          <div className="flex items-center gap-4 shrink-0">
-            <select
-              value={filterYear}
-              onChange={e => setFilterYear(e.target.value)}
-              className="px-4 py-2 rounded-lg border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-sm font-bold text-slate-700 dark:text-zinc-300 outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
-            >
+          <div className="flex flex-wrap justify-end items-center gap-3">
+            <select value={filterService} onChange={e => setFilterService(e.target.value)} className={selectStyles}>
+              <option value="All">All Services</option>
+              {uniqueServices.map(s => <option key={s as string} value={s as string}>{s as string}</option>)}
+            </select>
+
+            <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className={selectStyles}>
+              <option value="All">All Statuses</option>
+              <option value="Scheduled">Scheduled</option>
+              <option value="Backlog">Backlog</option>
+              <option value="Completed">Completed</option>
+              <option value="Stopped">Stopped</option>
+            </select>
+
+            <select value={filterYear} onChange={e => setFilterYear(e.target.value)} className={selectStyles}>
               <option value="All">All Years</option>
               <option value="2025">2025</option>
               <option value="2026">2026</option>
@@ -154,7 +184,10 @@ export default function TestsView() {
               <option value="2031">2031</option>
               <option value="null">Unscheduled</option>
             </select>
-            <div className="text-sm font-bold text-slate-500 bg-slate-100 dark:bg-zinc-800 px-3 py-1.5 rounded-lg">{filteredTests.length} Tests Found</div>
+
+            <div className="text-sm font-bold text-slate-500 bg-slate-100 dark:bg-zinc-800 px-3 py-1.5 rounded-lg shrink-0">
+              {filteredTests.length} Tests
+            </div>
           </div>
         </div>
 
@@ -186,6 +219,7 @@ export default function TestsView() {
                     >
                       <div className="flex items-center justify-end gap-2"><SortIcon column="status" /> Status</div>
                     </th>
+                    <th className="p-4 w-12 text-center"></th> {/* Empty header for Lock icon */}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200 dark:divide-zinc-700">
@@ -216,19 +250,18 @@ export default function TestsView() {
                         {test.assigned_pentesters}
                       </td>
                       <td className="p-4 text-right">
-                        <div className="flex items-center justify-end gap-3">
-                          {getStatusPill(test.status)}
-
-                          {currentUser?.role !== 'read_only' && (test.has_secret || test.is_service_active) && (
-                            <button
-                              onClick={() => setSecretConfirmOpen(test)}
-                              className={`p-1.5 rounded transition-colors ${test.has_secret ? 'text-indigo-600 bg-indigo-100 dark:bg-indigo-900/30' : 'text-slate-400 hover:text-indigo-500 hover:bg-slate-100 dark:hover:bg-zinc-800'}`}
-                              title={test.has_secret ? "View Secure Note" : "Add Secure Note"}
-                            >
-                              {test.has_secret ? <Lock size={14} /> : <LockOpen size={14} />}
-                            </button>
-                          )}
-                        </div>
+                         {getStatusPill(test.status)}
+                      </td>
+                      <td className="p-4 text-center">
+                         {currentUser?.role !== 'read_only' && (test.has_secret || test.is_service_active) && (
+                          <button
+                            onClick={() => setSecretConfirmOpen(test)}
+                            className={`p-1.5 rounded transition-colors ${test.has_secret ? 'text-indigo-600 bg-indigo-100 dark:bg-indigo-900/30' : 'text-slate-400 hover:text-indigo-500 hover:bg-slate-100 dark:hover:bg-zinc-800'}`}
+                            title={test.has_secret ? "View Secure Note" : "Add Secure Note"}
+                          >
+                            {test.has_secret ? <Lock size={14} /> : <LockOpen size={14} />}
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}

@@ -4,7 +4,7 @@ import axios from "axios";
 import TopNav from "../components/TopNav";
 import ConfirmModal from "../components/Modals/ConfirmModal";
 import toast, { Toaster } from "react-hot-toast";
-import { Search, Filter, MoveRight, Server, ChevronDown, Activity, Layers, ChevronsUpDown, ChevronUp } from "lucide-react";
+import { Search, Filter, ArrowBigRightDash, Server, ChevronDown, Activity, Layers, ChevronsUpDown, ChevronUp } from "lucide-react";
 
 interface PoolAsset {
   id: string;
@@ -184,7 +184,8 @@ export default function AssetsView() {
       (asset.country && asset.country.toLowerCase().includes(searchTerm.toLowerCase()));
 
     // 2. Service Lane & Country
-    const matchesService = filterService === "all" || asset.service_name === filterService;
+    const matchesService = filterService === "all" ||
+      (filterService === "none" ? !asset.service_name : asset.service_name === filterService);
     const matchesCountry = filterCountry === "all" || asset.country === filterCountry;
 
     // 3. Status Check
@@ -342,6 +343,7 @@ export default function AssetsView() {
                 className={selectStyles}
               >
                 <option value="all">All Service Lanes</option>
+                <option value="none">No Service Lane</option>
                 {services.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
               </select>
 
@@ -524,7 +526,6 @@ export default function AssetsView() {
                                 title="Generate new test in Backlog"
                               >
                                 <Activity className="h-3.5 w-3.5" />
-                                Generate
                               </button>
                             )}
                             <button
@@ -532,7 +533,7 @@ export default function AssetsView() {
                               className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 text-slate-500 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors text-sm"
                               title="Return to Raw Pool"
                             >
-                              <MoveRight className="h-3.5 w-3.5" />
+                              <ArrowBigRightDash className="h-3.5 w-3.5" />
                             </button>
                           </div>
                         </td>
