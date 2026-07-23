@@ -5,7 +5,7 @@ import TestHistoryModal from "../components/Modals/TestHistoryModal";
 import SecureNoteModal from "../components/Modals/SecureNoteModal";
 import ConfirmModal from "../components/Modals/ConfirmModal";
 import toast, { Toaster } from "react-hot-toast";
-import { Search, ShieldAlert, Calendar, ChevronsUpDown, ChevronUp, ChevronDown, LockOpen, Lock } from "lucide-react";
+import { Search, ShieldAlert, Calendar, ChevronsUpDown, ChevronUp, ChevronDown, LockOpen, Lock, FolderOpen, FolderPlus } from "lucide-react";
 import { useAppContext } from "../context/AppContext";
 import type { Test } from "../types/board";
 
@@ -54,6 +54,18 @@ export default function TestsView() {
       setLoading(false);
     }
   };
+
+  const handleCreateWorkspace = async (testId: string) => {
+  const toastId = toast.loading("Provisioning workspace...");
+  try {
+    await axios.post(`/api/tests/${testId}/workspace`);
+    toast.dismiss(toastId);
+    toast.success("Workspace creation started! The board will refresh shortly.");
+  } catch (error) {
+    toast.dismiss(toastId);
+    toast.error("Failed to create workspace.");
+  }
+};
 
   const handleSort = (column: string) => {
     if (sortBy === column) {
@@ -253,7 +265,28 @@ export default function TestsView() {
                          {getStatusPill(test.status)}
                       </td>
                       <td className="p-4 text-center">
-                         {currentUser?.role !== 'read_only' && (test.has_secret || test.is_service_active) && (
+                        {test.drive_folder_url ? (
+                          <a
+                            href={test.drive_folder_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title="Open Google Drive Workspace"
+                            className="p-1.5 text-blue-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded transition-colors flex items-center"
+                          >
+                            <FolderOpen size={14} />
+                          </a>
+                        ) : (
+                          currentUser?.role === 'admin' && (
+                            <button
+                              title="Create Drive Workspace"
+                              className="p-1.5 text-slate-400 hover:text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 rounded transition-colors"
+                              onClick={() => handleCreateWorkspace(test.id)}
+                            >
+                              <FolderPlus size={14} />
+                            </button>
+                          )
+                        )}
+                        {currentUser?.role !== 'read_only' && (test.has_secret || test.is_service_active) && (
                           <button
                             onClick={() => setSecretConfirmOpen(test)}
                             className={`p-1.5 rounded transition-colors ${test.has_secret ? 'text-indigo-600 bg-indigo-100 dark:bg-indigo-900/30' : 'text-slate-400 hover:text-indigo-500 hover:bg-slate-100 dark:hover:bg-zinc-800'}`}

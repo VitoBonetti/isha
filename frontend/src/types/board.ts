@@ -33,6 +33,8 @@ export interface Test {
   asset_count: number;
   has_secret?: boolean;
   is_service_active?: boolean;
+  drive_folder_id?: string;
+  drive_folder_url?: string;
 }
 
 export interface Assignment {

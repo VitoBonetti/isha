@@ -191,7 +191,8 @@ def get_quarterly_board(year: int, quarter: int, response: Response,
             SELECT t.id, t.name, t.service_lane_id, t.category_id, 
                    t.credits_per_week, t.duration_weeks, t.stages::text,
                    (SELECT COUNT(*) FROM test_assets WHERE test_id = t.id),
-                   EXISTS(SELECT 1 FROM secret_notes WHERE test_id = t.id)
+                   EXISTS(SELECT 1 FROM secret_notes WHERE test_id = t.id),
+                   t.drive_folder_url
             FROM tests t
             WHERE t.stages::text = 'NOT_PLANNED'
         ''')
@@ -201,7 +202,8 @@ def get_quarterly_board(year: int, quarter: int, response: Response,
             "id": str(r[0]), "name": r[1], "service_lane_id": str(r[2]) if r[2] else None,
             "category_id": str(r[3]) if r[3] else None,
             "credits": r[4], "duration": r[5], "status": enum_map.get(str(r[6]), str(r[6])),
-            "asset_count": r[7], "has_secret": r[8]
+            "asset_count": r[7], "has_secret": r[8],
+            "drive_folder_url": r[9]
         })
 
     # 4. Tests (Scheduled) - Force stages::text to prevent serialization errors
@@ -209,7 +211,8 @@ def get_quarterly_board(year: int, quarter: int, response: Response,
             SELECT t.id, t.name, t.service_lane_id, t.category_id, 
                    t.credits_per_week, t.duration_weeks, t.start_week, t.start_year, t.stages::text,
                    (SELECT COUNT(*) FROM test_assets WHERE test_id = t.id),
-                   EXISTS(SELECT 1 FROM secret_notes WHERE test_id = t.id)
+                   EXISTS(SELECT 1 FROM secret_notes WHERE test_id = t.id),
+                   t.drive_folder_url
             FROM tests t
             WHERE t.stages::text IN ('SCHEDULED', 'IN_PROGRESS', 'STOPPED', 'COMPLETED') 
               AND t.start_year = %s 
@@ -223,7 +226,8 @@ def get_quarterly_board(year: int, quarter: int, response: Response,
             "id": str(r[0]), "name": r[1], "service_lane_id": str(r[2]) if r[2] else None,
             "category_id": str(r[3]) if r[3] else None,
             "credits": r[4], "duration": r[5], "startWeek": r[6], "startYear": r[7],
-            "status": enum_map.get(str(r[8]), str(r[8])), "asset_count": r[9], "has_secret": r[10]
+            "status": enum_map.get(str(r[8]), str(r[8])), "asset_count": r[9], "has_secret": r[10],
+            "drive_folder_url": r[11]
         })
 
     # 5. Assignments

@@ -10,7 +10,7 @@ import TopNav from '../components/TopNav';
 import { useAppContext } from '../context/AppContext';
 import { getWeekDateRange } from '../utils/helpers';
 import type { BoardData, Test } from '../types/board';
-import { ChevronLeft, ChevronRight, Search, X, History, Edit2, Trash2, Plus, Users, CheckCircle, XCircle, CalendarOff, User, LockOpen, Lock } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Search, X, History, Edit2, Trash2, Plus, Users, CheckCircle, XCircle, CalendarOff, User, LockOpen, Lock, FolderOpen, FolderPlus } from 'lucide-react';
 
 interface PlannerViewProps {
   onlineUsers: string[];
@@ -355,6 +355,31 @@ export default function PlannerView({
                                                         </>
                                                       )}
                                                     </>
+                                                  )}
+                                                  {test.drive_folder_url ? (
+                                                    <a
+                                                      href={test.drive_folder_url}
+                                                      target="_blank"
+                                                      rel="noopener noreferrer"
+                                                      title="Open Google Drive Workspace"
+                                                      className="p-1.5 text-blue-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded transition-colors flex items-center"
+                                                      onClick={(e) => e.stopPropagation()}
+                                                    >
+                                                      <FolderOpen size={14} />
+                                                    </a>
+                                                  ) : (
+                                                    currentUser?.role === 'admin' && (
+                                                      <button
+                                                        title="Create Drive Workspace"
+                                                        className="p-1.5 text-slate-400 hover:text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 rounded transition-colors"
+                                                        onClick={(e) => {
+                                                          e.stopPropagation();
+                                                          handleCreateWorkspace(test.id);
+                                                        }}
+                                                      >
+                                                        <FolderPlus size={14} />
+                                                      </button>
+                                                    )
                                                   )}
                                                   {(test.has_secret || service?.is_active) && (
                                                     <button

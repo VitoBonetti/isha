@@ -3,6 +3,7 @@ import uuid
 import os
 import base64
 import hashlib
+from datetime import datetime
 from cryptography.fernet import Fernet
 from pydantic import BaseModel, UUID4
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
@@ -11,6 +12,7 @@ from routers.auth import get_current_user, require_admin, require_write_access
 from websockets_manager import manager
 from schema import TestCreate, TestBase, AssignmentBase, TestSchedule, BulkTestCreate, AssignmentCreate, SecureNotePayload
 from audit_logger import log_audit_event
+from utils.drive_manager import DriveManager, background_archive_workspace, background_provision_workspace
 
 router = APIRouter(prefix="/api/tests", tags=["Tests & Assignments"])
 
@@ -129,6 +131,11 @@ def update_test(test_id: str, t: TestBase, background_tasks: BackgroundTasks,
 @router.delete("/{test_id}", summary="[Admin Only]")
 def delete_test(test_id: str, background_tasks: BackgroundTasks,
                 current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+
+    # Fetch test name and drive_folder_id before deleting
+    cursor.execute("SELECT name, drive_folder_id FROM tests WHERE id = %s", (test_id,))
+    test_data = cursor.fetchone()
+
     # Log deletion BEFORE removing links, so the assets receive the cascade
     log_test_history(cursor, test_id, current_user['id'], "DELETED", "Test permanently deleted and assets freed.")
 
@@ -136,6 +143,10 @@ def delete_test(test_id: str, background_tasks: BackgroundTasks,
     cursor.execute('DELETE FROM assignments WHERE test_id = %s', (test_id,))
     cursor.execute('DELETE FROM tests WHERE id = %s', (test_id,))
     cursor.connection.commit()
+
+    if test_data and test_data[1]:
+        test_name, folder_id = test_data[0], test_data[1]
+        background_tasks.add_task(background_archive_workspace, folder_id, test_name)
 
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
@@ -148,25 +159,26 @@ def process_bulk_tests_background(asset_ids: List[UUID4], user_id: str):
         if not cursor: return
         for asset_id in asset_ids:
             cursor.execute('''
-                SELECT r.name, r.service_forecast_id, s.default_credits, s.default_duration_weeks
+                SELECT r.name, r.service_forecast_id, s.default_credits, s.default_duration_weeks,
+                       s.name as service_name, c.name as country_name
                 FROM assets a
                 JOIN raw_assets r ON a.raw_asset_id = r.id
                 LEFT JOIN services_lanes s ON r.service_forecast_id = s.id
+                LEFT JOIN countries c ON r.country_id = c.id
                 WHERE a.id = %s 
-                AND (r.duplicate_allowed = TRUE OR NOT EXISTS (
+                 AND (r.duplicate_allowed = TRUE OR NOT EXISTS (
                     SELECT 1 FROM test_assets ta 
-                    JOIN tests t ON ta.test_id = t.id 
-                    WHERE ta.asset_id = a.id 
-                        AND t.stages::text IN ('NOT_PLANNED', 'SCHEDULED', 'IN_PROGRESS')
+                     JOIN tests t ON ta.test_id = t.id 
+                     WHERE ta.asset_id = a.id 
+                         AND t.stages::text IN ('NOT_PLANNED', 'SCHEDULED', 'IN_PROGRESS')
                 ))
             ''', (str(asset_id),))
 
             asset_data = cursor.fetchone()
             if not asset_data or not asset_data[1]: continue
 
-            asset_name, service_lane_id, default_credits, default_duration_weeks = asset_data
+            asset_name, service_lane_id, default_credits, default_duration_weeks, service_name, country_name = asset_data
             new_test_id = str(uuid.uuid4())
-
             credits = float(default_credits) if default_credits is not None else 2.0
             duration = int(default_duration_weeks) if default_duration_weeks is not None else 1
 
@@ -177,6 +189,12 @@ def process_bulk_tests_background(asset_ids: List[UUID4], user_id: str):
 
             cursor.execute('INSERT INTO test_assets (test_id, asset_id) VALUES (%s, %s)', (new_test_id, str(asset_id)))
             log_test_history(cursor, new_test_id, user_id, "GENERATED", f"Test generated from Asset Pool.")
+
+            current_year = datetime.now().year
+            allowed_services = ["adversary simulation", "white box"]
+            if service_name and any(allowed in service_name.lower() for allowed in allowed_services):
+                DriveManager().provision_test_workspace(new_test_id, current_year, service_name, country_name,
+                                                        asset_name)
 
         cursor.connection.commit()
 
@@ -492,3 +510,31 @@ def delete_test_secret(test_id: str, background_tasks: BackgroundTasks,
     cursor.connection.commit()
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Secure note permanently deleted."}
+
+
+@router.post("/{test_id}/workspace", summary="[Admin Only]")
+def provision_workspace_manually(test_id: str, background_tasks: BackgroundTasks,
+                                 current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    # Fetch required metadata to create the folder path
+    cursor.execute('''
+        SELECT t.name, s.name, c.name, t.start_year
+        FROM tests t
+        LEFT JOIN services_lanes s ON t.service_lane_id = s.id
+        LEFT JOIN test_assets ta ON t.id = ta.test_id
+        LEFT JOIN assets a ON ta.asset_id = a.id
+        LEFT JOIN countries c ON a.country_id = c.id
+        WHERE t.id = %s LIMIT 1
+    ''', (test_id,))
+
+    test_data = cursor.fetchone()
+    if not test_data:
+        raise HTTPException(status_code=404, detail="Test not found.")
+
+    test_name, service_name, country_name, start_year = test_data
+    target_year = start_year if start_year else datetime.now().year
+
+    # Run the provisioner in the background. It will automatically broadcast a REFRESH_BOARD event when done!
+    background_tasks.add_task(background_provision_workspace, test_id, target_year, service_name, country_name,
+                              test_name)
+
+    return {"message": "Workspace provisioning started."}
