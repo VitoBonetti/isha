@@ -30,11 +30,21 @@ export default function AssignTeamModal({
     return w > 52 ? w - 52 : w;
   });
 
+  // Calculate capacity and Sort by Availability (Highest First), then Name
   const activePentesters = boardData.pentesters.filter(p => {
     if (p.role === 'read_only') return false;
     const pStart = (p.start_year || 2024) * 100 + (p.start_week || 1);
     const pEnd = p.end_year ? (p.end_year * 100 + (p.end_week || 52)) : 999999;
     return pStart <= testStartVal && pEnd >= testStartVal;
+  }).sort((a, b) => {
+    const capA = testWeeks.reduce((sum, w) => sum + (boardData.capacities[a.id]?.[w] || 0), 0);
+    const capB = testWeeks.reduce((sum, w) => sum + (boardData.capacities[b.id]?.[w] || 0), 0);
+
+    // Primary Sort: Highest capacity
+    if (capB !== capA) return capB - capA;
+
+    // Secondary Sort: Alphabetical by name
+    return (a.name || '').localeCompare(b.name || '');
   });
 
   const service = boardData.services.find(s => s.id === assignModalTest.service_lane_id);
@@ -58,7 +68,7 @@ export default function AssignTeamModal({
         </div>
          {!isServiceActive ? (
           <div className="flex-1 flex flex-col items-center justify-center text-slate-500 dark:text-zinc-500 py-12">
-            <AlertTriangle className="mb-4 text-amber-500" size="{32}"/>
+            <AlertTriangle className="mb-4 text-amber-500" size={32}/>
             <p className="font-bold text-lg text-slate-700 dark:text-zinc-300">Inactive Service Lane</p>
             <p className="text-sm mt-2 text-center max-w-sm">This service lane is currently marked as inactive. Pentesters cannot be assigned to its tests.</p>
           </div>
@@ -81,7 +91,7 @@ export default function AssignTeamModal({
                       <td className="py-3 px-2">
                         <div className="font-bold text-slate-900 dark:text-zinc-100">{p.name}</div>
 
-                        {/* NEW: Show exact capacity per week */}
+                        {/* Show exact capacity per week */}
                         <div className="flex flex-wrap gap-1.5 mt-1.5">
                           {testWeeks.map(w => {
                             const cap = boardData.capacities[p.id]?.[w] || 0;

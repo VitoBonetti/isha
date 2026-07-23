@@ -110,7 +110,6 @@ export default function PlannerView({
               <button className="p-1.5 hover:bg-slate-200 dark:hover:bg-zinc-800 rounded-md text-slate-500 transition-colors" onClick={handlePrevQuarter}><ChevronLeft size={16} /></button>
               <div className="mx-3 flex items-center gap-1.5 bg-slate-100 dark:bg-zinc-800/80 px-2 py-1 rounded-md shadow-inner">
                 <span className="text-sm text-slate-900 dark:text-zinc-100 font-extrabold">Q{targetQuarter}</span>
-                {/* 1. FIXED HOVER COLOR ON NAVIGATOR */}
                 <select
                   className="bg-transparent font-bold text-sm text-slate-900 dark:text-zinc-100 outline-none cursor-pointer hover:opacity-70 transition-opacity appearance-none pr-2"
                   value={targetYear}
@@ -225,7 +224,6 @@ export default function PlannerView({
                 {boardData.services.map(service => (
                   <tr key={service.id} style={{ backgroundColor: getTintedBg(service.theme_color) }}>
 
-                    {/* 2. FIXED Z-INDEX: Side Column is z-[30] */}
                     <td className="px-4 py-3 font-bold text-slate-900 dark:text-zinc-100 border-b border-r-2 border-slate-300 dark:border-zinc-700 sticky left-0 z-[30] bg-slate-50/95 dark:bg-zinc-900/95 backdrop-blur-xl shadow-[2px_0_5px_rgba(0,0,0,0.05)]">
                       <div className="flex items-center gap-3">
                         <div className="w-3 h-3 rounded-full shadow-sm shrink-0" style={{ backgroundColor: service.theme_color }} />
@@ -326,30 +324,39 @@ export default function PlannerView({
 
                                               {renderQualityAndTeam()}
 
-                                              {currentUser?.role === 'admin' && (
+                                              {/* Action Menu (Accessible by Pentesters & Admins) */}
+                                              {currentUser?.role !== 'read_only' && (
                                                 <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity bg-white/90 dark:bg-zinc-800/90 backdrop-blur-sm rounded-lg shadow-sm border border-slate-100 dark:border-zinc-700 flex items-center p-0.5 z-[100]">
                                                   {test.status === 'Completed' ? (
                                                     <>
-                                                      <button title="Undo Done" className="p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-zinc-300 transition-colors" onClick={() => handleRevertComplete(test.id)}><XCircle size={14}/></button>
+                                                      {currentUser?.role === 'admin' && (
+                                                        <button title="Undo Done" className="p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-zinc-300 transition-colors" onClick={() => handleRevertComplete(test.id)}><XCircle size={14}/></button>
+                                                      )}
                                                       <button title="History" className="p-1.5 text-blue-500 hover:text-blue-600 transition-colors" onClick={() => setHistoryTest(test)}><History size={14}/></button>
                                                     </>
                                                   ) : test.status === 'Stopped' ? (
                                                     <>
-                                                      <button title="Undo Stop" className="p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-zinc-300 transition-colors" onClick={() => handleRevertUnable(test.id)}><XCircle size={14}/></button>
+                                                      {currentUser?.role === 'admin' && (
+                                                        <button title="Undo Stop" className="p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-zinc-300 transition-colors" onClick={() => handleRevertUnable(test.id)}><XCircle size={14}/></button>
+                                                      )}
                                                       <button title="History" className="p-1.5 text-blue-500 hover:text-blue-600 transition-colors" onClick={() => setHistoryTest(test)}><History size={14}/></button>
                                                     </>
                                                   ) : (
                                                     <>
-                                                      {service.is_active && (
-                                                        <button title="Assign Staff" className="p-1.5 text-blue-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded transition-colors" onClick={() => setAssignModalTest(test)}><Users size={14}/></button>
+                                                      {currentUser?.role === 'admin' && (
+                                                        <>
+                                                          {service.is_active && (
+                                                            <button title="Assign Staff" className="p-1.5 text-blue-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded transition-colors" onClick={() => setAssignModalTest(test)}><Users size={14}/></button>
+                                                          )}
+                                                          <button title="Mark Done" className="p-1.5 text-emerald-500 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 rounded transition-colors" onClick={() => handleCompleteTest(test.id)}><CheckCircle size={14}/></button>
+                                                          <button title="Stop Test" className="p-1.5 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded transition-colors" onClick={() => handleMarkUnable(test.id)}><XCircle size={14}/></button>
+                                                          <button title="Unschedule" className="p-1.5 text-amber-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/30 rounded transition-colors" onClick={() => handleUnscheduleTest(test.id)}><CalendarOff size={14}/></button>
+                                                          <button title="Edit" className="p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-700 rounded transition-colors" onClick={() => openEditModal(test)}><Edit2 size={14}/></button>
+                                                        </>
                                                       )}
-                                                      <button title="Mark Done" className="p-1.5 text-emerald-500 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 rounded transition-colors" onClick={() => handleCompleteTest(test.id)}><CheckCircle size={14}/></button>
-                                                      <button title="Stop Test" className="p-1.5 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded transition-colors" onClick={() => handleMarkUnable(test.id)}><XCircle size={14}/></button>
-                                                      <button title="Unschedule" className="p-1.5 text-amber-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/30 rounded transition-colors" onClick={() => handleUnscheduleTest(test.id)}><CalendarOff size={14}/></button>
-                                                      <button title="Edit" className="p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-700 rounded transition-colors" onClick={() => openEditModal(test)}><Edit2 size={14}/></button>
                                                     </>
                                                   )}
-                                                  {currentUser?.role !== 'read_only' && (test.has_secret || service?.is_active) && (
+                                                  {(test.has_secret || service?.is_active) && (
                                                     <button
                                                       onClick={() => setSecretConfirmOpen(test)}
                                                       className={`p-1.5 rounded transition-colors ${test.has_secret ? 'text-indigo-600 bg-indigo-100 dark:bg-indigo-900/30' : 'text-slate-400 hover:text-indigo-500 hover:bg-slate-100 dark:hover:bg-zinc-800'}`}
