@@ -38,7 +38,7 @@ def get_user_provision_internal(cursor, user_id, year, week_number):
     cursor.execute("""
         SELECT start_date, end_date
         FROM events
-        WHERE user_id = %s
+        WHERE (user_id = %s AND event_type != 'working_from_abroad')
            OR event_type = 'team_day'
            OR (event_type = 'national_holiday' AND (
                location_id = %s OR 

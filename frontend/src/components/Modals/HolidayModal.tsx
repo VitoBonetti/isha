@@ -26,6 +26,9 @@ export default function HolidayModal({
   const liveCredits = useMemo(() => {
     if (!holidayData.start_date || !holidayData.end_date) return "0.0";
 
+    // WFA costs absolutely 0 credits!
+    if (holidayData.event_type === 'working_from_abroad') return "0.0";
+
     let workingDays = 0;
     let d = new Date(`${holidayData.start_date}T12:00:00`);
     const end = new Date(`${holidayData.end_date}T12:00:00`);
@@ -37,7 +40,6 @@ export default function HolidayModal({
     if (workingDays === 0) return "0.0";
 
     if (holidayData.event_type === 'national_holiday' || holidayData.event_type === 'team_day') {
-      // ✅ FIXED: Safe string comparison for UUIDs, handles null/undefined gracefully
       const locId = holidayData.location_id ? String(holidayData.location_id) : null;
       const affectedUsers = pentesters?.filter(p =>
         !locId || String(p.location_id) === locId
@@ -63,7 +65,7 @@ export default function HolidayModal({
         <div className="flex justify-between items-center mb-6 border-b border-slate-100 dark:border-zinc-800 pb-4">
           <h2 className="text-xl font-bold text-slate-900 dark:text-zinc-100 flex items-center gap-2">
             <CalendarDays size={20} className="text-blue-500" />
-            {isEditing ? 'Edit Time Off' : 'Add Time Off'}
+            {isEditing ? 'Edit Event' : 'Add Event'}
           </h2>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-900 dark:hover:text-zinc-100 transition-colors">
             <X size={20} />
@@ -82,6 +84,7 @@ export default function HolidayModal({
             >
               <option value="personal_time_off">Personal Time Off</option>
               <option value="sick_day">Sick Day</option>
+              <option value="working_from_abroad">Working from Abroad</option>
               {currentUser?.role === 'admin' && (
                 <>
                   <option value="national_holiday">National Holiday</option>
@@ -91,7 +94,8 @@ export default function HolidayModal({
             </select>
           </div>
 
-          {['personal_time_off', 'sick_day'].includes(holidayData.event_type) && (
+          {/* Show team member for PTO, Sick, OR Working from Abroad */}
+          {['personal_time_off', 'sick_day', 'working_from_abroad'].includes(holidayData.event_type) && (
             <div>
               <label className="block text-xs font-bold text-slate-500 dark:text-zinc-400 uppercase mb-1.5 flex items-center gap-1"><Users size={12}/> Team Member</label>
               <select
@@ -109,7 +113,8 @@ export default function HolidayModal({
             </div>
           )}
 
-          {holidayData.event_type === 'national_holiday' && (
+          {/* Show location for National Holidays AND Working from Abroad */}
+          {['national_holiday', 'working_from_abroad'].includes(holidayData.event_type) && (
             <div>
               <label className="block text-xs font-bold text-slate-500 dark:text-zinc-400 uppercase mb-1.5 flex items-center gap-1"><MapPin size={12}/> Location</label>
               <select
@@ -117,7 +122,7 @@ export default function HolidayModal({
                 onChange={e => setHolidayData({...holidayData, location_id: e.target.value})}
                 className="w-full bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 dark:text-zinc-100 outline-none"
               >
-                <option value="">Global (All Locations)</option>
+                <option value="">{holidayData.event_type === 'working_from_abroad' ? 'Unknown/Other' : 'Global (All Locations)'}</option>
                 {locations?.map(loc => (
                   <option key={loc.id} value={loc.id}>{loc.name}</option>
                 ))}

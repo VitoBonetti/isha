@@ -159,6 +159,7 @@ class EventType(str, Enum):
     team_day = "team_day"
     personal_time_off = "personal_time_off"
     sick_day = "sick_day"
+    working_from_abroad = "working_from_abroad"
 
 class EventBase(BaseModel):
     event_type: EventType

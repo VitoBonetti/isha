@@ -267,6 +267,11 @@ export default function CalendarView() {
                       } else if (eType === 'sick_day') {
                         bgClass = 'bg-orange-100 dark:bg-orange-500/20'; borderClass = 'border-orange-500'; textClass = 'text-orange-800 dark:text-orange-400';
                         label = `🤒 ${user?.name || 'Unknown User'} (Sick)`;
+                      } else if (eType === 'working_from_abroad') {
+                        // NEW THEME: WFA Display
+                        bgClass = 'bg-teal-100 dark:bg-teal-500/20'; borderClass = 'border-teal-500'; textClass = 'text-teal-800 dark:text-teal-400';
+                        const locName = locations.find(l => l.id === evt.location_id)?.name || 'Other';
+                        label = `✈️ ${user?.name || 'Unknown User'} (WFA: ${locName})`;
                       } else {
                         const theme = getUserColor(user?.id, localPentesters);
                         bgClass = theme.bg; borderClass = theme.border; textClass = theme.text;
@@ -274,7 +279,7 @@ export default function CalendarView() {
 
                       const isAdmin = currentUser?.role === 'admin';
                       const isOwner = String(user?.id) === String(currentUser?.id);
-                      const canEdit = isAdmin || (['personal_time_off', 'sick_day'].includes(eType) && isOwner);
+                      const canEdit = isAdmin || (['personal_time_off', 'sick_day', 'working_from_abroad'].includes(eType) && isOwner);
 
                       return (
                         <div
