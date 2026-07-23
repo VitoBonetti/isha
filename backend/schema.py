@@ -119,6 +119,8 @@ class TestBase(BaseModel):
     start_week: Optional[int] = None
     start_year: Optional[int] = None
     status: TestStatus = TestStatus.not_planned
+    drive_folder_id: Optional[str] = None
+    drive_folder_url: Optional[str] = None
 
 class TestCreate(TestBase):
     asset_ids: List[UUID4] = []
