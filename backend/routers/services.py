@@ -13,7 +13,7 @@ def get_services(current_user: dict = Depends(get_current_user), cursor=Depends(
     cursor.execute('''
         SELECT id, name, max_concurrent_per_week, theme_color, 
                 default_credits, default_duration_weeks, target_goal, display_order, is_active,
-                auto_provision_workspace -- <-- ADD THIS
+                auto_provision_workspace 
         FROM services_lanes 
          ORDER BY display_order ASC, name ASC
     ''')
@@ -44,7 +44,7 @@ def create_service(s: ServiceLaneBase, background_tasks: BackgroundTasks,
                default_duration_weeks = EXCLUDED.default_duration_weeks,
                target_goal = EXCLUDED.target_goal,
                display_order = EXCLUDED.display_order,
-               auto_provision_workspace = EXCLUDED.auto_provision_workspace -- <-- ADD THIS
+               auto_provision_workspace = EXCLUDED.auto_provision_workspace 
            RETURNING id''',
         (new_service_id, s.name, s.max_concurrent_per_week, s.theme_color, s.default_credits,
          s.default_duration_weeks, s.target_goal, s.display_order, s.is_active, s.auto_provision_workspace)
@@ -60,7 +60,7 @@ def update_service(service_id: str, s: ServiceLaneBase, background_tasks: Backgr
         '''UPDATE services_lanes 
             SET name=%s, max_concurrent_per_week=%s, theme_color=%s,
                 default_credits=%s, default_duration_weeks=%s, target_goal=%s, display_order=%s, is_active=%s,
-                auto_provision_workspace=%s -- <-- ADD THIS
+                auto_provision_workspace=%s 
             WHERE id=%s''',
         (s.name, s.max_concurrent_per_week, s.theme_color, s.default_credits,
          s.default_duration_weeks, s.target_goal, s.display_order, s.is_active, s.auto_provision_workspace, service_id)
@@ -72,7 +72,9 @@ def update_service(service_id: str, s: ServiceLaneBase, background_tasks: Backgr
 @router.delete("/{service_id}", summary="[Admin Only]")
 def delete_service(service_id: str, background_tasks: BackgroundTasks,
                    current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
-    cursor.execute("UPDATE services_lanes SET is_active = FALSE WHERE id = %s", (service_id,))
+
+    cursor.execute('DELETE FROM services_lanes WHERE id = %s', (service_id,))
     cursor.connection.commit()
+
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
-    return {"message": "Service lane deactivated"}
+    return {"message": "Service lane deleted"}

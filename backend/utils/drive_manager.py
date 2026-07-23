@@ -77,13 +77,13 @@ class DriveManager:
 
     def archive_test_workspace(self, folder_id: str, test_name: str):
         try:
-            body = {'name': f"[DELETED] - {test_name}"}
+            body = {'trashed': True}
             self.drive_service.files().update(
                 fileId=folder_id, body=body, supportsAllDrives=True
             ).execute()
-            print(f"Archived Drive folder {folder_id}")
+            print(f"Trashed Drive folder {folder_id}")
         except Exception as e:
-            print(f"Failed to archive Drive workspace: {e}")
+            print(f"Failed to trash Drive workspace: {e}")
 
     def scan_folder_for_files(self, folder_id: str):
             """Fetches all files (ignoring sub-folders) inside a specific Drive folder."""

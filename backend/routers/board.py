@@ -161,8 +161,9 @@ def get_quarterly_board(year: int, quarter: int, response: Response,
 
     # 1. Services & Categories
     cursor.execute(
-        'SELECT id, name, theme_color, display_order, max_concurrent_per_week, is_active FROM services_lanes ORDER BY display_order ASC')
-    services = [{"id": str(r[0]), "name": r[1], "theme_color": r[2], "max_concurrent_per_week": r[4], "is_active": r[5]} for r in cursor.fetchall()]
+        'SELECT id, name, theme_color, display_order, max_concurrent_per_week, is_active, auto_provision_workspace FROM services_lanes ORDER BY display_order ASC')
+    services = [{"id": str(r[0]), "name": r[1], "theme_color": r[2], "max_concurrent_per_week": r[4], "is_active": r[5],
+                 "auto_provision_workspace": r[6]} for r in cursor.fetchall()]
 
     cursor.execute('SELECT id, name, target_goal, service_lane_id FROM service_categories ORDER BY name ASC')
     categories = [{"id": str(r[0]), "name": r[1], "target_goal": r[2], "service_lane_id": str(r[3]) if r[3] else None}

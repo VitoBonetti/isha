@@ -366,9 +366,10 @@ export default function PlannerView({
                                                       onClick={(e) => e.stopPropagation()}
                                                     >
                                                       <FolderOpen size={14} />
-                                                    </a>
+                                                     </a>
                                                   ) : (
-                                                    currentUser?.role === 'admin' && (
+
+                                                    currentUser?.role === 'admin' && service?.auto_provision_workspace && (
                                                       <button
                                                         title="Create Drive Workspace"
                                                         className="p-1.5 text-slate-400 hover:text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 rounded transition-colors"
@@ -381,7 +382,7 @@ export default function PlannerView({
                                                       </button>
                                                     )
                                                   )}
-                                                  {(test.has_secret || service?.is_active) && (
+                                                  {(test.has_secret || service?.is_active && service?.auto_provision_workspace) && (
                                                     <button
                                                       onClick={() => setSecretConfirmOpen(test)}
                                                       className={`p-1.5 rounded transition-colors ${test.has_secret ? 'text-indigo-600 bg-indigo-100 dark:bg-indigo-900/30' : 'text-slate-400 hover:text-indigo-500 hover:bg-slate-100 dark:hover:bg-zinc-800'}`}

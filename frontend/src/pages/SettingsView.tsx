@@ -510,8 +510,12 @@ export default function SettingsView() {
                     <label className="text-sm font-bold text-slate-700 dark:text-zinc-300 col-span-1 md:col-span-2">Display Order <input type="number" className={inputClasses} value={serviceForm.display_order} onChange={e => setServiceForm({...serviceForm, display_order: parseInt(e.target.value)})} placeholder="e.g. 1" /></label>
 
                     <div className="col-span-1 md:col-span-2 pt-2 mt-2 border-t border-slate-200 dark:border-zinc-800">
-                      <span className="px-2 py-0.5"><Toggle checked={serviceForm.is_active} onChange={(c) => setServiceForm({...serviceForm, is_active: c})} label="Service Lane is Active" /></span>
-                      <span className="px-2 py-0.5"><Toggle label="Auto-Provision Drive Workspace" checked={serviceForm.auto_provision_workspace} onChange={c => setServiceForm({...serviceForm, auto_provision_workspace: c})} /></span>
+                      <span className="px-2 py-0.5">
+                        <Toggle checked={serviceForm.is_active} onChange={(c) => setServiceForm({...serviceForm, is_active: c})} label="Service Lane is Active" />
+                      </span>
+                      <span className="px-2 py-0.5">
+                        <Toggle checked={serviceForm.auto_provision_workspace} onChange={(c) => setServiceForm({...serviceForm, auto_provision_workspace: c})} label="Auto-Provision Drive Workspace" />
+                      </span>
                     </div>
                   </div>
                   <div className="flex justify-end gap-3 pt-4 border-t border-slate-200 dark:border-zinc-800">
@@ -528,11 +532,6 @@ export default function SettingsView() {
                       <div className="font-bold text-lg text-slate-900 dark:text-zinc-100 flex items-center gap-2">
                         {item.theme_color && <div className="w-4 h-4 rounded-full shadow-sm" style={{backgroundColor: item.theme_color}}></div>}
                         {item.name}
-                        {item.auto_provision_workspace && (
-                          <span className="px-2 py-0.5 rounded text-[10px] font-extrabold uppercase tracking-wider bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">
-                            <FolderClosed size={16} />
-                          </span>
-                        )}
                       </div>
                       <div className="mt-2 space-y-1">
                         <div className="text-sm text-slate-500 dark:text-zinc-400 font-medium">
@@ -544,6 +543,7 @@ export default function SettingsView() {
                       </div>
                       <div className={`mt-4 px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-wider w-fit shadow-sm border ${item.is_active ? 'bg-emerald-100 dark:bg-emerald-500/10 border-emerald-200 dark:border-emerald-500/20 text-emerald-800 dark:text-emerald-400' : 'bg-slate-100 dark:bg-zinc-800 border-slate-200 dark:border-zinc-700 text-slate-500 dark:text-zinc-400'}`}>
                         {item.is_active ? 'Active' : 'Inactive'}
+
                       </div>
                     </div>
                     <div className="flex flex-col gap-1">
@@ -552,7 +552,8 @@ export default function SettingsView() {
                         setServiceForm({
                           name: item.name, theme_color: item.theme_color, default_credits: item.default_credits,
                           default_duration_weeks: item.default_duration_weeks, max_concurrent_per_week: item.max_concurrent_per_week || 5,
-                          target_goal: item.target_goal || 0, display_order: item.display_order || 99, is_active: item.is_active
+                          target_goal: item.target_goal || 0, display_order: item.display_order || 99, is_active: item.is_active,
+                          auto_provision_workspace: item.auto_provision_workspace || false
                         });
                         setShowForm('services');
                       }} className="text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-500/10 p-2 rounded-lg transition-colors"><Edit2 size={18} /></button>

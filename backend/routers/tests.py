@@ -12,7 +12,7 @@ from routers.auth import get_current_user, require_admin, require_write_access
 from websockets_manager import manager
 from schema import TestCreate, TestBase, AssignmentBase, TestSchedule, BulkTestCreate, AssignmentCreate, SecureNotePayload
 from audit_logger import log_audit_event
-from utils.drive_manager import DriveManager, background_archive_workspace, background_provision_workspace
+from utils.drive_manager import DriveManager, background_archive_workspace, background_provision_workspace, background_relocate_workspace
 
 router = APIRouter(prefix="/api/tests", tags=["Tests & Assignments"])
 
@@ -94,9 +94,11 @@ def create_test(t: TestCreate, background_tasks: BackgroundTasks,
 def get_all_tests(current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
     cursor.execute('''
         SELECT t.id, t.name, t.start_week, t.start_year, t.duration_weeks, t.stages::text as status,
-               s.name as service_lane_name, s.is_active as is_service_active,
+               s.name as service_lane_name, s.is_active as is_service_active, 
+               s.auto_provision_workspace, -- <-- NEW
                COALESCE((SELECT string_agg(DISTINCT u.name, ', ') FROM assignments a JOIN users u ON a.user_id = u.id WHERE a.test_id = t.id), 'Unassigned') as assigned_pentesters,
-               EXISTS(SELECT 1 FROM secret_notes WHERE test_id = t.id) as has_secret
+               EXISTS(SELECT 1 FROM secret_notes WHERE test_id = t.id) as has_secret,
+               t.drive_folder_url -- <-- NEW
         FROM tests t LEFT JOIN services_lanes s ON t.service_lane_id = s.id
         ORDER BY t.start_year DESC NULLS LAST, t.start_week DESC NULLS LAST, t.name ASC
     ''')
@@ -107,22 +109,47 @@ def get_all_tests(current_user: dict = Depends(get_current_user), cursor=Depends
 @router.put("/{test_id}", summary="[Admin Only]")
 def update_test(test_id: str, t: TestBase, background_tasks: BackgroundTasks,
                 current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
-    db_stage = FRONTEND_TO_DB_STAGES.get(t.status, "NOT_PLANNED")
+    # 1. Fetch old data to see if we need to relocate the Google Drive folder
+    cursor.execute('''
+        SELECT t.drive_folder_id, s.name, c.name, t.start_year
+        FROM tests t
+        LEFT JOIN services_lanes s ON t.service_lane_id = s.id
+        LEFT JOIN test_assets ta ON t.id = ta.test_id
+        LEFT JOIN assets a ON ta.asset_id = a.id
+        LEFT JOIN countries c ON a.country_id = c.id
+        WHERE t.id = %s LIMIT 1
+    ''', (test_id,))
+    old_data = cursor.fetchone()
 
+    db_stage = FRONTEND_TO_DB_STAGES.get(t.status, "NOT_PLANNED")
     if db_stage == 'NOT_PLANNED':
         cursor.execute('DELETE FROM assignments WHERE test_id = %s', (test_id,))
         cursor.execute('UPDATE tests SET start_week = NULL, start_year = NULL WHERE id = %s', (test_id,))
 
     cat_id = str(t.category_id) if hasattr(t, 'category_id') and t.category_id else None
 
+    # Update the test
     cursor.execute('''
         UPDATE tests 
-        SET name=%s, service_lane_id=%s, category_id=%s, credits_per_week=%s, duration_weeks=%s, stages=%s
+         SET name=%s, service_lane_id=%s, category_id=%s, credits_per_week=%s, duration_weeks=%s, stages=%s
         WHERE id=%s
     ''', (t.name, str(t.service_lane_id), cat_id, t.credits_per_week, t.duration_weeks, db_stage, test_id))
-
-    log_test_history(cursor, test_id, current_user['id'], "UPDATED", f"Settings updated: {t.credits_per_week}cr, {t.duration_weeks}wks.")
+    log_test_history(cursor, test_id, current_user['id'], "UPDATED",
+                     f"Settings updated: {t.credits_per_week}cr, {t.duration_weeks}wks.")
     cursor.connection.commit()
+
+    # 2. Trigger Folder Relocation if a folder exists
+    if old_data and old_data[0]:
+        folder_id = old_data[0]
+        country_name = old_data[2] or "General"
+        start_year = old_data[3] or datetime.now().year
+
+        # Get the new service name to construct the new path
+        cursor.execute("SELECT name FROM services_lanes WHERE id = %s", (str(t.service_lane_id),))
+        new_service_name = cursor.fetchone()[0]
+
+        background_tasks.add_task(background_relocate_workspace, folder_id, start_year, new_service_name, country_name,
+                                  t.name)
 
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Test updated successfully."}
@@ -155,6 +182,8 @@ def delete_test(test_id: str, background_tasks: BackgroundTasks,
 
 # --- BULK GENERATION ---
 def process_bulk_tests_background(asset_ids: List[UUID4], user_id: str):
+    tests_to_provision = []
+
     with db_cursor_context() as cursor:
         if not cursor: return
         for asset_id in asset_ids:
@@ -173,7 +202,6 @@ def process_bulk_tests_background(asset_ids: List[UUID4], user_id: str):
                          AND t.stages::text IN ('NOT_PLANNED', 'SCHEDULED', 'IN_PROGRESS')
                 ))
             ''', (str(asset_id),))
-
             asset_data = cursor.fetchone()
             if not asset_data or not asset_data[1]: continue
 
@@ -185,18 +213,24 @@ def process_bulk_tests_background(asset_ids: List[UUID4], user_id: str):
 
             cursor.execute('''
                 INSERT INTO tests (id, name, service_lane_id, credits_per_week, duration_weeks, stages) 
-                VALUES (%s, %s, %s, %s, %s, 'NOT_PLANNED') RETURNING id
+                 VALUES (%s, %s, %s, %s, %s, 'NOT_PLANNED') RETURNING id
             ''', (new_test_id, asset_name, str(service_lane_id), credits, duration))
 
             cursor.execute('INSERT INTO test_assets (test_id, asset_id) VALUES (%s, %s)', (new_test_id, str(asset_id)))
             log_test_history(cursor, new_test_id, user_id, "GENERATED", f"Test generated from Asset Pool.")
 
+            # Store the data to provision later
             current_year = datetime.now().year
-            if auto_provision:
-                DriveManager().provision_test_workspace(new_test_id, current_year, service_name, country_name,
-                                                        asset_name)
+            tests_to_provision.append(
+                (new_test_id, current_year, service_name, country_name, asset_name, auto_provision))
 
+        # Commit the transaction so the database unlocks the rows!
         cursor.connection.commit()
+
+    # Now that the DB is unlocked, we can safely contact Google Drive
+    for test_id, year, s_name, c_name, t_name, auto_prov in tests_to_provision:
+        if auto_prov:
+            DriveManager().provision_test_workspace(test_id, year, s_name, c_name, t_name)
 
 
 @router.post("/bulk", summary="[Admin Only]")
