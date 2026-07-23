@@ -160,7 +160,7 @@ def process_bulk_tests_background(asset_ids: List[UUID4], user_id: str):
         for asset_id in asset_ids:
             cursor.execute('''
                 SELECT r.name, r.service_forecast_id, s.default_credits, s.default_duration_weeks,
-                       s.name as service_name, c.name as country_name
+                       s.name as service_name, c.name as country_name, s.auto_provision_workspace
                 FROM assets a
                 JOIN raw_assets r ON a.raw_asset_id = r.id
                 LEFT JOIN services_lanes s ON r.service_forecast_id = s.id
@@ -177,7 +177,8 @@ def process_bulk_tests_background(asset_ids: List[UUID4], user_id: str):
             asset_data = cursor.fetchone()
             if not asset_data or not asset_data[1]: continue
 
-            asset_name, service_lane_id, default_credits, default_duration_weeks, service_name, country_name = asset_data
+            asset_name, service_lane_id, default_credits, default_duration_weeks, service_name, country_name, auto_provision = asset_data
+
             new_test_id = str(uuid.uuid4())
             credits = float(default_credits) if default_credits is not None else 2.0
             duration = int(default_duration_weeks) if default_duration_weeks is not None else 1
@@ -191,8 +192,7 @@ def process_bulk_tests_background(asset_ids: List[UUID4], user_id: str):
             log_test_history(cursor, new_test_id, user_id, "GENERATED", f"Test generated from Asset Pool.")
 
             current_year = datetime.now().year
-            allowed_services = ["adversary simulation", "white box"]
-            if service_name and any(allowed in service_name.lower() for allowed in allowed_services):
+            if auto_provision:
                 DriveManager().provision_test_workspace(new_test_id, current_year, service_name, country_name,
                                                         asset_name)
 

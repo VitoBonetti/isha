@@ -43,6 +43,7 @@ class ServiceLaneBase(BaseModel):
     target_goal: Optional[int] = 0
     is_active: bool = True
     display_order: int = 99
+    auto_provision_workspace: bool = False
 
 class ServiceLaneResponse(ServiceLaneBase):
     id: UUID4

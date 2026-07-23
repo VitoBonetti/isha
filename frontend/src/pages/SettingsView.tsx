@@ -4,7 +4,7 @@ import { useSettings } from '../hooks/useSettings';
 import TopNav from '../components/TopNav';
 import ConfirmModal from '../components/Modals/ConfirmModal';
 import { Toaster } from 'react-hot-toast';
-import { Key, Users, MapPin, Activity, Tags, Globe, Flag, Server, Trash2, Download, AlertTriangle, Plus, Database, Terminal, Edit2, LayoutTemplate, ChevronsUpDown, ChevronUp, ChevronDown } from 'lucide-react';
+import { Key, Users, MapPin, Activity, Tags, Globe, Flag, Server, Trash2, Download, AlertTriangle, Plus, Database, Terminal, Edit2, LayoutTemplate, ChevronsUpDown, ChevronUp, ChevronDown, FolderClosed } from 'lucide-react';
 
 // Sleek Custom Toggle Component
 const Toggle = ({ checked, onChange, label, disabled = false }: { checked: boolean, onChange: (c: boolean) => void, label: string, disabled?: boolean }) => (
@@ -106,7 +106,7 @@ export default function SettingsView() {
   const [assetTypePage, setAssetTypePage] = useState(1);
 
   // Forms
-  const defaultUserForm = { email: '', name: '', role: 'read_only', base_capacity: 1.0, location_id: '', start_week: 1, start_year: new Date().getFullYear(), end_week: '', end_year: '' };
+  const defaultUserForm = { email: '', name: '', role: 'read_only', base_capacity: 1.0, location_id: '', start_week: 1, start_year: new Date().getFullYear(), end_week: '', end_year: '', auto_provision_workspace: false };
   const [userForm, setUserForm] = useState(defaultUserForm);
   const [editUserId, setEditUserId] = useState<string | null>(null);
 
@@ -114,7 +114,8 @@ export default function SettingsView() {
   const [locForm, setLocForm] = useState(defaultLocForm);
   const [editLocId, setEditLocId] = useState<string | null>(null);
 
-  const defaultServiceForm = { name: '', theme_color: '#3b82f6', default_credits: 2.0, default_duration_weeks: 1, max_concurrent_per_week: 5, target_goal: 0, display_order: 99, is_active: true };  const [serviceForm, setServiceForm] = useState(defaultServiceForm);
+  const defaultServiceForm = { name: '', theme_color: '#3b82f6', default_credits: 2.0, default_duration_weeks: 1, max_concurrent_per_week: 5, target_goal: 0, display_order: 99, is_active: true };
+  const [serviceForm, setServiceForm] = useState(defaultServiceForm);
   const [editServiceId, setEditServiceId] = useState<string | null>(null);
 
   const defaultCatForm = { name: '', target_goal: 0, service_lane_id: '' };
@@ -509,7 +510,8 @@ export default function SettingsView() {
                     <label className="text-sm font-bold text-slate-700 dark:text-zinc-300 col-span-1 md:col-span-2">Display Order <input type="number" className={inputClasses} value={serviceForm.display_order} onChange={e => setServiceForm({...serviceForm, display_order: parseInt(e.target.value)})} placeholder="e.g. 1" /></label>
 
                     <div className="col-span-1 md:col-span-2 pt-2 mt-2 border-t border-slate-200 dark:border-zinc-800">
-                      <Toggle checked={serviceForm.is_active} onChange={(c) => setServiceForm({...serviceForm, is_active: c})} label="Service Lane is Active" />
+                      <span className="px-2 py-0.5"><Toggle checked={serviceForm.is_active} onChange={(c) => setServiceForm({...serviceForm, is_active: c})} label="Service Lane is Active" /></span>
+                      <span className="px-2 py-0.5"><Toggle label="Auto-Provision Drive Workspace" checked={serviceForm.auto_provision_workspace} onChange={c => setServiceForm({...serviceForm, auto_provision_workspace: c})} /></span>
                     </div>
                   </div>
                   <div className="flex justify-end gap-3 pt-4 border-t border-slate-200 dark:border-zinc-800">
@@ -526,6 +528,11 @@ export default function SettingsView() {
                       <div className="font-bold text-lg text-slate-900 dark:text-zinc-100 flex items-center gap-2">
                         {item.theme_color && <div className="w-4 h-4 rounded-full shadow-sm" style={{backgroundColor: item.theme_color}}></div>}
                         {item.name}
+                        {item.auto_provision_workspace && (
+                          <span className="px-2 py-0.5 rounded text-[10px] font-extrabold uppercase tracking-wider bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">
+                            <FolderClosed size={16} />
+                          </span>
+                        )}
                       </div>
                       <div className="mt-2 space-y-1">
                         <div className="text-sm text-slate-500 dark:text-zinc-400 font-medium">
