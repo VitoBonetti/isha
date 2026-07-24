@@ -278,6 +278,18 @@ export default function Planner() {
 
   const handleDuplicateTest = (testId: string) => console.log("Duplicate Triggered:", testId);
 
+  const handleCreateWorkspace = async (testId: string) => {
+    const toastId = toast.loading("Provisioning workspace...");
+    try {
+      await axios.post(`/api/tests/${testId}/workspace`);
+      toast.dismiss(toastId);
+      toast.success("Workspace creation started! The board will refresh shortly.");
+    } catch (error) {
+      toast.dismiss(toastId);
+      toast.error("Failed to create workspace.");
+    }
+  };
+
   return (
     <>
       <PlannerView
@@ -301,6 +313,7 @@ export default function Planner() {
         handleMarkUnable={handleMarkUnable}
         handleRevertComplete={handleRevertComplete}
         handleRevertUnable={handleRevertUnable}
+        handleCreateWorkspace={handleCreateWorkspace}
         assignModalTest={assignModalTest}
         setAssignModalTest={setAssignModalTest}
         backlogFilter={backlogFilter}

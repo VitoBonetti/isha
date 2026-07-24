@@ -56,16 +56,16 @@ export default function TestsView() {
   };
 
   const handleCreateWorkspace = async (testId: string) => {
-  const toastId = toast.loading("Provisioning workspace...");
-  try {
-    await axios.post(`/api/tests/${testId}/workspace`);
-    toast.dismiss(toastId);
-    toast.success("Workspace creation started! The board will refresh shortly.");
-  } catch (error) {
-    toast.dismiss(toastId);
-    toast.error("Failed to create workspace.");
-  }
-};
+      const toastId = toast.loading("Provisioning workspace...");
+      try {
+        await axios.post(`/api/tests/${testId}/workspace`);
+        toast.dismiss(toastId);
+        toast.success("Workspace creation started! The board will refresh shortly.");
+      } catch (error) {
+        toast.dismiss(toastId);
+        toast.error("Failed to create workspace.");
+      }
+    };
 
   const handleSort = (column: string) => {
     if (sortBy === column) {

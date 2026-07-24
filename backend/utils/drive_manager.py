@@ -77,9 +77,8 @@ class DriveManager:
 
     def archive_test_workspace(self, folder_id: str, test_name: str):
         try:
-            body = {'trashed': True}
-            self.drive_service.files().update(
-                fileId=folder_id, body=body, supportsAllDrives=True
+            self.drive_service.files().delete(
+                fileId=folder_id, supportsAllDrives=True
             ).execute()
             print(f"Trashed Drive folder {folder_id}")
         except Exception as e:

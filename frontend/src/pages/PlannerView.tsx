@@ -33,6 +33,7 @@ interface PlannerViewProps {
   handleMarkUnable: (testId: string) => void;
   handleRevertComplete: (testId: string) => void;
   handleRevertUnable: (testId: string) => void;
+  handleCreateWorkspace: (testId: string) => void;
   assignModalTest: Test | null;
   setAssignModalTest: (test: Test | null) => void;
   backlogFilter: string;
@@ -58,7 +59,7 @@ export default function PlannerView({
   onlineUsers, targetYear, targetQuarter, handlePrevQuarter, handleNextQuarter, handleCurrentQuarter,
   boardData, setNewTest, setShowTestForm,
   onDragEnd, handleAssignTeam, handleCompleteTest, handleUnscheduleTest, handleUnassignPentester,
-  handleDeleteTest, handleDuplicateTest, openEditModal, handleMarkUnable, handleRevertComplete, handleRevertUnable,
+  handleDeleteTest, handleDuplicateTest, openEditModal, handleMarkUnable, handleRevertComplete, handleRevertUnable, handleCreateWorkspace,
   assignModalTest, setAssignModalTest, backlogFilter, setBacklogFilter, setTargetYear
 }: PlannerViewProps) {
 
