@@ -49,12 +49,7 @@ class DriveManager:
             year_folder = self.get_or_create_folder(str(year), reports_folder['id'])
 
             # 3. Map the Service Name to the specific Drive Folder string
-            service_lower = (service_name or "").lower()
-            if "white" in service_lower: clean_service = "White"
-            elif "black" in service_lower: clean_service = "Black"
-            elif "adversary" in service_lower: clean_service = "Adversary Simulation"
-            else: clean_service = "Other"
-
+            clean_service = service_name if service_name else "Uncategorized"
             service_folder = self.get_or_create_folder(clean_service, year_folder['id'])
 
             # 4. Market folder (fallback to 'General' if no market is assigned)
@@ -147,12 +142,8 @@ class DriveManager:
             reports_folder = self.get_or_create_folder("02. Reports", self.source_folder_id)
             year_folder = self.get_or_create_folder(str(new_year), reports_folder['id'])
 
-            service_lower = (new_service_name or "").lower()
-            if "white" in service_lower: clean_service = "White"
-            elif "black" in service_lower: clean_service = "Black"
-            elif "adversary" in service_lower: clean_service = "Adversary Simulation"
-            else: clean_service = "Other"
-
+            # Use the dynamic Service Name directly!
+            clean_service = new_service_name if new_service_name else "Uncategorized"
             service_folder = self.get_or_create_folder(clean_service, year_folder['id'])
 
             safe_market = new_market if new_market else "General"

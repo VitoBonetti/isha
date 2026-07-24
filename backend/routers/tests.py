@@ -142,14 +142,15 @@ def update_test(test_id: str, t: TestBase, background_tasks: BackgroundTasks,
     if old_data and old_data[0]:
         folder_id = old_data[0]
         country_name = old_data[2] or "General"
-        start_year = old_data[3] or datetime.now().year
+
+        # Ensure we pass the NEW year if it was updated, otherwise fallback to the old year
+        target_year = t.start_year if t.start_year else (old_data[3] or datetime.now().year)
 
         # Get the new service name to construct the new path
         cursor.execute("SELECT name FROM services_lanes WHERE id = %s", (str(t.service_lane_id),))
         new_service_name = cursor.fetchone()[0]
 
-        background_tasks.add_task(background_relocate_workspace, folder_id, start_year, new_service_name, country_name,
-                                  t.name)
+        background_tasks.add_task(background_relocate_workspace, folder_id, target_year, new_service_name, country_name, t.name)
 
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Test updated successfully."}
