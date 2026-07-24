@@ -193,7 +193,8 @@ def get_quarterly_board(year: int, quarter: int, response: Response,
                    t.credits_per_week, t.duration_weeks, t.stages::text,
                    (SELECT COUNT(*) FROM test_assets WHERE test_id = t.id),
                    EXISTS(SELECT 1 FROM secret_notes WHERE test_id = t.id),
-                   t.drive_folder_url
+                   t.drive_folder_url,
+                   t.is_tentative
             FROM tests t
             WHERE t.stages::text = 'NOT_PLANNED'
         ''')
@@ -204,7 +205,8 @@ def get_quarterly_board(year: int, quarter: int, response: Response,
             "category_id": str(r[3]) if r[3] else None,
             "credits": r[4], "duration": r[5], "status": enum_map.get(str(r[6]), str(r[6])),
             "asset_count": r[7], "has_secret": r[8],
-            "drive_folder_url": r[9]
+            "drive_folder_url": r[9],
+            "is_tentative": r[10]
         })
 
     # 4. Tests (Scheduled) - Force stages::text to prevent serialization errors
@@ -213,7 +215,8 @@ def get_quarterly_board(year: int, quarter: int, response: Response,
                    t.credits_per_week, t.duration_weeks, t.start_week, t.start_year, t.stages::text,
                    (SELECT COUNT(*) FROM test_assets WHERE test_id = t.id),
                    EXISTS(SELECT 1 FROM secret_notes WHERE test_id = t.id),
-                   t.drive_folder_url
+                   t.drive_folder_url,
+                   t.is_tentative
             FROM tests t
             WHERE t.stages::text IN ('SCHEDULED', 'IN_PROGRESS', 'STOPPED', 'COMPLETED') 
               AND t.start_year = %s 
@@ -228,7 +231,8 @@ def get_quarterly_board(year: int, quarter: int, response: Response,
             "category_id": str(r[3]) if r[3] else None,
             "credits": r[4], "duration": r[5], "startWeek": r[6], "startYear": r[7],
             "status": enum_map.get(str(r[8]), str(r[8])), "asset_count": r[9], "has_secret": r[10],
-            "drive_folder_url": r[11]
+            "drive_folder_url": r[11],
+            "is_tentative": r[12]
         })
 
     # 5. Assignments

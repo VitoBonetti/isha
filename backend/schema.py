@@ -120,6 +120,7 @@ class TestBase(BaseModel):
     start_week: Optional[int] = None
     start_year: Optional[int] = None
     status: TestStatus = TestStatus.not_planned
+    is_tentative: bool = False
     drive_folder_id: Optional[str] = None
     drive_folder_url: Optional[str] = None
 

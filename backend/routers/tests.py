@@ -131,9 +131,11 @@ def update_test(test_id: str, t: TestBase, background_tasks: BackgroundTasks,
     # Update the test
     cursor.execute('''
         UPDATE tests 
-         SET name=%s, service_lane_id=%s, category_id=%s, credits_per_week=%s, duration_weeks=%s, stages=%s
+         SET name=%s, service_lane_id=%s, category_id=%s, credits_per_week=%s, duration_weeks=%s, stages=%s, is_tentative=%s
         WHERE id=%s
-    ''', (t.name, str(t.service_lane_id), cat_id, t.credits_per_week, t.duration_weeks, db_stage, test_id))
+    ''', (t.name, str(t.service_lane_id), cat_id, t.credits_per_week, t.duration_weeks, db_stage, t.is_tentative,
+          test_id))
+
     log_test_history(cursor, test_id, current_user['id'], "UPDATED",
                      f"Settings updated: {t.credits_per_week}cr, {t.duration_weeks}wks.")
     cursor.connection.commit()
@@ -573,3 +575,20 @@ def provision_workspace_manually(test_id: str, background_tasks: BackgroundTasks
                               test_name)
 
     return {"message": "Workspace provisioning started."}
+
+
+@router.put("/{test_id}/tentative", summary="[Admin Only]")
+def toggle_tentative(test_id: str, background_tasks: BackgroundTasks,
+                     current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    # Flips the boolean from True to False, or False to True
+    cursor.execute("UPDATE tests SET is_tentative = NOT is_tentative WHERE id = %s", (test_id,))
+
+    # Log it
+    cursor.execute("SELECT is_tentative FROM tests WHERE id = %s", (test_id,))
+    is_tent = cursor.fetchone()[0]
+    state_str = "Marked as Tentative (TBC)" if is_tent else "Removed Tentative mark"
+    log_test_history(cursor, test_id, current_user['id'], "UPDATED", state_str)
+
+    cursor.connection.commit()
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+    return {"message": state_str}

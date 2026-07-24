@@ -290,6 +290,14 @@ export default function Planner() {
     }
   };
 
+  const handleToggleTentative = async (testId: string) => {
+    try {
+      await axios.put(`/api/tests/${testId}/tentative`);
+    } catch (error) {
+      toast.error("Failed to toggle tentative status.");
+    }
+  };
+
   return (
     <>
       <PlannerView
@@ -314,6 +322,7 @@ export default function Planner() {
         handleRevertComplete={handleRevertComplete}
         handleRevertUnable={handleRevertUnable}
         handleCreateWorkspace={handleCreateWorkspace}
+        handleToggleTentative={handleToggleTentative}
         assignModalTest={assignModalTest}
         setAssignModalTest={setAssignModalTest}
         backlogFilter={backlogFilter}

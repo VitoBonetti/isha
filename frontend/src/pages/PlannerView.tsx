@@ -10,7 +10,7 @@ import TopNav from '../components/TopNav';
 import { useAppContext } from '../context/AppContext';
 import { getWeekDateRange } from '../utils/helpers';
 import type { BoardData, Test } from '../types/board';
-import { ChevronLeft, ChevronRight, Search, X, History, Edit2, Trash2, Plus, Users, CheckCircle, XCircle, CalendarOff, User, LockOpen, Lock, FolderOpen, FolderPlus } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Search, X, History, Edit2, Trash2, Plus, Users, CheckCircle, XCircle, CalendarOff, User, LockOpen, Lock, FolderOpen, FolderPlus, CircleQuestionMark } from 'lucide-react';
 
 interface PlannerViewProps {
   onlineUsers: string[];
@@ -34,6 +34,7 @@ interface PlannerViewProps {
   handleRevertComplete: (testId: string) => void;
   handleRevertUnable: (testId: string) => void;
   handleCreateWorkspace: (testId: string) => void;
+  handleToggleTentative: (testId: string) => void;
   assignModalTest: Test | null;
   setAssignModalTest: (test: Test | null) => void;
   backlogFilter: string;
@@ -59,7 +60,7 @@ export default function PlannerView({
   onlineUsers, targetYear, targetQuarter, handlePrevQuarter, handleNextQuarter, handleCurrentQuarter,
   boardData, setNewTest, setShowTestForm,
   onDragEnd, handleAssignTeam, handleCompleteTest, handleUnscheduleTest, handleUnassignPentester,
-  handleDeleteTest, handleDuplicateTest, openEditModal, handleMarkUnable, handleRevertComplete, handleRevertUnable, handleCreateWorkspace,
+  handleDeleteTest, handleDuplicateTest, openEditModal, handleMarkUnable, handleRevertComplete, handleRevertUnable, handleCreateWorkspace, handleToggleTentative,
   assignModalTest, setAssignModalTest, backlogFilter, setBacklogFilter, setTargetYear
 }: PlannerViewProps) {
 
@@ -318,80 +319,82 @@ export default function PlannerView({
                                               <div className="flex justify-between items-start mb-1 mt-1">
                                                 <div className="font-bold text-xs text-slate-900 dark:text-zinc-100 leading-tight pr-4">
                                                   {test.name}
+                                                  {test.is_tentative && <span className="text-amber-500 font-black ml-1" title="Tentative / TBC"> (?)</span>}
                                                 </div>
                                                 {test.status === 'Completed' && <span className="text-[9px] font-black bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-md uppercase tracking-wide shrink-0">Done</span>}
                                                 {test.status === 'Stopped' && <span className="text-[9px] font-black bg-red-100 text-red-700 px-1.5 py-0.5 rounded-md uppercase tracking-wide shrink-0">Stop</span>}
                                               </div>
 
                                               {renderQualityAndTeam()}
-
                                               {/* Action Menu (Accessible by Pentesters & Admins) */}
                                               {currentUser?.role !== 'read_only' && (
-                                                <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity bg-white/90 dark:bg-zinc-800/90 backdrop-blur-sm rounded-lg shadow-sm border border-slate-100 dark:border-zinc-700 flex items-center p-0.5 z-[100]">
-                                                  {test.status === 'Completed' ? (
-                                                    <>
-                                                      {currentUser?.role === 'admin' && (
-                                                        <button title="Undo Done" className="p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-zinc-300 transition-colors" onClick={() => handleRevertComplete(test.id)}><XCircle size={14}/></button>
-                                                      )}
-                                                      <button title="History" className="p-1.5 text-blue-500 hover:text-blue-600 transition-colors" onClick={() => setHistoryTest(test)}><History size={14}/></button>
-                                                    </>
-                                                  ) : test.status === 'Stopped' ? (
-                                                    <>
-                                                      {currentUser?.role === 'admin' && (
-                                                        <button title="Undo Stop" className="p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-zinc-300 transition-colors" onClick={() => handleRevertUnable(test.id)}><XCircle size={14}/></button>
-                                                      )}
-                                                      <button title="History" className="p-1.5 text-blue-500 hover:text-blue-600 transition-colors" onClick={() => setHistoryTest(test)}><History size={14}/></button>
-                                                    </>
-                                                  ) : (
-                                                    <>
-                                                      {currentUser?.role === 'admin' && (
-                                                        <>
-                                                          {service.is_active && (
-                                                            <button title="Assign Staff" className="p-1.5 text-blue-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded transition-colors" onClick={() => setAssignModalTest(test)}><Users size={14}/></button>
-                                                          )}
-                                                          <button title="Mark Done" className="p-1.5 text-emerald-500 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 rounded transition-colors" onClick={() => handleCompleteTest(test.id)}><CheckCircle size={14}/></button>
-                                                          <button title="Stop Test" className="p-1.5 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded transition-colors" onClick={() => handleMarkUnable(test.id)}><XCircle size={14}/></button>
-                                                          <button title="Unschedule" className="p-1.5 text-amber-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/30 rounded transition-colors" onClick={() => handleUnscheduleTest(test.id)}><CalendarOff size={14}/></button>
-                                                          <button title="Edit" className="p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-700 rounded transition-colors" onClick={() => openEditModal(test)}><Edit2 size={14}/></button>
-                                                        </>
-                                                      )}
-                                                    </>
-                                                  )}
-                                                  {test.drive_folder_url ? (
-                                                    <a
-                                                      href={test.drive_folder_url}
-                                                      target="_blank"
-                                                      rel="noopener noreferrer"
-                                                      title="Open Google Drive Workspace"
-                                                      className="p-1.5 text-blue-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded transition-colors flex items-center"
-                                                      onClick={(e) => e.stopPropagation()}
-                                                    >
-                                                      <FolderOpen size={14} />
-                                                     </a>
-                                                  ) : (
-
-                                                    currentUser?.role === 'admin' && service?.auto_provision_workspace && (
-                                                      <button
-                                                        title="Create Drive Workspace"
-                                                        className="p-1.5 text-slate-400 hover:text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 rounded transition-colors"
-                                                        onClick={(e) => {
-                                                          e.stopPropagation();
-                                                          handleCreateWorkspace(test.id);
-                                                        }}
+                                                <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity bg-white/90 dark:bg-zinc-800/90 backdrop-blur-sm rounded-lg shadow-sm border border-slate-100 dark:border-zinc-700 p-1 z-[100]">
+                                                  <div className="grid grid-cols-4 gap-1">
+                                                    {test.status === 'Completed' ? (
+                                                      <>
+                                                        {currentUser?.role === 'admin' && (
+                                                          <button title="Undo Done" className="p-1.5 flex items-center justify-center rounded text-slate-400 hover:text-slate-700 dark:hover:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-700 transition-colors" onClick={() => handleRevertComplete(test.id)}><XCircle size={14}/></button>
+                                                        )}
+                                                        <button title="History" className="p-1.5 flex items-center justify-center rounded text-blue-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors" onClick={() => setHistoryTest(test)}><History size={14}/></button>
+                                                      </>
+                                                    ) : test.status === 'Stopped' ? (
+                                                      <>
+                                                        {currentUser?.role === 'admin' && (
+                                                          <button title="Undo Stop" className="p-1.5 flex items-center justify-center rounded text-slate-400 hover:text-slate-700 dark:hover:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-700 transition-colors" onClick={() => handleRevertUnable(test.id)}><XCircle size={14}/></button>
+                                                        )}
+                                                        <button title="History" className="p-1.5 flex items-center justify-center rounded text-blue-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors" onClick={() => setHistoryTest(test)}><History size={14}/></button>
+                                                      </>
+                                                    ) : (
+                                                      <>
+                                                        {currentUser?.role === 'admin' && (
+                                                          <>
+                                                            {service?.is_active && (
+                                                              <button title="Assign Staff" className="p-1.5 flex items-center justify-center rounded text-blue-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors" onClick={() => setAssignModalTest(test)}><Users size={14}/></button>
+                                                            )}
+                                                            <button title="Mark Done" className="p-1.5 flex items-center justify-center rounded text-emerald-500 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 transition-colors" onClick={() => handleCompleteTest(test.id)}><CheckCircle size={14}/></button>
+                                                            <button title="Stop Test" className="p-1.5 flex items-center justify-center rounded text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors" onClick={() => handleMarkUnable(test.id)}><XCircle size={14}/></button>
+                                                            <button title="Unschedule" className="p-1.5 flex items-center justify-center rounded text-amber-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/30 transition-colors" onClick={() => handleUnscheduleTest(test.id)}><CalendarOff size={14}/></button>
+                                                            <button title="Edit" className="p-1.5 flex items-center justify-center rounded text-slate-400 hover:text-slate-700 dark:hover:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-700 transition-colors" onClick={() => openEditModal(test)}><Edit2 size={14}/></button>
+                                                            <button title="Toggle Tentative / TBC" className="p-1.5 flex items-center justify-center rounded text-amber-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/30 transition-colors" onClick={(e) => { e.stopPropagation(); handleToggleTentative(test.id); }}><CircleQuestionMark size={14}/></button>
+                                                          </>
+                                                        )}
+                                                      </>
+                                                    )}
+                                                    {test.drive_folder_url ? (
+                                                      <a
+                                                        href={test.drive_folder_url}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        title="Open Google Drive Workspace"
+                                                        className="p-1.5 flex items-center justify-center rounded text-blue-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors"
+                                                        onClick={(e) => e.stopPropagation()}
                                                       >
-                                                        <FolderPlus size={14} />
+                                                        <FolderOpen size={14} />
+                                                      </a>
+                                                    ) : (
+                                                      currentUser?.role === 'admin' && service?.auto_provision_workspace && (
+                                                        <button
+                                                          title="Create Drive Workspace"
+                                                          className="p-1.5 flex items-center justify-center rounded text-slate-400 hover:text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 transition-colors"
+                                                          onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            handleCreateWorkspace(test.id);
+                                                          }}
+                                                        >
+                                                          <FolderPlus size={14} />
+                                                        </button>
+                                                      )
+                                                    )}
+                                                    {(test.has_secret || (service?.is_active && service?.auto_provision_workspace)) && (
+                                                      <button
+                                                        onClick={() => setSecretConfirmOpen(test)}
+                                                        className={`p-1.5 flex items-center justify-center rounded transition-colors ${test.has_secret ? 'text-indigo-600 bg-indigo-100 dark:bg-indigo-900/30' : 'text-slate-400 hover:text-indigo-500 hover:bg-slate-100 dark:hover:bg-zinc-800'}`}
+                                                        title={test.has_secret ? "View Secure Note" : "Add Secure Note"}
+                                                      >
+                                                        {test.has_secret ? <Lock size={14} /> : <LockOpen size={14} />}
                                                       </button>
-                                                    )
-                                                  )}
-                                                  {(test.has_secret || service?.is_active && service?.auto_provision_workspace) && (
-                                                    <button
-                                                      onClick={() => setSecretConfirmOpen(test)}
-                                                      className={`p-1.5 rounded transition-colors ${test.has_secret ? 'text-indigo-600 bg-indigo-100 dark:bg-indigo-900/30' : 'text-slate-400 hover:text-indigo-500 hover:bg-slate-100 dark:hover:bg-zinc-800'}`}
-                                                      title={test.has_secret ? "View Secure Note" : "Add Secure Note"}
-                                                    >
-                                                      {test.has_secret ? <Lock size={14} /> : <LockOpen size={14} />}
-                                                    </button>
-                                                  )}
+                                                    )}
+                                                  </div>
                                                 </div>
                                               )}
                                             </div>

@@ -37,6 +37,7 @@ export interface Test {
   drive_folder_id?: string;
   drive_folder_url?: string;
   auto_provision_workspace?: boolean;
+  is_tentative?: boolean;
 }
 
 export interface Assignment {

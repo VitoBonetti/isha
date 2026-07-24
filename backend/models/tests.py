@@ -1,6 +1,6 @@
 import uuid
 import enum
-from sqlalchemy import Column, String, Integer, ForeignKey, REAL, Enum, DateTime
+from sqlalchemy import Column, String, Integer, ForeignKey, REAL, Enum, DateTime, Boolean
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from database import Base
@@ -29,6 +29,7 @@ class Tests(Base):
     start_week = Column(Integer)
     start_year = Column(Integer)
     stages = Column(Enum(TestStages), default=TestStages.NOT_PLANNED, nullable=False)
+    is_tentative = Column(Boolean, default=False)
     drive_folder_id = Column(String(255), nullable=True)
     drive_folder_url = Column(String(1000), nullable=True)
 

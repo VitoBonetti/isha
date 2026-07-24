@@ -16,6 +16,7 @@ export default function EditTestModal({ isOpen, test, boardData, onClose, onSubm
   const [categoryId, setCategoryId] = useState(''); // <-- NEW STATE
   const [credits, setCredits] = useState(2.0);
   const [duration, setDuration] = useState(1);
+  const [isTentative, setIsTentative] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
@@ -25,6 +26,7 @@ export default function EditTestModal({ isOpen, test, boardData, onClose, onSubm
       setCategoryId(test.category_id || ''); // <-- SET FROM TEST
       setCredits(test.credits || 2.0);
       setDuration(test.duration || 1);
+      setIsTentative(test.is_tentative || false);
     }
   }, [test]);
 
@@ -43,7 +45,8 @@ export default function EditTestModal({ isOpen, test, boardData, onClose, onSubm
       category_id: categoryId === '' ? null : categoryId, // <-- SEND TO BACKEND
       credits_per_week: credits,
       duration_weeks: duration,
-      status: test.status
+      status: test.status,
+      is_tentative: isTentative
     });
 
     setIsSubmitting(false);
@@ -94,6 +97,24 @@ export default function EditTestModal({ isOpen, test, boardData, onClose, onSubm
               <label className="block text-xs font-bold text-slate-700 dark:text-zinc-300 mb-1.5">Duration (Weeks)</label>
               <input type="number" step="1" min="1" required value={duration} onChange={e => setDuration(parseInt(e.target.value))} className="w-full px-3 py-2 bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-lg text-sm text-slate-900 dark:text-zinc-100 focus:ring-2 focus:ring-blue-500 outline-none transition-shadow"/>
             </div>
+          </div>
+
+          <div className="mt-2">
+            <label className="flex items-center gap-3 cursor-pointer w-fit">
+              <div className="relative flex items-center">
+                <input
+                  type="checkbox"
+                  className="sr-only"
+                  checked={isTentative}
+                  onChange={e => setIsTentative(e.target.checked)}
+                />
+                <div className={`block w-10 h-6 rounded-full transition-colors duration-300 ${isTentative ? 'bg-amber-500' : 'bg-slate-300 dark:bg-zinc-700'}`}></div>
+                <div className={`absolute left-1 bg-white w-4 h-4 rounded-full transition-transform duration-300 shadow-sm ${isTentative ? 'transform translate-x-4' : ''}`}></div>
+              </div>
+              <span className="text-sm font-bold text-slate-700 dark:text-zinc-300">
+                Mark as Tentative (TBC)
+              </span>
+            </label>
           </div>
 
           <div className="mt-4 pt-4 border-t border-slate-100 dark:border-zinc-800 flex justify-end gap-3">
