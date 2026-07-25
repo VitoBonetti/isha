@@ -965,43 +965,47 @@ export default function SettingsView() {
           {activeTab === 'system' && (
             <div className="space-y-8 fade-in">
               <div>
-                <h2 className="text-xl font-bold text-slate-900 dark:text-zinc-100 mb-4 flex items-center gap-2"><Server size={20} className="text-blue-500"/> System Logs & DB</h2>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="border border-slate-200 dark:border-zinc-800 rounded-2xl p-5 flex justify-between items-center bg-slate-50 dark:bg-zinc-900 shadow-sm">
-                    <span className="font-bold text-slate-700 dark:text-zinc-300">PostgreSQL Primary</span>
-                    {dbLatency !== null ? (
-                      <span className="flex items-center gap-2 text-sm text-emerald-700 dark:text-emerald-400 font-extrabold uppercase tracking-wider bg-emerald-100 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/20 px-3 py-1.5 rounded-full">
-                        <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
-                        Connected ({dbLatency}ms)
-                      </span>
+                <h2 className="text-xl font-bold text-slate-900 dark:text-zinc-100 mb-4 flex items-center gap-2"><Terminal size={20} className="text-slate-500 dark:text-zinc-400"/> Security Audit Logs (BigQuery)</h2>
+
+                <div className="flex gap-3 mb-4">
+                  <a href="/api/system/logs/download/archive" target="_blank" rel="noopener noreferrer" className="bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-300 px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-bold transition-colors">
+                    <Download size={16} /> Download Archive (.txt)
+                  </a>
+                  <button onClick={() => confirmDelete('/api/system/logs/clear', '', 'All Audit Logs')} className="text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-500/10 hover:bg-red-100 dark:hover:bg-red-500/20 px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-bold transition-colors">
+                    <Trash2 size={16} /> Truncate BigQuery Table
+                  </button>
+                </div>
+
+                <div className="bg-[#0c0c0e] rounded-2xl border border-slate-200 dark:border-zinc-800 shadow-sm overflow-hidden flex flex-col h-[400px]">
+                  {/* Terminal Header */}
+                  <div className="bg-slate-800 px-4 py-2 flex items-center gap-2 shrink-0">
+                    <div className="w-3 h-3 rounded-full bg-red-500"></div>
+                    <div className="w-3 h-3 rounded-full bg-amber-500"></div>
+                    <div className="w-3 h-3 rounded-full bg-emerald-500"></div>
+                    <span className="ml-2 text-xs font-mono text-slate-400">gostplanner_logs.audit_logs (Last 100 Events)</span>
+                  </div>
+
+                  {/* Terminal Body */}
+                  <div className="p-4 overflow-y-auto font-mono text-[11px] text-slate-300 space-y-1.5 flex-1">
+                    {(!logs || logs?.length === 0) ? (
+                       <div className="text-slate-600 italic">No logs found in BigQuery.</div>
                     ) : (
-                      <span className="flex items-center gap-2 text-sm text-red-700 dark:text-red-400 font-extrabold uppercase tracking-wider bg-red-100 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 px-3 py-1.5 rounded-full">
-                        <div className="w-2 h-2 rounded-full bg-red-500"></div>
-                        Offline
-                      </span>
+                      logs.map((log: any, idx: number) => (
+                        <div key={idx} className="flex gap-3 hover:bg-white/5 p-1 rounded transition-colors break-words">
+                          <span className="text-emerald-400 shrink-0">[{new Date(log.timestamp).toLocaleString()}]</span>
+                          <span className="text-blue-400 shrink-0 font-bold">[{log.action}]</span>
+                          <span className="text-slate-300">{log.details}</span>
+                          <span className="text-slate-500 ml-auto shrink-0 pl-2">
+                            User: {log.user_id?.split('-')[0]}... ({log.role || 'Unknown'})
+                          </span>
+                        </div>
+                      ))
                     )}
                   </div>
                 </div>
               </div>
 
-              <div>
-                <h2 className="text-xl font-bold text-slate-900 dark:text-zinc-100 mb-4 flex items-center gap-2"><Terminal size={20} className="text-slate-500 dark:text-zinc-400"/> Security Audit Logs</h2>
-                <div className="border border-slate-200 dark:border-zinc-800 rounded-2xl overflow-hidden shadow-sm bg-white dark:bg-zinc-900">
-                  {(!logs || logs?.length === 0) ? <div className="p-12 text-center text-slate-500 dark:text-zinc-500 bg-slate-50/50 dark:bg-zinc-950/50">No text logs generated yet in the backend /logs folder.</div> :
-                    <ul className="divide-y divide-slate-100 dark:divide-zinc-800">
-                      {logs.map(log => (
-                        <li key={log} className="p-4 flex justify-between items-center hover:bg-slate-50 dark:hover:bg-zinc-800/50 transition-colors">
-                          <span className="font-mono text-sm font-medium text-slate-700 dark:text-zinc-300">{log}</span>
-                          <div className="flex gap-2">
-                            <button onClick={() => downloadLog(log)} className="text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-500/10 px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-bold transition-colors"><Download size={16} /> Download</button>
-                            <button onClick={() => confirmDelete('/api/system/logs/', log, log)} className="text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-bold transition-colors"><Trash2 size={16} /> Delete</button>
-                          </div>
-                        </li>
-                      ))}
-                    </ul>
-                  }
-                </div>
-              </div>
+
               <div className="pt-6 border-t border-slate-200 dark:border-zinc-800">
                 <h2 className="text-xl font-bold text-red-600 dark:text-red-500 mb-2 flex items-center gap-2"><AlertTriangle size={20} /> Danger Zone</h2>
                 <button onClick={() => setNukeModalOpen(true)} className="bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-8 rounded-xl shadow-sm mt-4 transition-colors focus:ring-4 focus:ring-red-500/20">Execute Factory Reset</button>

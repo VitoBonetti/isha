@@ -1,10 +1,26 @@
+from google.cloud import bigquery
+from datetime import datetime, timezone
 import os
 import re
-from datetime import datetime
 
-# Automatically create a 'logs' directory inside the backend folder
-LOGS_DIR = os.path.join(os.path.dirname(__file__), "logs")
-os.makedirs(LOGS_DIR, exist_ok=True)
+_cached_bq_client = None
+
+
+PROJECT_ID = os.environ.get("GCP_PROJECT_ID")
+if not PROJECT_ID and os.environ.get("ENV") != "local":
+    raise EnvironmentError("GCP_PROJECT_ID environment variable is not set.")
+
+DATASET_ID = os.environ.get("DATASET_ID")
+if not DATASET_ID and os.environ.get("ENV") != "local":
+    raise EnvironmentError("DATASET_ID environment variable is not set.")
+
+TABLE_ID = os.environ.get("TABLE_ID")
+if not TABLE_ID and os.environ.get("ENV") != "local":
+    raise EnvironmentError("TABLE_ID environment variable is not set.")
+
+LOCATION = os.environ.get("LOCATION")
+if not LOCATION and os.environ.get("ENV") != "local":
+    raise EnvironmentError("LOCATION environment variable is not set.")
 
 
 def sanitize_details(details: str) -> str:
@@ -12,6 +28,7 @@ def sanitize_details(details: str) -> str:
     if not details:
         return details
 
+    # Patterns to redact: passwords, secrets, and JWT-like strings
     patterns = [
         (r'(password["\s:=]+)["\']?([^"\'\s,]+)["\']?', r'\1[REDACTED]'),
         (r'(secret["\s:=]+)["\']?([^"\'\s,]+)["\']?', r'\1[REDACTED]'),
@@ -25,20 +42,128 @@ def sanitize_details(details: str) -> str:
     return sanitized
 
 
-def log_audit_event(user_id: str, role: str, action: str, resource_type: str, resource_id: str = None,
-                    details: str = None):
-    """Appends an event to the daily log file."""
-    today = datetime.now().strftime("%Y-%m-%d")
-    log_filename = os.path.join(LOGS_DIR, f"audit_{today}.txt")
-    timestamp = datetime.now().isoformat()
+def get_bq_client():
+    global _cached_bq_client
 
-    clean_details = sanitize_details(details)
+    # Only try to connect if we are in production (or if you have local ADC set up)
+    if os.environ.get("ENV") == "local":
+        return None
 
-    # Format: [TIMESTAMP] USER_EMAIL | ACTION | RESOURCE | DETAILS
-    log_entry = f"[{timestamp}] ROLE:{role} | USER_ID: {user_id} | ACTION:{action} | RESOURCE:{resource_type} | TARGET:{resource_id} | DETAILS:{clean_details}\n"
+    if _cached_bq_client is not None:
+        return _cached_bq_client
 
     try:
-        with open(log_filename, "a", encoding="utf-8") as f:
-            f.write(log_entry)
+        print("Initializing BigQuery Client for the first time...")
+        _cached_bq_client = bigquery.Client(project=PROJECT_ID)
+        return _cached_bq_client
     except Exception as e:
-        print(f"Failed to write to local audit log: {e}")
+        print(f"Failed to initialize BigQuery Client: {e}")
+        return None
+
+
+def init_audit_log_infrastructure():
+    """
+    Runs on startup: Creates the BigQuery Dataset and Table (with schema) if they don't exist.
+    """
+    client = get_bq_client()
+    if not client:
+        print("Running locally: Skipping BigQuery Infrastructure Setup.")
+        return
+
+    # Create Dataset if not exists
+    dataset_ref = f"{PROJECT_ID}.{DATASET_ID}"
+    dataset = bigquery.Dataset(dataset_ref)
+    dataset.location = LOCATION
+    try:
+        dataset = client.create_dataset(dataset, exists_ok=True)
+        print(f"BigQuery Dataset '{DATASET_ID}' verified/created.")
+    except Exception as e:
+        print(f"Failed to create dataset: {e}")
+
+    # Define the Schema
+    schema = [
+        bigquery.SchemaField("timestamp", "TIMESTAMP", mode="REQUIRED"),
+        bigquery.SchemaField("user_id", "STRING", mode="REQUIRED"),
+        bigquery.SchemaField("role", "STRING", mode="REQUIRED"),
+        bigquery.SchemaField("action", "STRING", mode="REQUIRED"),
+        bigquery.SchemaField("resource_type", "STRING", mode="REQUIRED"),
+        bigquery.SchemaField("resource_id", "STRING", mode="NULLABLE"),
+        bigquery.SchemaField("details", "STRING", mode="NULLABLE"),
+    ]
+
+    # Create Table if not exists
+    table_ref = f"{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}"
+    table = bigquery.Table(table_ref, schema=schema)
+
+    # ENTERPRISE FEATURE: Partition the table by Day to save money on future queries!
+    table.time_partitioning = bigquery.TimePartitioning(
+        type_=bigquery.TimePartitioningType.DAY,
+        field="timestamp",
+    )
+
+    try:
+        client.create_table(table, exists_ok=True)
+        print(f"BigQuery Table '{TABLE_ID}' verified/created.")
+    except Exception as e:
+        print(f"Failed to create table: {e}")
+
+
+def log_audit_event(user_id: str, role: str, action: str, resource_type: str, resource_id: str = None,
+                    details: str = None):
+    """Streams an audit event to BigQuery."""
+    client = get_bq_client()
+    if not client:
+        print(f"[LOCAL AUDIT LOG] ({role}) performed {action} on {resource_type}: {details}")
+        return
+
+    table_ref = f"{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}"
+
+    row_to_insert = [{
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "user_id": str(user_id),
+        "role": str(role),
+        "action": str(action),
+        "resource_type": str(resource_type),
+        "resource_id": str(resource_id) if resource_id else None,
+        "details": sanitize_details(details)
+    }]
+
+    try:
+        errors = client.insert_rows_json(table_ref, row_to_insert)
+        if errors:
+            print(f"BigQuery Insert Errors: {errors}")
+    except Exception as e:
+        print(f"Failed to log to BigQuery: {e}")
+
+
+def fetch_recent_audit_logs(limit: int = 100):
+    """Fetches the most recent audit logs from BigQuery."""
+    client = get_bq_client()
+
+    # If we are running locally without GCP credentials, return a dummy log
+    if not client:
+        return [{
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "role": "emperor",
+            "user_id": "LOCAL_DEV_USER",
+            "action": "LOCAL_DEV_MODE",
+            "resource": "BigQuery",
+            "details": "Running locally. Real logs are only fetched in Production."
+        }]
+
+    query = f"""
+        SELECT timestamp, role, user_id, action, resource_type, resource_id, details
+        FROM `{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}`
+        ORDER BY timestamp DESC
+        LIMIT {limit}
+    """
+
+    try:
+        query_job = client.query(query)
+        results = query_job.result()
+        # Convert BigQuery Row objects to standard Python dictionaries
+        return [dict(row) for row in results]
+    except Exception as e:
+        print(f"Failed to fetch logs from BigQuery: {e}")
+        return []
+

@@ -325,13 +325,27 @@ def update_category(cat_id: str, cat: ServiceCategoryBase, background_tasks: Bac
 @router.delete("/categories/{cat_id}", summary="[Admin Only]")
 def delete_category(cat_id: str, background_tasks: BackgroundTasks,
                     current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
-    service_category_name = cursor.execute('SELECT name FROM service_categories WHERE id=%s', (cat_id,)).fetchone()[0]
-    cursor.execute('DELETE FROM service_categories WHERE id=%s', (cat_id,))
-    cursor.connection.commit()
+    cursor.execute('SELECT name FROM service_categories WHERE id=%s', (cat_id,))
+    row = cursor.fetchone()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Category not found.")
+
+    service_category_name = row[0]
+
+    try:
+        # Delete the category
+        cursor.execute('DELETE FROM service_categories WHERE id=%s', (cat_id,))
+        cursor.connection.commit()
+    except Exception as e:
+        # If there's a Foreign Key constraint (e.g., tests are using this category), this catches it
+        cursor.connection.rollback()
+        raise HTTPException(status_code=400,
+                            detail="Cannot delete this category because it is actively used by tests. Remove it from tests first.")
 
     log_audit_event(
         user_id=str(current_user["id"]),
-        role=current_user["role"],
+        role=current_user.get("role", "admin"),  # Safe fallback
         action="CATEGORY_DELETE",
         resource_type="CATEGORY",
         resource_id=str(cat_id),
@@ -339,7 +353,7 @@ def delete_category(cat_id: str, background_tasks: BackgroundTasks,
     )
 
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
-    return {"message": "Category deleted"}
+    return {"message": "Category deleted successfully"}
 
 
 # --- 4. EVENTS ---

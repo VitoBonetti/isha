@@ -11,7 +11,10 @@ from routers import auth, services, users, regions, countries, assets, tests, bo
 from routers.auth import require_admin, get_google_public_keys
 from database import get_db_connection, run_alembic_migrations
 from websockets_manager import manager
-from audit_logger import log_audit_event
+from audit_logger import log_audit_event, init_audit_log_infrastructure
+
+
+init_audit_log_infrastructure()
 
 # --- LIFESPAN MANAGER (Runs on Cloud Run Boot) ---
 @asynccontextmanager
