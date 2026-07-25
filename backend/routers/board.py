@@ -288,7 +288,7 @@ def create_category(cat: ServiceCategoryCreate, current_user: dict = Depends(req
 
     log_audit_event(
         user_id=str(current_user["id"]),
-        username=current_user["name"],
+        role=current_user["role"],
         action="CATEGORY_CREATE",
         resource_type="CATEGORY",
         details=f"Category {cat.name} created with target goal {cat.target_goal}. Service line ID: {lane_id}",
@@ -310,7 +310,7 @@ def update_category(cat_id: str, cat: ServiceCategoryBase, background_tasks: Bac
 
     log_audit_event(
         user_id=str(current_user["id"]),
-        username=current_user["name"],
+        role=current_user["role"],
         action="CATEGORY_UPDATE",
         resource_type="CATEGORY",
         details=f"Category {cat.name} updated. ID: {cat.service_lane_id}",
@@ -329,7 +329,7 @@ def delete_category(cat_id: str, background_tasks: BackgroundTasks,
 
     log_audit_event(
         user_id=str(current_user["id"]),
-        username=current_user["name"],
+        role=current_user["role"],
         action="CATEGORY_DELETE",
         resource_type="CATEGORY",
         details=f"Category {service_category_name} deleted. ID: {cat_id}",
@@ -382,7 +382,7 @@ def create_event(e: EventCreate, background_tasks: BackgroundTasks,
 
     log_audit_event(
         user_id=str(current_user["id"]),
-        username=current_user["name"],
+        role=current_user["role"],
         action="EVENT_CREATED",
         resource_type="EVENTS",
         details=f"Event {e_type} created. Start:{e.start_date} End:{e.end_date}"
@@ -411,7 +411,7 @@ def update_event(event_id: str, e: EventBase, background_tasks: BackgroundTasks,
 
     log_audit_event(
         user_id=str(current_user["id"]),
-        username=current_user["name"],
+        role=current_user["role"],
         action="EVENT_UPDATED",
         resource_type="EVENTS",
         details=f"Event {event_id} updated."
@@ -435,7 +435,7 @@ def delete_event(event_id: str, background_tasks: BackgroundTasks,
 
     log_audit_event(
         user_id=str(current_user["id"]),
-        username=current_user["name"],
+        role=current_user["role"],
         action="EVENT_DELETE",
         resource_type="EVENTS",
         details=f"Event {event_id} deleted."
@@ -472,7 +472,7 @@ def wipe_system_data(background_tasks: BackgroundTasks,
 
         log_audit_event(
             user_id=str(current_user["id"]),
-            username=current_user["name"],
+            role=current_user["role"],
             action="FACTORY_RESET",
             resource_type="DATABASE",
             details="Administrator successfully wiped all transactional data (Tests, Assignments, Assets)."
@@ -490,8 +490,16 @@ def wipe_system_data(background_tasks: BackgroundTasks,
 
 @router.delete("/system/wipe-secrets", summary="[Admin Only]")
 def wipe_all_secrets(background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+
     cursor.execute("TRUNCATE TABLE secret_notes CASCADE;")
-    log_audit_event(str(current_user["id"]), current_user["name"], "WIPE_SECRETS", "DATABASE", details="Wiped ALL encrypted secure notes.")
-    cursor.connection.commit()
+
+    log_audit_event(
+        user_id=str(current_user["id"]),
+        role=current_user["role"],
+        action="WIPE_SECRETS",
+        resource_type="DATABASE",
+        details="Administrator wiped ALL encrypted secure notes."
+    )
+
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "All secure notes wiped."}

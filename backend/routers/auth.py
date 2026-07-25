@@ -10,6 +10,7 @@ from jose import jwt, JWTError
 from database import get_db_cursor
 from websockets_manager import manager
 from schema import ApiKeyCreate
+from audit_logger import log_audit_event
 
 env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), '.env')
 load_dotenv(env_path)
@@ -149,6 +150,14 @@ def logout(background_tasks: BackgroundTasks, current_user: dict = Depends(get_c
         f'{{"action": "USER_LEFT", "email": "{current_user["email"]}"}}'
     )
 
+    log_audit_event(
+        user_id=str(current_user["id"]),
+        role=current_user["role"],
+        action="LOGOUT",
+        resource_type="USER",
+        details=f"{current_user['id']} has logout."
+    )
+
     #  send the required Google IAP logout URL back to the React frontend.
     return {
         "message": "Successfully logged out of backend.",
@@ -196,6 +205,14 @@ def create_api_key(req: ApiKeyCreate, current_user: dict = Depends(get_current_u
     )
     cursor.connection.commit()
 
+    log_audit_event(
+        user_id=str(current_user["id"]),
+        role=current_user["role"],
+        action="CREATE_API_KEY",
+        resource_type="USER",
+        details=f"{current_user['id']} has create a new API Key."
+    )
+
     return {
         "id": new_id,
         "name": req.name,
@@ -210,7 +227,23 @@ def revoke_api_key(key_id: str, current_user: dict = Depends(get_current_user), 
     """Deletes an API key. Admins can delete any key, users can only delete their own."""
     if current_user['role'] == 'admin':
         cursor.execute("DELETE FROM api_keys WHERE id = %s", (key_id,))
+        log_audit_event(
+            user_id=str(current_user["id"]),
+            role=current_user["role"],
+            action="DELETE_API_KEY",
+            resource_type="USER",
+            details=f"{current_user['role']} with ID: {current_user['id']} delete API Key ID: {key_id}."
+        )
     else:
         cursor.execute("DELETE FROM api_keys WHERE id = %s AND user_id = %s", (key_id, str(current_user['id'])))
+        log_audit_event(
+            user_id=str(current_user["id"]),
+            role=current_user["role"],
+            action="DELETE_ALL_API_KEY",
+            resource_type="USER",
+            details=f"{current_user['role']} with ID: {current_user['id']} delete all API Key with ID: {key_id}."
+        )
     cursor.connection.commit()
+
+
     return {"message": "API Key successfully revoked."}

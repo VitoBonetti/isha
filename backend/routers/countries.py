@@ -6,6 +6,7 @@ from routers.auth import get_current_user, require_admin
 from schema import CountryBase
 import uuid
 from datetime import datetime
+from audit_logger import log_audit_event
 
 
 router = APIRouter(prefix="/api/countries", tags=["Countries"])
@@ -24,6 +25,7 @@ def get_countries(current_user: dict = Depends(get_current_user), cursor = Depen
     """)
     return [{"id": r[0], "code": r[1], "name": r[2], "is_active": r[3], "region_id": r[4], "region_name": r[5]} for r in cursor.fetchall()]
 
+
 @router.post("/", summary="[Admin Only]")
 def create_country(c: CountryBase, current_user: dict = Depends(require_admin), cursor = Depends(get_db_cursor)):
     reg_id = str(c.region_id) if c.region_id else None
@@ -34,6 +36,15 @@ def create_country(c: CountryBase, current_user: dict = Depends(require_admin), 
             (new_country_id, c.code, c.name, reg_id, c.is_active)
         )
         cursor.connection.commit()
+
+        log_audit_event(
+            user_id=str(current_user["id"]),
+            role=current_user["role"],
+            action="COUNTRY_CREATED",
+            resource_type="COUNTRY",
+            details=f"Country {c.name} with ID {new_country_id} has been created in region {reg_id}."
+        )
+
         return {"id": new_country_id, "message": "Country created successfully."}
     except Exception as e:
         cursor.connection.rollback()
@@ -45,6 +56,15 @@ def update_country(country_id: str, c: CountryBase, current_user: dict = Depends
         "UPDATE countries SET code=%s, name=%s, region_id=%s, is_active=%s WHERE id=%s",
         (c.code, c.name, c.region_id, c.is_active, country_id)
     )
+
+    log_audit_event(
+        user_id=str(current_user["id"]),
+        role=current_user["role"],
+        action="COUNTRY_UPDATED",
+        resource_type="COUNTRY",
+        details=f"Country with ID {country_id} has been updated."
+    )
+
     cursor.connection.commit()
     return {"message": "Country updated successfully."}
 
@@ -52,6 +72,15 @@ def update_country(country_id: str, c: CountryBase, current_user: dict = Depends
 def delete_country(country_id: str, current_user: dict = Depends(require_admin), cursor = Depends(get_db_cursor)):
     cursor.execute("DELETE FROM countries WHERE id = %s", (country_id,))
     cursor.connection.commit()
+
+    log_audit_event(
+        user_id=str(current_user["id"]),
+        role=current_user["role"],
+        action="COUNTRY_DELETED",
+        resource_type="COUNTRY",
+        details=f"Country with ID {country_id} has been deleted."
+    )
+
     return {"message": "Country deleted."}
 
 

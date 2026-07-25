@@ -25,7 +25,7 @@ def sanitize_details(details: str) -> str:
     return sanitized
 
 
-def log_audit_event(user_id: str, username: str, action: str, resource_type: str, resource_id: str = None,
+def log_audit_event(user_id: str, role: str, action: str, resource_type: str, resource_id: str = None,
                     details: str = None):
     """Appends an event to the daily log file."""
     today = datetime.now().strftime("%Y-%m-%d")
@@ -35,7 +35,7 @@ def log_audit_event(user_id: str, username: str, action: str, resource_type: str
     clean_details = sanitize_details(details)
 
     # Format: [TIMESTAMP] USER_EMAIL | ACTION | RESOURCE | DETAILS
-    log_entry = f"[{timestamp}] USER:{username} | ACTION:{action} | RESOURCE:{resource_type} | TARGET:{resource_id} | DETAILS:{clean_details}\n"
+    log_entry = f"[{timestamp}] ROLE:{role} | USER_ID: {user_id} | ACTION:{action} | RESOURCE:{resource_type} | TARGET:{resource_id} | DETAILS:{clean_details}\n"
 
     try:
         with open(log_filename, "a", encoding="utf-8") as f:

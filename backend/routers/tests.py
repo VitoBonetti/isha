@@ -83,7 +83,16 @@ def create_test(t: TestCreate, background_tasks: BackgroundTasks,
             cursor.execute('INSERT INTO test_assets (test_id, asset_id) VALUES (%s, %s)', (new_id, str(asset_id)))
 
     log_test_history(cursor, new_id, current_user['id'], "CREATED", f"Test manually created.")
+
     cursor.connection.commit()
+
+    log_audit_event(
+        user_id=str(current_user["id"]),
+        role=current_user["role"],
+        action="TEST_CREATED",
+        resource_type="TESTS",
+        details=f"Test {t.name} with ID: {new_test_id} was created. Service Lane ID: {t.service_lane_id}."
+    )
 
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
@@ -140,6 +149,14 @@ def update_test(test_id: str, t: TestBase, background_tasks: BackgroundTasks,
                      f"Settings updated: {t.credits_per_week}cr, {t.duration_weeks}wks.")
     cursor.connection.commit()
 
+    log_audit_event(
+        user_id=str(current_user["id"]),
+        role=current_user["role"],
+        action="TEST_UPDATED",
+        resource_type="TESTS",
+        details=f"Test with ID: {test_id} was updated."
+    )
+
     # 2. Trigger Folder Relocation if a folder exists
     if old_data and old_data[0]:
         folder_id = old_data[0]
@@ -174,6 +191,14 @@ def delete_test(test_id: str, background_tasks: BackgroundTasks,
     cursor.execute('DELETE FROM tests WHERE id = %s', (test_id,))
     cursor.connection.commit()
 
+    log_audit_event(
+        user_id=str(current_user["id"]),
+        role=current_user["role"],
+        action="TEST_DELETED",
+        resource_type="TESTS",
+        details=f"Test with ID: {test_id} was deleted."
+    )
+
     if test_data and test_data[1]:
         test_name, folder_id = test_data[0], test_data[1]
         background_tasks.add_task(background_archive_workspace, folder_id, test_name)
@@ -184,7 +209,7 @@ def delete_test(test_id: str, background_tasks: BackgroundTasks,
 
 
 # --- BULK GENERATION ---
-def process_bulk_tests_background(asset_ids: List[UUID4], user_id: str):
+def process_bulk_tests_background(asset_ids: List[UUID4], user_id: str, user_name: str,):
     tests_to_provision = []
 
     with db_cursor_context() as cursor:
@@ -219,6 +244,14 @@ def process_bulk_tests_background(asset_ids: List[UUID4], user_id: str):
                  VALUES (%s, %s, %s, %s, %s, 'NOT_PLANNED') RETURNING id
             ''', (new_test_id, asset_name, str(service_lane_id), credits, duration))
 
+            log_audit_event(
+                user_id=str(user_id),
+                username=str(user_name),
+                action="TEST_CREATED",
+                resource_type="TESTS",
+                details=f"Test {asset_name} with ID: {new_test_id} was created. Service Lane ID: {service_lane_id} in a Bulk Action."
+            )
+
             cursor.execute('INSERT INTO test_assets (test_id, asset_id) VALUES (%s, %s)', (new_test_id, str(asset_id)))
             log_test_history(cursor, new_test_id, user_id, "GENERATED", f"Test generated from Asset Pool.")
 
@@ -239,7 +272,7 @@ def process_bulk_tests_background(asset_ids: List[UUID4], user_id: str):
 @router.post("/bulk", summary="[Admin Only]")
 def bulk_create_tests(req: BulkTestCreate, background_tasks: BackgroundTasks,
                       current_user: dict = Depends(require_admin)):
-    background_tasks.add_task(process_bulk_tests_background, req.asset_ids, str(current_user['id']))
+    background_tasks.add_task(process_bulk_tests_background, req.asset_ids, str(current_user['id']), str(current_user['name']))
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": f"Generating {len(req.asset_ids)} tests from active pool."}
 
@@ -282,6 +315,14 @@ def schedule_test(test_id: str, schedule: TestSchedule, background_tasks: Backgr
                      f"Scheduled for Week {schedule.start_week}, {schedule.start_year}.")
     cursor.connection.commit()
 
+    log_audit_event(
+        user_id=str(current_user["id"]),
+        role=current_user["role"],
+        action="TEST_SCHEDULED",
+        resource_type="TESTS",
+        details=f"Test with ID: {test_id} was scheduled for Week {schedule.start_week}, {schedule.start_year}."
+    )
+
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Test scheduled on the board."}
 
@@ -306,6 +347,15 @@ def unschedule_test(test_id: str, background_tasks: BackgroundTasks,
 
     log_test_history(cursor, test_id, current_user['id'], "UNSCHEDULED",
                      "Test removed from calendar and returned to backlog.")
+
+    log_audit_event(
+        user_id=str(current_user["id"]),
+        role=current_user["role"],
+        action="TEST_UNSCHEDULED",
+        resource_type="TESTS",
+        details=f"Test with ID: {test_id} was unscheduled."
+    )
+
     cursor.connection.commit()
 
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')

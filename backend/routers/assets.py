@@ -64,6 +64,15 @@ def create_asset_type(at: AssetTypeBase, current_user: dict = Depends(require_ad
     try:
         cursor.execute("INSERT INTO asset_types (id, name) VALUES (%s, %s)", (new_id, at.name))
         cursor.connection.commit()
+
+        log_audit_event(
+            user_id=str(current_user["id"]),
+            role=current_user["role"],
+            action="ASSET_TYPE_CREATE",
+            resource_type="ASSETS",
+            details=f"Asset Type {at.name} created with ID: {new_id}",
+        )
+
         return {"id": new_id, "message": "Asset Type created."}
     except Exception as e:
         cursor.connection.rollback()
@@ -73,6 +82,15 @@ def create_asset_type(at: AssetTypeBase, current_user: dict = Depends(require_ad
 @router.put("/types/{type_id}", summary="[Admin Only]")
 def update_asset_type(type_id: str, at: AssetTypeBase, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     cursor.execute("UPDATE asset_types SET name=%s WHERE id=%s", (at.name, type_id))
+
+    log_audit_event(
+        user_id=str(current_user["id"]),
+        role=current_user["role"],
+        action="ASSET_TYPE_UPDATE",
+        resource_type="ASSETS",
+        details=f"Asset Type {type_id} has been updated as {at.name} ",
+    )
+
     cursor.connection.commit()
     return {"message": "Asset Type updated."}
 
@@ -81,6 +99,15 @@ def update_asset_type(type_id: str, at: AssetTypeBase, current_user: dict = Depe
 def delete_asset_type(type_id: str, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     # Note: Because of CASCADE rules in DB, this will delete all associated Raw Assets.
     cursor.execute("DELETE FROM asset_types WHERE id = %s", (type_id,))
+
+    log_audit_event(
+        user_id=str(current_user["id"]),
+        role=current_user["role"],
+        action="ASSET_TYPE_DELETED",
+        resource_type="ASSETS",
+        details=f"Asset Type {type_id} has been Deleted ",
+    )
+
     cursor.connection.commit()
     return {"message": "Asset Type deleted."}
 
@@ -195,6 +222,15 @@ def create_manual_raw_asset(asset: RawAssetCreate, background_tasks: BackgroundT
         asset.confidentiality_rating, asset.integrity_rating, asset.availability_rating,
         c_id, s_id, cat_id, at_id, asset.facing_internet, asset.duplicate_allowed
     ))
+
+    log_audit_event(
+        user_id=str(current_user["id"]),
+        role=current_user["role"],
+        action="RAW_ASSET_CREATED",
+        resource_type="RAW_ASSETS",
+        details=f"Asset {asset.name} has been created with ID: {new_raw_assets_id} ",
+    )
+
     new_id = cursor.fetchone()[0]
 
     # Standardized Creation Log
@@ -315,6 +351,14 @@ def update_raw_asset(raw_id: str, asset: RawAssetCreate, background_tasks: Backg
         c_id, s_id, cat_id, at_id, asset.facing_internet, asset.duplicate_allowed, raw_id
     ))
 
+    log_audit_event(
+        user_id=str(current_user["id"]),
+        role=current_user["role"],
+        action="RAW_ASSET_UPDATED",
+        resource_type="RAW_ASSETS",
+        details=f"Asset {asset.name} has been updated. ID: {raw_id} ",
+    )
+
     # 4. Supercharged Diff Engine
     changes = []
     if old_name != asset.name: changes.append(f"Name: '{old_name}' ➔ '{asset.name}'")
@@ -345,6 +389,15 @@ def delete_raw_asset(raw_id: str, background_tasks: BackgroundTasks,
                      current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     cursor.execute("DELETE FROM raw_assets WHERE id = %s", (raw_id,))
     cursor.connection.commit()
+
+    log_audit_event(
+        user_id=str(current_user["id"]),
+        role=current_user["role"],
+        action="RAW_ASSET_DELETED",
+        resource_type="RAW_ASSETS",
+        details=f"Asset with ID: {raw_id}  has been deleted.",
+    )
+
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
     return {"message": "Asset permanently deleted"}
 
@@ -354,7 +407,17 @@ def bulk_delete_raw_assets(req: BulkAssetRequest, background_tasks: BackgroundTa
                            current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     for raw_id in req.raw_asset_ids:
         cursor.execute("DELETE FROM raw_assets WHERE id = %s", (str(raw_id),))
+
+        log_audit_event(
+            user_id=str(current_user["id"]),
+            role=current_user["role"],
+            action="RAW_ASSET_BULK_DELETED",
+            resource_type="RAW_ASSETS",
+            details=f"Asset with ID {raw_id} has been deleted in Bulk Action.",
+        )
+
     cursor.connection.commit()
+
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
     return {"message": f"Successfully deleted {len(req.raw_asset_ids)} assets."}
 
@@ -500,7 +563,7 @@ def process_excel_import_sync(contents: bytes, filename: str, current_user: dict
 
             if failed_items:
                 log_audit_event(
-                    user_id=str(current_user["id"]), username=current_user["name"],
+                    user_id=str(current_user["id"]), role=current_user["role"],
                     action="IMPORT_WARNINGS", resource_type="ASSETS",
                     details=f"Failed to import {len(failed_items)} rows: {', '.join(failed_items[:10])}{'...' if len(failed_items) > 10 else ''}"
                 )
@@ -563,6 +626,14 @@ def promote_raw_assets_to_pool(req: BulkAssetRequest, background_tasks: Backgrou
             VALUES (%s, %s, %s, %s, %s, %s, %s)
         """, (new_promote_id, str(raw_id), raw_data[0], raw_data[1], raw_data[2], raw_data[3], raw_data[4]))
 
+        log_audit_event(
+            user_id=str(current_user["id"]),
+            role=current_user["role"],
+            action="RAW_ASSET_PROMOTED",
+            resource_type="RAW_ASSETS",
+            details=f"Asset {raw_data[0]} with ID: {raw_id} has been promoted. Test ID: {new_promote_id} ",
+        )
+
         # Standardized Promotion Log
         insert_asset_history(cursor, str(raw_id), str(current_user["id"]), "PROMOTED",
                              "Asset moved to the Active testing pool.")
@@ -601,6 +672,14 @@ def bulk_update_service_lane(req: BulkServiceUpdateRequest, background_tasks: Ba
         # 3. Log it in the Asset's History
         insert_asset_history(cursor, raw_asset_id, str(current_user["id"]), "UPDATED",
                              f"Service Lane bulk updated to '{s_name}'.")
+
+        log_audit_event(
+            user_id=str(current_user["id"]),
+            role=current_user["role"],
+            action="ASSET_UPDATED_SERVICE_LANE_BULK",
+            resource_type="ASSETS",
+            details=f"Service Lane with ID: {service_id} has been set to Asset ID: {asset_id} in a Bulk Action. ",
+        )
 
     cursor.connection.commit()
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
@@ -652,5 +731,14 @@ def remove_from_active_pool(asset_id: str, background_tasks: BackgroundTasks,
                             current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     cursor.execute("DELETE FROM assets WHERE id = %s", (asset_id,))
     cursor.connection.commit()
+
+    log_audit_event(
+        user_id=str(current_user["id"]),
+        role=current_user["role"],
+        action="ASSET_REMOVE_FROM_ACTIVE_POOL",
+        resource_type="ASSETS",
+        details=f"Asset with ID: {asset_id} has been removed from active pool. ",
+    )
+
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
     return {"message": "Asset returned to raw data pool."}

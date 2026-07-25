@@ -4,6 +4,7 @@ from routers.auth import require_admin, get_current_user
 from schema import ServiceLaneBase
 from websockets_manager import manager
 import uuid
+from audit_logger import log_audit_event
 
 router = APIRouter(prefix="/api/services", tags=["Services"])
 
@@ -50,6 +51,15 @@ def create_service(s: ServiceLaneBase, background_tasks: BackgroundTasks,
          s.default_duration_weeks, s.target_goal, s.display_order, s.is_active, s.auto_provision_workspace)
     )
     cursor.connection.commit()
+
+    log_audit_event(
+        user_id=str(current_user["id"]),
+        role=current_user["role"],
+        action="SERVICES_LANES_CREATED",
+        resource_type="SERVICES_LANES",
+        details=f"Service Lane {s.name} with ID: {new_service_id} was created."
+    )
+
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Service lane created or restored", "id": new_service_id}
 
@@ -66,6 +76,15 @@ def update_service(service_id: str, s: ServiceLaneBase, background_tasks: Backgr
          s.default_duration_weeks, s.target_goal, s.display_order, s.is_active, s.auto_provision_workspace, service_id)
     )
     cursor.connection.commit()
+
+    log_audit_event(
+        user_id=str(current_user["id"]),
+        role=current_user["role"],
+        action="SERVICES_LANES_UPDATED",
+        resource_type="SERVICES_LANES",
+        details=f"Service Lane  with ID: {service_id} was updated."
+    )
+
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Service lane updated"}
 
@@ -75,6 +94,14 @@ def delete_service(service_id: str, background_tasks: BackgroundTasks,
 
     cursor.execute('DELETE FROM services_lanes WHERE id = %s', (service_id,))
     cursor.connection.commit()
+
+    log_audit_event(
+        user_id=str(current_user["id"]),
+        role=current_user["role"],
+        action="SERVICES_LANES_DELETED",
+        resource_type="SERVICES_LANES",
+        details=f"Service Lane  with ID: {service_id} was deleted."
+    )
 
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Service lane deleted"}
