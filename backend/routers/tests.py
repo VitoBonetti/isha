@@ -91,6 +91,7 @@ def create_test(t: TestCreate, background_tasks: BackgroundTasks,
         role=current_user["role"],
         action="TEST_CREATED",
         resource_type="TESTS",
+        resource_id=str(new_test_id),
         details=f"Test {t.name} with ID: {new_test_id} was created. Service Lane ID: {t.service_lane_id}."
     )
 
@@ -154,6 +155,7 @@ def update_test(test_id: str, t: TestBase, background_tasks: BackgroundTasks,
         role=current_user["role"],
         action="TEST_UPDATED",
         resource_type="TESTS",
+        resource_id=str(test_id),
         details=f"Test with ID: {test_id} was updated."
     )
 
@@ -196,6 +198,7 @@ def delete_test(test_id: str, background_tasks: BackgroundTasks,
         role=current_user["role"],
         action="TEST_DELETED",
         resource_type="TESTS",
+        resource_id=str(test_id),
         details=f"Test with ID: {test_id} was deleted."
     )
 
@@ -249,6 +252,7 @@ def process_bulk_tests_background(asset_ids: List[UUID4], user_id: str, user_nam
                 username=str(user_name),
                 action="TEST_CREATED",
                 resource_type="TESTS",
+                resource_id=str(new_test_id),
                 details=f"Test {asset_name} with ID: {new_test_id} was created. Service Lane ID: {service_lane_id} in a Bulk Action."
             )
 
@@ -320,6 +324,7 @@ def schedule_test(test_id: str, schedule: TestSchedule, background_tasks: Backgr
         role=current_user["role"],
         action="TEST_SCHEDULED",
         resource_type="TESTS",
+        resource_id=str(test_id),
         details=f"Test with ID: {test_id} was scheduled for Week {schedule.start_week}, {schedule.start_year}."
     )
 
@@ -353,6 +358,7 @@ def unschedule_test(test_id: str, background_tasks: BackgroundTasks,
         role=current_user["role"],
         action="TEST_UNSCHEDULED",
         resource_type="TESTS",
+        resource_id=str(test_id),
         details=f"Test with ID: {test_id} was unscheduled."
     )
 

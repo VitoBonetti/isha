@@ -70,6 +70,7 @@ def create_asset_type(at: AssetTypeBase, current_user: dict = Depends(require_ad
             role=current_user["role"],
             action="ASSET_TYPE_CREATE",
             resource_type="ASSETS",
+            resource_id=str(new_id),
             details=f"Asset Type {at.name} created with ID: {new_id}",
         )
 
@@ -88,6 +89,7 @@ def update_asset_type(type_id: str, at: AssetTypeBase, current_user: dict = Depe
         role=current_user["role"],
         action="ASSET_TYPE_UPDATE",
         resource_type="ASSETS",
+        resource_id=str(type_id),
         details=f"Asset Type {type_id} has been updated as {at.name} ",
     )
 
@@ -105,6 +107,7 @@ def delete_asset_type(type_id: str, current_user: dict = Depends(require_admin),
         role=current_user["role"],
         action="ASSET_TYPE_DELETED",
         resource_type="ASSETS",
+        resource_id=str(type_id),
         details=f"Asset Type {type_id} has been Deleted ",
     )
 
@@ -228,6 +231,7 @@ def create_manual_raw_asset(asset: RawAssetCreate, background_tasks: BackgroundT
         role=current_user["role"],
         action="RAW_ASSET_CREATED",
         resource_type="RAW_ASSETS",
+        resource_id=str(new_raw_assets_id),
         details=f"Asset {asset.name} has been created with ID: {new_raw_assets_id} ",
     )
 
@@ -356,6 +360,7 @@ def update_raw_asset(raw_id: str, asset: RawAssetCreate, background_tasks: Backg
         role=current_user["role"],
         action="RAW_ASSET_UPDATED",
         resource_type="RAW_ASSETS",
+        resource_id=str(raw_id),
         details=f"Asset {asset.name} has been updated. ID: {raw_id} ",
     )
 
@@ -395,6 +400,7 @@ def delete_raw_asset(raw_id: str, background_tasks: BackgroundTasks,
         role=current_user["role"],
         action="RAW_ASSET_DELETED",
         resource_type="RAW_ASSETS",
+        resource_id=str(raw_id),
         details=f"Asset with ID: {raw_id}  has been deleted.",
     )
 
@@ -413,6 +419,7 @@ def bulk_delete_raw_assets(req: BulkAssetRequest, background_tasks: BackgroundTa
             role=current_user["role"],
             action="RAW_ASSET_BULK_DELETED",
             resource_type="RAW_ASSETS",
+            resource_id=str(raw_id),
             details=f"Asset with ID {raw_id} has been deleted in Bulk Action.",
         )
 
@@ -564,7 +571,9 @@ def process_excel_import_sync(contents: bytes, filename: str, current_user: dict
             if failed_items:
                 log_audit_event(
                     user_id=str(current_user["id"]), role=current_user["role"],
-                    action="IMPORT_WARNINGS", resource_type="ASSETS",
+                    action="IMPORT_WARNINGS",
+                    resource_type="ASSETS",
+                    resource_id="N/A",
                     details=f"Failed to import {len(failed_items)} rows: {', '.join(failed_items[:10])}{'...' if len(failed_items) > 10 else ''}"
                 )
 
@@ -631,6 +640,7 @@ def promote_raw_assets_to_pool(req: BulkAssetRequest, background_tasks: Backgrou
             role=current_user["role"],
             action="RAW_ASSET_PROMOTED",
             resource_type="RAW_ASSETS",
+            resource_id=str(raw_id),
             details=f"Asset {raw_data[0]} with ID: {raw_id} has been promoted. Test ID: {new_promote_id} ",
         )
 
@@ -678,6 +688,7 @@ def bulk_update_service_lane(req: BulkServiceUpdateRequest, background_tasks: Ba
             role=current_user["role"],
             action="ASSET_UPDATED_SERVICE_LANE_BULK",
             resource_type="ASSETS",
+            resource_id=str(asset_id),
             details=f"Service Lane with ID: {service_id} has been set to Asset ID: {asset_id} in a Bulk Action. ",
         )
 
@@ -737,6 +748,7 @@ def remove_from_active_pool(asset_id: str, background_tasks: BackgroundTasks,
         role=current_user["role"],
         action="ASSET_REMOVE_FROM_ACTIVE_POOL",
         resource_type="ASSETS",
+        resource_id=str(asset_id),
         details=f"Asset with ID: {asset_id} has been removed from active pool. ",
     )
 

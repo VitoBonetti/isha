@@ -27,6 +27,7 @@ def create_location(loc: LocationBase, current_user: dict = Depends(require_admi
             role=current_user["role"],
             action="LOCATION_CREATED",
             resource_type="LOCATIONS",
+            resource_id=str(new_location_id),
             details=f"Location {loc.name} with ID: {new_location_id} was created."
         )
 
@@ -46,6 +47,7 @@ def update_location(loc_id: str, loc: LocationBase, current_user: dict = Depends
         role=current_user["role"],
         action="LOCATION_UPDATED",
         resource_type="LOCATIONS",
+        resource_id=str(loc_id),
         details=f"Location with ID: {loc_id} was updated."
     )
 
@@ -62,6 +64,7 @@ def delete_location(loc_id: str, current_user: dict = Depends(require_admin), cu
         role=current_user["role"],
         action="LOCATION_DELETED",
         resource_type="LOCATIONS",
+        resource_id=str(loc_id),
         details=f"Location with ID: {loc_id} was deleted."
     )
 

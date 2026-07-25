@@ -291,6 +291,7 @@ def create_category(cat: ServiceCategoryCreate, current_user: dict = Depends(req
         role=current_user["role"],
         action="CATEGORY_CREATE",
         resource_type="CATEGORY",
+        resource_id=str(new_category_id),
         details=f"Category {cat.name} created with target goal {cat.target_goal}. Service line ID: {lane_id}",
     )
 
@@ -313,6 +314,7 @@ def update_category(cat_id: str, cat: ServiceCategoryBase, background_tasks: Bac
         role=current_user["role"],
         action="CATEGORY_UPDATE",
         resource_type="CATEGORY",
+        resource_id=str(cat_id),
         details=f"Category {cat.name} updated. ID: {cat.service_lane_id}",
     )
 
@@ -332,6 +334,7 @@ def delete_category(cat_id: str, background_tasks: BackgroundTasks,
         role=current_user["role"],
         action="CATEGORY_DELETE",
         resource_type="CATEGORY",
+        resource_id=str(cat_id),
         details=f"Category {service_category_name} deleted. ID: {cat_id}",
     )
 
@@ -385,6 +388,7 @@ def create_event(e: EventCreate, background_tasks: BackgroundTasks,
         role=current_user["role"],
         action="EVENT_CREATED",
         resource_type="EVENTS",
+        resource_id=str(new_event_id),
         details=f"Event {e_type} created. Start:{e.start_date} End:{e.end_date}"
     )
 
@@ -414,6 +418,7 @@ def update_event(event_id: str, e: EventBase, background_tasks: BackgroundTasks,
         role=current_user["role"],
         action="EVENT_UPDATED",
         resource_type="EVENTS",
+        resource_id=str(event_id),
         details=f"Event {event_id} updated."
     )
 
@@ -438,6 +443,7 @@ def delete_event(event_id: str, background_tasks: BackgroundTasks,
         role=current_user["role"],
         action="EVENT_DELETE",
         resource_type="EVENTS",
+        resource_id=str(event_id),
         details=f"Event {event_id} deleted."
     )
 
@@ -475,6 +481,7 @@ def wipe_system_data(background_tasks: BackgroundTasks,
             role=current_user["role"],
             action="FACTORY_RESET",
             resource_type="DATABASE",
+            resource_id="N/A",
             details="Administrator successfully wiped all transactional data (Tests, Assignments, Assets)."
         )
 
@@ -498,6 +505,7 @@ def wipe_all_secrets(background_tasks: BackgroundTasks, current_user: dict = Dep
         role=current_user["role"],
         action="WIPE_SECRETS",
         resource_type="DATABASE",
+        resource_id="N/A",
         details="Administrator wiped ALL encrypted secure notes."
     )
 

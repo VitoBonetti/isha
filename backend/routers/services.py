@@ -57,6 +57,7 @@ def create_service(s: ServiceLaneBase, background_tasks: BackgroundTasks,
         role=current_user["role"],
         action="SERVICES_LANES_CREATED",
         resource_type="SERVICES_LANES",
+        resource_id=str(new_service_id),
         details=f"Service Lane {s.name} with ID: {new_service_id} was created."
     )
 
@@ -82,6 +83,7 @@ def update_service(service_id: str, s: ServiceLaneBase, background_tasks: Backgr
         role=current_user["role"],
         action="SERVICES_LANES_UPDATED",
         resource_type="SERVICES_LANES",
+        resource_id=str(service_id),
         details=f"Service Lane  with ID: {service_id} was updated."
     )
 
@@ -100,6 +102,7 @@ def delete_service(service_id: str, background_tasks: BackgroundTasks,
         role=current_user["role"],
         action="SERVICES_LANES_DELETED",
         resource_type="SERVICES_LANES",
+        resource_id=str(service_id),
         details=f"Service Lane  with ID: {service_id} was deleted."
     )
 

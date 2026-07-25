@@ -38,6 +38,7 @@ def create_region(r: RegionBase, current_user: dict = Depends(require_admin), cu
             role=current_user["role"],
             action="REGION_CREATED",
             resource_type="REGIONS",
+            resource_id=str(new_region_id),
             details=f"Region {r.name} with ID: {new_region_id} was created."
         )
 
@@ -58,6 +59,7 @@ def update_region(region_id: str, r: RegionBase, current_user: dict = Depends(re
         role=current_user["role"],
         action="REGION_UPDATED",
         resource_type="REGIONS",
+        resource_id=str(region_id),
         details=f"Region with ID: {region_id} was updated."
     )
 
@@ -74,6 +76,7 @@ def delete_region(region_id: str, current_user: dict = Depends(require_admin), c
         role=current_user["role"],
         action="REGION_DELETED",
         resource_type="REGIONS",
+        resource_id=str(region_id),
         details=f"Region with ID: {region_id} was deleted."
     )
 

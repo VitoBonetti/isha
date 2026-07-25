@@ -66,6 +66,7 @@ def create_user(u: UserCreate, background_tasks: BackgroundTasks,
         role=current_user["role"],
         action="LOCATION_CREATED",
         resource_type="USER",
+        resource_id=str(new_user_id),
         details=f"User with ID: {new_user_id} was created."
     )
 
@@ -109,6 +110,7 @@ def delete_user(user_id: str, background_tasks: BackgroundTasks,
             role=current_user["role"],
             action="LOCATION_DELETED",
             resource_type="USER",
+            resource_id=str(user_id),
             details=f"User with ID: {user_id} was deleted."
         )
 
@@ -158,6 +160,7 @@ def update_user(user_id: str, u: UserBase, background_tasks: BackgroundTasks,
         role=current_user["role"],
         action="LOCATION_UPDATED",
         resource_type="USER",
+        resource_id=str(user_id),
         details=f"User with ID: {user_id} was updated."
     )
 

@@ -155,6 +155,7 @@ def logout(background_tasks: BackgroundTasks, current_user: dict = Depends(get_c
         role=current_user["role"],
         action="LOGOUT",
         resource_type="USER",
+        resource_id=str(current_user["id"]),
         details=f"{current_user['id']} has logout."
     )
 
@@ -210,6 +211,7 @@ def create_api_key(req: ApiKeyCreate, current_user: dict = Depends(get_current_u
         role=current_user["role"],
         action="CREATE_API_KEY",
         resource_type="USER",
+        resource_id=str(new_id),
         details=f"{current_user['id']} has create a new API Key."
     )
 
@@ -232,6 +234,7 @@ def revoke_api_key(key_id: str, current_user: dict = Depends(get_current_user), 
             role=current_user["role"],
             action="DELETE_API_KEY",
             resource_type="USER",
+            resource_id=f"User ID: {current_user["id"]} - API Key ID: {key_id} ",
             details=f"{current_user['role']} with ID: {current_user['id']} delete API Key ID: {key_id}."
         )
     else:
@@ -241,6 +244,7 @@ def revoke_api_key(key_id: str, current_user: dict = Depends(get_current_user), 
             role=current_user["role"],
             action="DELETE_ALL_API_KEY",
             resource_type="USER",
+            resource_id=f"User ID: {current_user["id"]} - API Key ID: {key_id} ",
             details=f"{current_user['role']} with ID: {current_user['id']} delete all API Key with ID: {key_id}."
         )
     cursor.connection.commit()

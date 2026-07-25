@@ -42,6 +42,7 @@ def create_country(c: CountryBase, current_user: dict = Depends(require_admin), 
             role=current_user["role"],
             action="COUNTRY_CREATED",
             resource_type="COUNTRY",
+            resource_id=str(new_country_id),
             details=f"Country {c.name} with ID {new_country_id} has been created in region {reg_id}."
         )
 
@@ -62,6 +63,7 @@ def update_country(country_id: str, c: CountryBase, current_user: dict = Depends
         role=current_user["role"],
         action="COUNTRY_UPDATED",
         resource_type="COUNTRY",
+        resource_id=str(country_id),
         details=f"Country with ID {country_id} has been updated."
     )
 
@@ -78,6 +80,7 @@ def delete_country(country_id: str, current_user: dict = Depends(require_admin),
         role=current_user["role"],
         action="COUNTRY_DELETED",
         resource_type="COUNTRY",
+        resource_id=str(country_id),
         details=f"Country with ID {country_id} has been deleted."
     )
 

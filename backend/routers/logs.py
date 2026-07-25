@@ -3,6 +3,7 @@ from fastapi.responses import FileResponse
 import os
 from pathlib import Path
 from routers.auth import require_admin
+from audit_logger import log_audit_event
 
 router = APIRouter(prefix="/api/system/logs", tags=["System Logs"])
 LOGS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs")
@@ -45,6 +46,16 @@ def list_audit_logs(current_user: dict = Depends(require_admin)):
 def download_audit_log(filename: str, current_user: dict = Depends(require_admin)):
     """Downloads a specific daily log file."""
     file_path = get_safe_log_path(filename)
+
+    log_audit_event(
+        user_id=str(current_user["id"]),
+        role=current_user["role"],
+        action="LOGS_DOWNLOADED",
+        resource_type="LOGS",
+        resource_id="N/A",
+        details=f"Logs {filename} downloaded."
+    )
+
     return FileResponse(path=str(file_path), filename=filename, media_type="text/plain")
 
 
@@ -54,6 +65,16 @@ def delete_audit_log(filename: str, current_user: dict = Depends(require_admin))
     file_path = get_safe_log_path(filename)
     try:
         os.remove(file_path)
+
+        log_audit_event(
+            user_id=str(current_user["id"]),
+            role=current_user["role"],
+            action="LOGS_DELETED",
+            resource_type="LOGS",
+            resource_id="N/A",
+            details=f"Logs {filename} deleted."
+        )
+
         return {"message": "Log file deleted."}
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete file.")
