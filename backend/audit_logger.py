@@ -22,6 +22,8 @@ LOCATION = os.environ.get("LOCATION")
 if not LOCATION and os.environ.get("ENV") != "local":
     raise EnvironmentError("LOCATION environment variable is not set.")
 
+TABLE_REF = f"{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}"
+
 
 def sanitize_details(details: str) -> str:
     """Removes sensitive patterns like passwords or tokens from log strings."""
@@ -92,8 +94,7 @@ def init_audit_log_infrastructure():
     ]
 
     # Create Table if not exists
-    table_ref = f"{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}"
-    table = bigquery.Table(table_ref, schema=schema)
+    table = bigquery.Table(TABLE_REF, schema=schema)
 
     # ENTERPRISE FEATURE: Partition the table by Day to save money on future queries!
     table.time_partitioning = bigquery.TimePartitioning(
@@ -116,8 +117,6 @@ def log_audit_event(user_id: str, role: str, action: str, resource_type: str, re
         print(f"[LOCAL AUDIT LOG] ({role}) performed {action} on {resource_type}: {details}")
         return
 
-    table_ref = f"{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}"
-
     row_to_insert = [{
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "user_id": str(user_id),
@@ -129,7 +128,7 @@ def log_audit_event(user_id: str, role: str, action: str, resource_type: str, re
     }]
 
     try:
-        errors = client.insert_rows_json(table_ref, row_to_insert)
+        errors = client.insert_rows_json(TABLE_REF, row_to_insert)
         if errors:
             print(f"BigQuery Insert Errors: {errors}")
     except Exception as e:

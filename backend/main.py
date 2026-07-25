@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from contextlib import asynccontextmanager
 import traceback
 import os
@@ -200,3 +201,32 @@ def ping_database(current_user: dict = Depends(require_admin)):
 @app.get("/api/health", include_in_schema=False)
 def health_check():
     return {"status": "online", "system": "Mario"}
+
+
+#  Automatically log HTTP errors (400, 401, 403, 404, etc.)
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    # We only care about logging client and server errors, not standard redirects
+    if exc.status_code >= 400:
+        log_audit_event(
+            user_id="SYSTEM",
+            role="auto_logger",
+            action=f"HTTP_{exc.status_code}",
+            resource_type="API_ERROR",
+            resource_id=request.url.path,
+            details=f"Method: {request.method} | Error: {str(exc.detail)}"
+        )
+    return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
+
+#  Automatically log full system crashes (500)
+@app.exception_handler(Exception)
+async def general_exception_handler(request: Request, exc: Exception):
+    log_audit_event(
+        user_id="SYSTEM",
+        role="auto_logger",
+        action="HTTP_500",
+        resource_type="SYSTEM_CRASH",
+        resource_id=request.url.path,
+        details=f"Method: {request.method} | Exception: {str(exc)}"
+    )
+    return JSONResponse({"detail": "Internal Server Error"}, status_code=500)
