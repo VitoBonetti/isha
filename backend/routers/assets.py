@@ -4,12 +4,13 @@ import pandas as pd
 import io
 import uuid
 import anyio
-from database import get_db_cursor, db_cursor_context
+from database import get_db_cursor, db_cursor_context, SessionLocal
 from routers.auth import get_current_user, require_admin
 from schema import RawAssetCreate, AssetBase, PromoteAssetRequest, BulkAssetRequest, AssetTypeBase, BulkServiceUpdateRequest
 from starlette import status
 from websockets_manager import manager
 from audit_logger import log_audit_event
+from utils.snow_sync import process_and_sync_snow_data, fetch_raw_snow_data
 
 router = APIRouter(prefix="/api/assets", tags=["Assets"])
 
@@ -754,3 +755,36 @@ def remove_from_active_pool(asset_id: str, background_tasks: BackgroundTasks,
 
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
     return {"message": "Asset returned to raw data pool."}
+
+
+# Service Now integrations
+def background_sync_wrapper(snow_records: list, user_id: str, user_role: str):
+    """Creates a dedicated DB session just for the background thread."""
+    db = SessionLocal()
+    try:
+        process_and_sync_snow_data(db, snow_records, user_id, user_role)
+    finally:
+        db.close()
+
+
+@router.post("/servicenow", summary="[Admin Only]")
+def trigger_snow_sync(
+        background_tasks: BackgroundTasks,
+        current_user: dict = Depends(require_admin)
+):
+    # 1. Fetch the data
+    snow_records = fetch_raw_snow_data(str(current_user["id"]), str(current_user["role"]))
+
+    # 2. Process it in the background so the HTTP request doesn't timeout the user's browser
+    background_tasks.add_task(background_sync_wrapper, snow_records, str(current_user["id"]), str(current_user["role"]))
+
+    # 3. Log that the admin initiated it
+    log_audit_event(
+        user_id=str(current_user["id"]),
+        role=str(current_user["role"]),
+        action="SNOW_SYNC_STARTED",
+        resource_type="INTEGRATION",
+        details="Admin manually triggered the ServiceNow CMDB sync."
+    )
+
+    return {"message": "ServiceNow sync started in the background. This may take a few minutes."}
