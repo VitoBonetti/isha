@@ -198,6 +198,7 @@ def process_and_sync_snow_data(db: Session, snow_records: list, user_id: str, us
         # Extract Core Fields & Cast Types (Item.pop removes them from the dict)
         name = item.pop("name", "Unknown Asset")
         description = item.pop("short_description", None)
+        snow_number = item.pop("number", None)
 
         # Safe integer casting for ratings
         def safe_int(val):
@@ -230,7 +231,8 @@ def process_and_sync_snow_data(db: Session, snow_records: list, user_id: str, us
             integrity_rating=integrity_rating,
             availability_rating=availability_rating,
             facing_internet=facing_internet,
-            country_id=country_id
+            country_id=country_id,
+            snow_number=snow_number
         )
 
         # Define what happens if the ID already exists (Update the fields)
@@ -245,7 +247,8 @@ def process_and_sync_snow_data(db: Session, snow_records: list, user_id: str, us
                 'integrity_rating': raw_asset_stmt.excluded.integrity_rating,
                 'availability_rating': raw_asset_stmt.excluded.availability_rating,
                 'facing_internet': raw_asset_stmt.excluded.facing_internet,
-                'country_id': raw_asset_stmt.excluded.country_id
+                'country_id': raw_asset_stmt.excluded.country_id,
+                'snow_number': raw_asset_stmt.excluded.snow_number
             }
         )
         db.execute(raw_asset_stmt)

@@ -36,6 +36,8 @@ class RawAssets(Base):
     create_date = Column(DateTime(timezone=True), default=aware_utcnow)
     update_date = Column(DateTime(timezone=True), nullable=True)
     duplicate_allowed = Column(Boolean, default=False)
+    snow_number = Column(String(100), nullable=True)
+    team_note = Column(Text, nullable=True)
 
     # relashionship
     asset_types = relationship("AssetTypes", back_populates="raw_assets")

@@ -253,9 +253,11 @@ def get_single_raw_asset(raw_id: str, current_user: dict = Depends(get_current_u
         SELECT r.id, r.name, r.description, r.business_critical, r.confidentiality_rating, 
                r.integrity_rating, r.availability_rating, r.country_id, r.service_forecast_id, 
                r.category_id, r.asset_type_id, r.facing_internet, r.duplicate_allowed, r.create_date, r.update_date,
+               r.snow_number, r.team_note, m.snow_data,
                CASE WHEN a.id IS NOT NULL THEN true ELSE false END as is_promoted
         FROM raw_assets r
         LEFT JOIN assets a ON r.id = a.raw_asset_id
+        LEFT JOIN raw_assets_snow_metadata m ON r.id = m.correlation_id
         WHERE r.id = %s
     """, (raw_id,))
     row = cursor.fetchone()
@@ -298,21 +300,22 @@ def update_raw_asset(raw_id: str, asset: RawAssetCreate, background_tasks: Backg
                      current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     # 1. Fetch the OLD state (including relational names via JOINs)
     cursor.execute("""
-        SELECT r.name, r.facing_internet, r.duplicate_allowed, r.confidentiality_rating, r.integrity_rating, r.availability_rating,
-               c.name as country_name, s.name as service_name, cat.name as category_name, at.name as type_name
-        FROM raw_assets r
-        LEFT JOIN countries c ON r.country_id = c.id
-        LEFT JOIN services_lanes s ON r.service_forecast_id = s.id
-        LEFT JOIN service_categories cat ON r.category_id = cat.id
-        LEFT JOIN asset_types at ON r.asset_type_id = at.id
-        WHERE r.id = %s
-    """, (raw_id,))
+            SELECT r.name, r.facing_internet, r.duplicate_allowed, r.confidentiality_rating, r.integrity_rating, r.availability_rating,
+                   c.name as country_name, s.name as service_name, cat.name as category_name, at.name as type_name,
+                   r.snow_number, r.team_note
+            FROM raw_assets r
+            LEFT JOIN countries c ON r.country_id = c.id
+            LEFT JOIN services_lanes s ON r.service_forecast_id = s.id
+            LEFT JOIN service_categories cat ON r.category_id = cat.id
+            LEFT JOIN asset_types at ON r.asset_type_id = at.id
+            WHERE r.id = %s
+        """, (raw_id,))
     old_state = cursor.fetchone()
     if not old_state:
         raise HTTPException(status_code=404, detail="Asset not found")
 
     # Unpack old state and handle NULLs gracefully
-    old_name, old_internet, old_duplicate_allowed, old_c, old_i, old_a, old_country, old_service, old_category, old_type = old_state
+    old_name, old_internet, old_duplicate_allowed, old_c, old_i, old_a, old_country, old_service, old_category, old_type, old_snow_number, old_team_note = old_state
     old_country = old_country or "None"
     old_service = old_service or "None"
     old_category = old_category or "None"
@@ -349,12 +352,13 @@ def update_raw_asset(raw_id: str, asset: RawAssetCreate, background_tasks: Backg
         SET name=%s, description=%s, business_critical=%s, 
             confidentiality_rating=%s, integrity_rating=%s, availability_rating=%s, 
             country_id=%s, service_forecast_id=%s, category_id=%s, asset_type_id=%s, facing_internet=%s, duplicate_allowed=%s,
-            update_date=CURRENT_TIMESTAMP
+            snow_number=%s, team_note=%s, update_date=CURRENT_TIMESTAMP
         WHERE id=%s
     """, (
         asset.name, asset.description, asset.business_critical,
         asset.confidentiality_rating, asset.integrity_rating, asset.availability_rating,
-        c_id, s_id, cat_id, at_id, asset.facing_internet, asset.duplicate_allowed, raw_id
+        c_id, s_id, cat_id, at_id, asset.facing_internet, asset.duplicate_allowed, asset.snow_number, asset.team_note,
+        raw_id
     ))
 
     log_audit_event(
@@ -380,6 +384,9 @@ def update_raw_asset(raw_id: str, asset: RawAssetCreate, background_tasks: Backg
     if old_c != asset.confidentiality_rating: changes.append(f"C-Rating: {old_c} ➔ {asset.confidentiality_rating}")
     if old_i != asset.integrity_rating: changes.append(f"I-Rating: {old_i} ➔ {asset.integrity_rating}")
     if old_a != asset.availability_rating: changes.append(f"A-Rating: {old_a} ➔ {asset.availability_rating}")
+
+    if old_snow_number != asset.snow_number: changes.append(f"SNOW ID: '{old_snow_number}' ➔ '{asset.snow_number}'")
+    if old_team_note != asset.team_note: changes.append(f"Team Note was updated")
 
     details_str = " | ".join(changes) if changes else "Description Updated."
 

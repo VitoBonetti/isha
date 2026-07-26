@@ -95,6 +95,8 @@ class RawAssetCreate(AssetBase):
     availability_rating: Optional[int] = None
     facing_internet: bool = False
     duplicate_allowed: bool = False
+    snow_number: Optional[str] = None
+    team_note: Optional[str] = None
 
 class AssetResponse(AssetBase):
     id: UUID4
