@@ -16,6 +16,10 @@ class TestStatus(str, Enum):
     completed = "Completed"
     unable = "Unable"
 
+# --- SERVICENOW SYNC ---
+class SnowSyncRequest(BaseModel):
+    pass
+
 # --- LOCATIONS & COUNTRIES ---
 class LocationBase(BaseModel):
     name: str

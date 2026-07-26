@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 import { useSettings } from '../hooks/useSettings';
 import TopNav from '../components/TopNav';
 import ConfirmModal from '../components/Modals/ConfirmModal';
-import { Toaster } from 'react-hot-toast';
+import toast, { Toaster } from 'react-hot-toast';
 import { Key, Users, MapPin, Activity, Tags, Globe, Flag, Server, Trash2, Download, AlertTriangle, Plus, Database, Terminal, Edit2, LayoutTemplate, ChevronsUpDown, ChevronUp, ChevronDown, FolderClosed } from 'lucide-react';
 
 // Sleek Custom Toggle Component
@@ -37,6 +37,64 @@ export default function SettingsView() {
       .then(res => setServerTime(res.data))
       .catch(console.error);
   }, []);
+
+  // ServiceNow Sync State
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  const handleSnowSync = async () => {
+    setIsSyncing(true);
+    const startTime = new Date().getTime(); // Record exact time we clicked the button
+
+    // 1. Toast: What is happening right now
+    const loadingToastId = toast.loading("ServiceNow sync initiated. Fetching and mapping data in the background...");
+
+    try {
+      // Trigger the backend (returns immediately)
+      await axios.post('/api/assets/servicenow', {});
+
+      // 2. Start polling the audit logs every 3 seconds to look for the finish line
+      const pollInterval = setInterval(async () => {
+        try {
+          // Fetch the latest logs using your existing endpoint
+          const logsRes = await axios.get('/api/system/logs/');
+          const latestLogs = logsRes.data;
+
+          // Look for a success or crash log that happened AFTER we clicked the button
+          const completionLog = latestLogs.find((log: any) =>
+            new Date(log.timestamp).getTime() > startTime &&
+            (log.action.includes("SERVICE_NOW_SYNC_SUCCESS") || log.action.includes("SERVICE_NOW_SYNC_CRASH"))
+          );
+
+          if (completionLog) {
+            clearInterval(pollInterval); // Stop polling
+            setIsSyncing(false); // Stop the button spinner
+
+            // 3. Toast: When it is done or errors out
+            if (completionLog.action.includes("SUCCESS")) {
+              toast.success("Sync Complete! Check the terminal below for details.", { id: loadingToastId, duration: 6000 });
+              setBqLogs(latestLogs); // Instantly update the terminal UI on the screen
+            } else {
+              toast.error("Sync Failed: " + completionLog.details, { id: loadingToastId, duration: 10000 });
+              setBqLogs(latestLogs);
+            }
+          }
+        } catch (e) {
+          // Silently ignore polling errors (like brief network drops) so we don't spam the user
+        }
+      }, 3000);
+
+      // Safety Net: If 2 minutes pass and we still haven't found a log, stop polling
+      setTimeout(() => {
+        clearInterval(pollInterval);
+        setIsSyncing(false);
+        toast("Sync is taking longer than usual. Check the logs manually in a few minutes.", { id: loadingToastId, icon: '⏳' });
+      }, 120000);
+
+    } catch (err: any) {
+      setIsSyncing(false);
+      toast.error(err.response?.data?.detail || "Failed to trigger ServiceNow sync.", { id: loadingToastId });
+    }
+  };
 
   const [bqLogs, setBqLogs] = useState<any[]>([]);
 
@@ -1014,7 +1072,36 @@ export default function SettingsView() {
                 </div>
               </div>
 
+              {/* --- SERVICENOW INTEGRATION SECTION --- */}
+              <div className="pt-6 border-t border-slate-200 dark:border-zinc-800">
+                <h2 className="text-xl font-bold text-slate-900 dark:text-zinc-100 mb-2 flex items-center gap-2">
+                  <Database size={20} className="text-blue-500" /> ServiceNow CMDB
+                </h2>
+                <p className="text-sm text-slate-500 dark:text-zinc-400 mb-4 max-w-2xl">
+                  Manually trigger a background synchronization to fetch and map active application assets from the ServiceNow CMDB. This process processes up to 10,000 items and will run in the background.
+                </p>
+                <button
+                  onClick={handleSnowSync}
+                  disabled={isSyncing}
+                  className="bg-slate-100 dark:bg-zinc-800 hover:bg-blue-50 dark:hover:bg-blue-500/10 text-slate-700 dark:text-zinc-300 hover:text-blue-600 dark:hover:text-blue-400 disabled:opacity-50 disabled:cursor-not-allowed border border-slate-200 dark:border-zinc-700 px-4 py-2.5 rounded-lg text-sm font-bold flex items-center gap-2 transition-colors"
+                >
+                  {isSyncing ? (
+                    <>
+                      <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      Queuing Sync...
+                    </>
+                  ) : (
+                    <>
+                      <Database size={16} /> Sync Assets Now
+                    </>
+                  )}
+                </button>
+              </div>
 
+              {/* --- DANGER ZONE SECTION --- */}
               <div className="pt-6 border-t border-slate-200 dark:border-zinc-800">
                 <h2 className="text-xl font-bold text-red-600 dark:text-red-500 mb-2 flex items-center gap-2"><AlertTriangle size={20} /> Danger Zone</h2>
                 <button onClick={() => setNukeModalOpen(true)} className="bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-8 rounded-xl shadow-sm mt-4 transition-colors focus:ring-4 focus:ring-red-500/20">Execute Factory Reset</button>

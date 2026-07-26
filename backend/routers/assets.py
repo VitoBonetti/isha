@@ -4,9 +4,10 @@ import pandas as pd
 import io
 import uuid
 import anyio
+import sys
 from database import get_db_cursor, db_cursor_context, SessionLocal
 from routers.auth import get_current_user, require_admin
-from schema import RawAssetCreate, AssetBase, PromoteAssetRequest, BulkAssetRequest, AssetTypeBase, BulkServiceUpdateRequest
+from schema import RawAssetCreate, AssetBase, PromoteAssetRequest, BulkAssetRequest, AssetTypeBase, BulkServiceUpdateRequest, SnowSyncRequest
 from starlette import status
 from websockets_manager import manager
 from audit_logger import log_audit_event
@@ -758,27 +759,63 @@ def remove_from_active_pool(asset_id: str, background_tasks: BackgroundTasks,
 
 
 # Service Now integrations
-def background_sync_wrapper(snow_records: list, user_id: str, user_role: str):
-    """Creates a dedicated DB session just for the background thread."""
-    db = SessionLocal()
+def full_background_sync_wrapper(user_id: str, user_role: str):
+    """Wrapper to run the ENTIRE fetch and sync process in the background."""
+
+    # 1. Force a log to BigQuery so it appears on your frontend terminal instantly
+    log_audit_event(
+        user_id=user_id,
+        role=user_role,
+        action="SERVICE_NOW_SYNC_THREAD_START",
+        resource_type="INTEGRATION",
+        details="Background thread successfully launched. Fetching API data..."
+    )
+
     try:
-        process_and_sync_snow_data(db, snow_records, user_id, user_role)
-    finally:
-        db.close()
+        # Fetch the data in the background
+        snow_records = fetch_raw_snow_data(user_id, user_role)
+
+        if not snow_records:
+            log_audit_event(
+                user_id=user_id, role=user_role,
+                action="SERVICE_NOW_SYNC_CRASH",
+                resource_type="INTEGRATION",
+                details="Fetch returned 0 records or failed. Aborting."
+            )
+            return
+
+        # Process and save to DB
+        db = SessionLocal()
+        try:
+            process_and_sync_snow_data(db, snow_records, user_id, user_role)
+        finally:
+            db.close()
+
+    except Exception as e:
+        # Catch any catastrophic Python crashes and log them to your UI
+        log_audit_event(
+            user_id=user_id,
+            role=user_role,
+            action="SERVICE_NOW_SYNC_CRASH",
+            resource_type="INTEGRATION",
+            details=f"CRITICAL ERROR IN BACKGROUND THREAD: {str(e)}"
+        )
 
 
 @router.post("/servicenow", summary="[Admin Only]")
 def trigger_snow_sync(
+        payload: SnowSyncRequest,
         background_tasks: BackgroundTasks,
         current_user: dict = Depends(require_admin)
 ):
-    # 1. Fetch the data
-    snow_records = fetch_raw_snow_data(str(current_user["id"]), str(current_user["role"]))
+    # Hand off ALL heavy lifting to FastAPI's background thread
+    background_tasks.add_task(
+        full_background_sync_wrapper,
+        str(current_user["id"]),
+        str(current_user["role"])
+    )
 
-    # 2. Process it in the background so the HTTP request doesn't timeout the user's browser
-    background_tasks.add_task(background_sync_wrapper, snow_records, str(current_user["id"]), str(current_user["role"]))
-
-    # 3. Log that the admin initiated it
+    # Log that the admin initiated it
     log_audit_event(
         user_id=str(current_user["id"]),
         role=str(current_user["role"]),

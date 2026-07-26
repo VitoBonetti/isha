@@ -47,7 +47,7 @@ def extract_app_data(response_json: dict) -> list:
 
 def fetch_raw_snow_data(user_id: str, user_role: str) -> list:
     """
-    Secures API credentials dynamically and fetches target payloads from ServiceNow.
+    Secures API credentials dynamically and fetches target payloads from ServiceNow in paginated batches.
     """
     snow_user = get_secret(SNOW_SECRET_MANAGER_FILED_NAME)
     snow_password = get_secret(SNOW_SECRET_MANAGER_FIELD_PSW)
@@ -58,72 +58,82 @@ def fetch_raw_snow_data(user_id: str, user_role: str) -> list:
         action="SECRET_MANAGER_SNOW_FETCHING",
         resource_type="SECRET_MANAGER",
         resource_id="snow_user/snow_password",
-        details=f"Secrets from ServiceNow has been request"
+        details="Secrets from ServiceNow have been requested."
     )
 
     if not snow_user or not snow_password:
         log_audit_event(
-            user_id=user_id,
-            role=user_role,
+            user_id=user_id, role=user_role,
             action="SECRET_MANAGER_SNOW_ERROR",
-            resource_type="SECRET_MANAGER",
-            resource_id="snow_user/snow_password",
-            details=f"Sync aborted: Failed to resolve complete API credentials."
+            resource_type="SECRET_MANAGER", resource_id="snow_user/snow_password",
+            details="Sync aborted: Failed to resolve complete API credentials."
         )
         return []
 
+    all_clean_records = []
+    limit = 1000
+    offset = 0
+
     try:
-        # Added a 60-second connection read timeout to safeguard heavy high-volume processing
-        response = requests.get(
-            SNOW_ENDPOINT,
-            auth=(snow_user, snow_password),
-            headers=HEADERS,
-            timeout=(15, 60)
-        )
+        while True:
+            print(f"▶️ [SNOW SYNC] Fetching batch: {offset} to {offset + limit}...", flush=True)
 
-        if response.status_code != 200:
-            log_audit_event(
-                user_id=user_id,
-                role=user_role,
-                action="SERVICE_NOW_CONNECTION_FAILED",
-                resource_type="SERVICE_NOW",
-                resource_id=f"{response.status_code}",
-                details=f"ServiceNow connection failure: HTTP {response.status_code}"
+            # Using params to safely enforce pagination
+            response = requests.get(
+                SNOW_ENDPOINT,
+                auth=(snow_user, snow_password),
+                headers=HEADERS,
+                params={"sysparm_limit": limit, "sysparm_offset": offset},
+                timeout=(15, 60)
             )
-            return []
 
-        full_payload = response.json()
-        clean_records = extract_app_data(full_payload)
+            if response.status_code != 200:
+                log_audit_event(
+                    user_id=user_id, role=user_role,
+                    action="SERVICE_NOW_CONNECTION_FAILED",
+                    resource_type="SERVICE_NOW", resource_id=f"{response.status_code}",
+                    details=f"ServiceNow connection failure at offset {offset}: HTTP {response.status_code}"
+                )
+                break
+
+            full_payload = response.json()
+            results = full_payload.get("result", [])
+
+            # If the result array is empty, we reached the end of the database!
+            if not results:
+                break
+
+            clean_chunk = extract_app_data(full_payload)
+            all_clean_records.extend(clean_chunk)
+
+            # If we received fewer records than our limit, it means this was the final page
+            if len(results) < limit:
+                break
+
+            offset += limit  # Move to the next page
+
         log_audit_event(
-            user_id=user_id,
-            role=user_role,
+            user_id=user_id, role=user_role,
             action="SERVICE_NOW_CONNECTION_SUCCESS",
-            resource_type="SERVICE_NOW",
-            resource_id=f"{response.status_code}",
-            details=f"Successfully downloaded and filtered {len(clean_records)} assets."
+            resource_type="SERVICE_NOW", resource_id="N/A",
+            details=f"Successfully downloaded and filtered a total of {len(all_clean_records)} assets in batches."
         )
-        return clean_records
+        return all_clean_records
 
     except requests.exceptions.Timeout as e:
         log_audit_event(
-            user_id=user_id,
-            role=user_role,
-            action="SERVICE_NOW_CONNECTION_TIMEOUT",
-            resource_type="SERVICE_NOW",
-            resource_id=f"{e}",
-            details=f"Connection error: The request to ServiceNow timed out. {e}"
+            user_id=user_id, role=user_role, action="SERVICE_NOW_CONNECTION_TIMEOUT",
+            resource_type="SERVICE_NOW", resource_id=f"{e}",
+            details=f"Connection error: The request to ServiceNow timed out during batch {offset}. {e}"
         )
-        return []
+        return all_clean_records  # Return whatever we successfully grabbed before the crash
     except Exception as e:
         log_audit_event(
-            user_id=user_id,
-            role=user_role,
-            action="SERVICE_NOW_CONNECTION_ERROR",
-            resource_type="SERVICE_NOW",
-            resource_id=f"{e}",
+            user_id=user_id, role=user_role, action="SERVICE_NOW_CONNECTION_ERROR",
+            resource_type="SERVICE_NOW", resource_id=f"{e}",
             details=f"Critical error encountered during API fetching cycle: {e}"
         )
-        return []
+        return all_clean_records
 
 
 def process_and_sync_snow_data(db: Session, snow_records: list, user_id: str, user_role: str):
@@ -262,7 +272,7 @@ def process_and_sync_snow_data(db: Session, snow_records: list, user_id: str, us
     try:
         # Commit the massive transaction block
         db.commit()
-
+        # db.rollback()  # Reverts to commit this is for testing purpose only
         log_audit_event(
             user_id=user_id,
             role=user_role,
