@@ -60,22 +60,22 @@ export default function HolidayModal({
   }, [holidayData, pentesters]);
 
   return (
-    <div className="fixed inset-0 bg-slate-900/50 dark:bg-zinc-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in">
-      <div className="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-2xl p-6 w-full max-w-md shadow-2xl animate-in zoom-in-95">
-        <div className="flex justify-between items-center mb-6 border-b border-slate-100 dark:border-zinc-800 pb-4">
-          <h2 className="text-xl font-bold text-slate-900 dark:text-zinc-100 flex items-center gap-2">
+    <div className="fixed inset-0 bg-slate-900/50 dark:bg-zinc-950/80 backdrop-blur-sm z-50 flex items-start sm:items-center justify-center p-2 sm:p-4 animate-in fade-in overflow-y-auto">
+      <div className="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-2xl p-4 sm:p-6 w-[95%] sm:w-full max-w-md shadow-2xl animate-in zoom-in-95 my-4 sm:my-auto flex-shrink-0">
+        <div className="flex justify-between items-start sm:items-center mb-4 sm:mb-6 border-b border-slate-100 dark:border-zinc-800 pb-4">
+          <h2 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-zinc-100 flex items-center gap-2">
             <CalendarDays size={20} className="text-blue-500" />
             {isEditing ? 'Edit Event' : 'Add Event'}
           </h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-900 dark:hover:text-zinc-100 transition-colors">
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-900 dark:hover:text-zinc-100 transition-colors p-1">
             <X size={20} />
           </button>
         </div>
 
-        <form onSubmit={(e) => { e.preventDefault(); onSave(); }} className="space-y-5">
+        <form onSubmit={(e) => { e.preventDefault(); onSave(); }} className="space-y-4 sm:space-y-5">
 
           <div>
-            <label className="block text-xs font-bold text-slate-500 dark:text-zinc-400 uppercase mb-1.5">Event Type</label>
+            <label className="block text-[11px] sm:text-xs font-bold text-slate-500 dark:text-zinc-400 uppercase mb-1.5">Event Type</label>
             <select
               required
               value={holidayData.event_type}
@@ -97,7 +97,7 @@ export default function HolidayModal({
           {/* Show team member for PTO, Sick, OR Working from Abroad */}
           {['personal_time_off', 'sick_day', 'working_from_abroad'].includes(holidayData.event_type) && (
             <div>
-              <label className="block text-xs font-bold text-slate-500 dark:text-zinc-400 uppercase mb-1.5 flex items-center gap-1"><Users size={12}/> Team Member</label>
+              <label className="block text-[11px] sm:text-xs font-bold text-slate-500 dark:text-zinc-400 uppercase mb-1.5 flex items-center gap-1"><Users size={12}/> Team Member</label>
               <select
                 required
                 value={holidayData.user_id || ''}
@@ -116,7 +116,7 @@ export default function HolidayModal({
           {/* Show location for National Holidays AND Working from Abroad */}
           {['national_holiday', 'working_from_abroad'].includes(holidayData.event_type) && (
             <div>
-              <label className="block text-xs font-bold text-slate-500 dark:text-zinc-400 uppercase mb-1.5 flex items-center gap-1"><MapPin size={12}/> Location</label>
+              <label className="block text-[11px] sm:text-xs font-bold text-slate-500 dark:text-zinc-400 uppercase mb-1.5 flex items-center gap-1"><MapPin size={12}/> Location</label>
               <select
                 value={holidayData.location_id || ''}
                 onChange={e => setHolidayData({...holidayData, location_id: e.target.value})}
@@ -130,9 +130,9 @@ export default function HolidayModal({
             </div>
           )}
 
-          <div className="flex gap-4">
+          <div className="flex flex-col sm:flex-row gap-4">
             <div className="flex-1">
-              <label className="block text-xs font-bold text-slate-500 dark:text-zinc-400 uppercase mb-1.5">Start Date</label>
+              <label className="block text-[11px] sm:text-xs font-bold text-slate-500 dark:text-zinc-400 uppercase mb-1.5">Start Date</label>
               <input
                 type="date" required
                 value={holidayData.start_date}
@@ -141,7 +141,7 @@ export default function HolidayModal({
               />
             </div>
             <div className="flex-1">
-              <label className="block text-xs font-bold text-slate-500 dark:text-zinc-400 uppercase mb-1.5">End Date</label>
+              <label className="block text-[11px] sm:text-xs font-bold text-slate-500 dark:text-zinc-400 uppercase mb-1.5">End Date</label>
               <input
                 type="date" required
                 value={holidayData.end_date}
@@ -151,26 +151,26 @@ export default function HolidayModal({
             </div>
           </div>
 
-          <div className="mt-6 bg-blue-50 dark:bg-blue-500/10 border border-blue-100 dark:border-blue-500/20 rounded-xl p-3.5 flex items-center justify-between text-sm shadow-inner">
+          <div className="mt-4 sm:mt-6 bg-blue-50 dark:bg-blue-500/10 border border-blue-100 dark:border-blue-500/20 rounded-xl p-3.5 flex items-center justify-between text-sm shadow-inner">
             <div className="flex items-center gap-2 font-bold text-blue-800 dark:text-blue-400">
-              <AlertCircle size={16} />
+              <AlertCircle size={16} className="flex-shrink-0" />
               Estimated Impact:
             </div>
-            <span className={`font-extrabold ${Number(liveCredits) > 0 ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
+            <span className={`font-extrabold flex-shrink-0 ${Number(liveCredits) > 0 ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
               -{liveCredits} Credits
             </span>
           </div>
 
-          <div className="flex justify-between items-center pt-5 border-t border-slate-100 dark:border-zinc-800 mt-6">
+          <div className="flex flex-col sm:flex-row justify-between items-center pt-5 border-t border-slate-100 dark:border-zinc-800 mt-6 gap-3 sm:gap-0">
             {isEditing ? (
-              <button type="button" onClick={() => onDelete(holidayData.id)} className="px-4 py-2.5 text-sm font-bold text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-lg transition-colors">
+              <button type="button" onClick={() => onDelete(holidayData.id)} className="w-full sm:w-auto px-4 py-2.5 text-sm font-bold text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-lg transition-colors order-3 sm:order-1 flex justify-center">
                 Delete Event
               </button>
-            ) : <div />} 
-            
-            <div className="flex gap-2">
-              <button type="button" onClick={onClose} className="px-4 py-2.5 text-sm font-medium bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-300 rounded-lg transition-colors">Cancel</button>
-              <button type="submit" className="px-5 py-2.5 text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-sm transition-colors">Save Event</button>
+            ) : <div className="hidden sm:block" />}
+
+            <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto order-1 sm:order-2">
+              <button type="submit" className="w-full sm:w-auto px-5 py-2.5 text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-sm transition-colors order-1 sm:order-2 flex justify-center">Save Event</button>
+              <button type="button" onClick={onClose} className="w-full sm:w-auto px-4 py-2.5 text-sm font-medium bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-300 rounded-lg transition-colors order-2 sm:order-1 flex justify-center">Cancel</button>
             </div>
           </div>
         </form>

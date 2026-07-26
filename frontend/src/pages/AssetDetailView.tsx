@@ -116,7 +116,7 @@ export default function AssetDetailView() {
       {isSynced && (
         <div className="group relative flex items-center">
           <HelpCircle size={14} className="text-blue-500 cursor-help" />
-          <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 w-48 p-2 bg-slate-800 text-white text-xs rounded shadow-lg opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-10 text-center">
+          <div className="absolute bottom-full mb-2 left-0 md:left-1/2 md:-translate-x-1/2 w-48 p-2 bg-slate-800 text-white text-xs rounded shadow-lg opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-10 text-center">
             This field is managed by ServiceNow. Manual changes will be overwritten on the next sync.
           </div>
         </div>
@@ -130,45 +130,54 @@ export default function AssetDetailView() {
       <Toaster position="bottom-right" />
       <ConfirmModal isOpen={deleteModalOpen} title="Delete Asset" message="Are you sure you want to permanently delete this asset? If it is currently in the active pool, it will be removed." onConfirm={handleDelete} onCancel={() => setDeleteModalOpen(false)} />
 
-      <div className="pt-32 pb-12 px-6 max-w-4xl mx-auto">
-        <div className="flex justify-between items-center mb-6">
-          <button onClick={() => navigate(backPath)} className="flex items-center gap-2 text-sm text-slate-500 hover:text-slate-900 dark:hover:text-white transition-colors">
-            <ChevronLeft size={16} /> Back to {backLabel}
+      <div className="pt-28 md:pt-32 pb-12 px-4 md:px-6 max-w-4xl mx-auto overflow-hidden">
+
+        {/* Top Toolbar */}
+        <div className="flex justify-between items-center mb-4 md:mb-6">
+          <button onClick={() => navigate(backPath)} className="flex items-center gap-1 md:gap-2 text-sm text-slate-500 hover:text-slate-900 dark:hover:text-white transition-colors font-medium">
+            <ChevronLeft size={16} /> <span className="hidden sm:inline">Back to</span> {backLabel}
           </button>
 
           {!isEditing && (
-            <button onClick={() => setIsEditing(true)} className="flex items-center gap-2 px-4 py-2 bg-slate-200 hover:bg-slate-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-800 dark:text-zinc-200 rounded-lg text-sm font-bold transition-colors">
-              <Edit2 size={16} /> Edit Asset
+            <button onClick={() => setIsEditing(true)} className="flex items-center gap-2 px-3 py-1.5 md:px-4 md:py-2 bg-slate-200 hover:bg-slate-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-800 dark:text-zinc-200 rounded-lg text-sm font-bold transition-colors shadow-sm">
+              <Edit2 size={16} /> <span className="hidden sm:inline">Edit Asset</span><span className="sm:hidden">Edit</span>
             </button>
           )}
         </div>
 
-        <div className="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-2xl p-8 shadow-sm">
-          <div className="flex justify-between items-start mb-8 border-b border-slate-100 dark:border-zinc-800 pb-6">
+        <div className="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-2xl p-5 md:p-8 shadow-sm">
+
+          {/* Header Section (Stacked on Mobile) */}
+          <div className="flex flex-col md:flex-row justify-between items-start gap-4 md:gap-0 mb-6 md:mb-8 border-b border-slate-100 dark:border-zinc-800 pb-6">
             <div>
-              <h1 className="text-2xl font-bold flex items-center gap-2"><FileText className="text-emerald-500" /> {asset.name}</h1>
-              <div className="text-slate-500 text-sm mt-2 flex flex-col gap-1">
-                <span className="font-mono">ID: {asset.id}</span>
+              <h1 className="text-xl md:text-2xl font-bold flex items-start md:items-center gap-2">
+                <FileText className="text-emerald-500 flex-shrink-0 mt-1 md:mt-0" />
+                <span className="break-words">{asset.name}</span>
+              </h1>
+              <div className="text-slate-500 text-xs md:text-sm mt-2 flex flex-col gap-1.5">
+                <span className="font-mono break-all">ID: {asset.id}</span>
                 <span className="flex items-center gap-1.5"><Clock size={14}/> Created: {formatDate(asset.create_date)}</span>
                 {asset.update_date && <span className="flex items-center gap-1.5"><Edit2 size={14}/> Updated: {formatDate(asset.update_date)}</span>}
               </div>
             </div>
-            <div className="flex flex-col items-end gap-2">
+
+            {/* Status Badges */}
+            <div className="flex flex-row md:flex-col flex-wrap items-start md:items-end gap-2 w-full md:w-auto">
               {asset.is_promoted ? (
                 <span className="px-3 py-1 bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-400 font-bold text-xs rounded-full uppercase tracking-wider">In Active Pool</span>
               ) : (
                 <span className="px-3 py-1 bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400 font-bold text-xs rounded-full uppercase tracking-wider">Raw Status</span>
               )}
               {isSynced && (
-                 <span className="flex items-center gap-1 px-3 py-1 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 font-bold text-xs rounded-full uppercase tracking-wider border border-blue-200 dark:border-blue-800/30 shadow-sm mt-1">
-                   <Database size={12} /> ServiceNow Synced
+                 <span className="flex items-center gap-1 px-3 py-1 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 font-bold text-xs rounded-full uppercase tracking-wider border border-blue-200 dark:border-blue-800/30 shadow-sm md:mt-1">
+                   <Database size={12} /> SNOW Synced
                  </span>
               )}
             </div>
           </div>
 
-          <form onSubmit={handleUpdate} className="space-y-8">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+          <form onSubmit={handleUpdate} className="space-y-6 md:space-y-8">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 md:gap-6">
               <div>
                 <SyncLabel label="Asset Name" />
                 <input required disabled={!isEditing} className={inputClasses} value={asset.name} onChange={e => setAsset({...asset, name: e.target.value})} />
@@ -200,23 +209,23 @@ export default function AssetDetailView() {
               </div>
 
               <div className="sm:col-span-2">
-                <label className="text-sm font-bold text-slate-700 dark:text-zinc-300 mb-1 block flex items-center gap-2">
-                  Team Notes <span className="text-xs font-normal text-slate-400 bg-slate-100 dark:bg-zinc-800 px-2 py-0.5 rounded-full">(Never overwritten by Sync)</span>
+                <label className="text-sm font-bold text-slate-700 dark:text-zinc-300 mb-1 flex items-center gap-2 flex-wrap">
+                  Team Notes <span className="text-[10px] md:text-xs font-normal text-slate-400 bg-slate-100 dark:bg-zinc-800 px-2 py-0.5 rounded-full">(Never overwritten by Sync)</span>
                 </label>
                 <textarea disabled={!isEditing} placeholder="Add internal pentesting notes or context here..." className={`${inputClasses} resize-none ${isEditing ? 'h-24' : 'h-auto min-h-[40px]'}`} value={asset.team_note || ""} onChange={e => setAsset({...asset, team_note: e.target.value})} />
               </div>
 
-              <div className="sm:col-span-2 flex flex-wrap gap-6">
+              <div className="sm:col-span-2 flex flex-col sm:flex-row gap-4 md:gap-6">
                 <div>
                   <SyncLabel label="Facing Internet" />
-                  <label className={`flex items-center w-fit gap-3 p-3 rounded-lg transition-colors ${isEditing ? 'bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800/50' : 'bg-transparent'}`}>
+                  <label className={`flex items-center w-full sm:w-fit gap-3 p-3 rounded-lg transition-colors ${isEditing ? 'bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800/50' : 'bg-transparent'}`}>
                     <input type="checkbox" disabled={!isEditing} className="h-4 w-4 rounded text-emerald-500 border-slate-300 disabled:opacity-70" checked={asset.facing_internet} onChange={e => setAsset({...asset, facing_internet: e.target.checked})} />
                     <span className="text-sm font-bold text-slate-700 dark:text-zinc-300">Yes</span>
                   </label>
                 </div>
                 <div>
                   <label className="text-sm font-bold text-slate-700 dark:text-zinc-300 block mb-1">Allow Duplicates</label>
-                  <label className={`flex items-center w-fit gap-3 p-3 rounded-lg transition-colors ${isEditing ? 'bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800/50' : 'bg-transparent '}`}>
+                  <label className={`flex items-center w-full sm:w-fit gap-3 p-3 rounded-lg transition-colors ${isEditing ? 'bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800/50' : 'bg-transparent '}`}>
                     <input type="checkbox" disabled={!isEditing} className="h-4 w-4 rounded text-blue-500 border-slate-300 disabled:opacity-70" checked={asset.duplicate_allowed || false} onChange={e => setAsset({...asset, duplicate_allowed: e.target.checked})} />
                     <span className="text-sm font-bold text-slate-700 dark:text-zinc-300">Yes</span>
                   </label>
@@ -224,11 +233,11 @@ export default function AssetDetailView() {
               </div>
             </div>
 
-            <div className={`p-6 rounded-xl border ${isEditing ? 'bg-slate-50 dark:bg-zinc-950/50 border-slate-200 dark:border-zinc-800' : 'border-slate-100 dark:border-zinc-800/50'}`}>
+            <div className={`p-4 md:p-6 rounded-xl border ${isEditing ? 'bg-slate-50 dark:bg-zinc-950/50 border-slate-200 dark:border-zinc-800' : 'border-slate-100 dark:border-zinc-800/50'}`}>
               <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500 dark:text-zinc-400 mb-4 flex items-center gap-2"><ShieldAlert size={16}/> Risk Ratings</h3>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-6">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6">
                 <div>
-                  <label className="text-xs font-bold text-slate-700 dark:text-zinc-300">Bus. Critical</label>
+                  <label className="text-[11px] md:text-xs font-bold text-slate-700 dark:text-zinc-300">Bus. Critical</label>
                   <input type="number" disabled className={`${ratingClasses} !bg-slate-200 dark:!bg-zinc-800 text-slate-500 font-bold cursor-not-allowed`} value={businessCritical} readOnly />
                 </div>
                 <div>
@@ -246,7 +255,7 @@ export default function AssetDetailView() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 md:gap-6">
               <div>
                 <label className="text-sm font-bold text-slate-700 dark:text-zinc-300">Service Forecast</label>
                 <select disabled={!isEditing} className={inputClasses} value={asset.service_forecast_id || ""} onChange={e => setAsset({...asset, service_forecast_id: e.target.value, category_id: ""})}>
@@ -263,17 +272,17 @@ export default function AssetDetailView() {
               </div>
             </div>
 
-            {/* Form Actions */}
+            {/* Form Actions (Stacked on Mobile) */}
             {isEditing && (
-              <div className="flex justify-between items-center pt-8 border-t border-slate-100 dark:border-zinc-800 animate-in fade-in slide-in-from-bottom-2">
-                <button type="button" onClick={() => setDeleteModalOpen(true)} className="flex items-center gap-2 px-4 py-2.5 text-sm font-bold text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors">
+              <div className="flex flex-col md:flex-row justify-between items-center gap-4 pt-6 md:pt-8 border-t border-slate-100 dark:border-zinc-800 animate-in fade-in slide-in-from-bottom-2">
+                <button type="button" onClick={() => setDeleteModalOpen(true)} className="w-full md:w-auto flex justify-center items-center gap-2 px-4 py-2.5 text-sm font-bold text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors order-2 md:order-1">
                   <Trash2 size={16} /> Delete Asset
                 </button>
-                <div className="flex gap-3">
-                  <button type="button" onClick={handleCancel} className="flex items-center gap-2 px-6 py-2.5 text-sm font-bold bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-300 rounded-lg transition-colors">
+                <div className="w-full md:w-auto flex flex-col md:flex-row gap-3 order-1 md:order-2">
+                  <button type="button" onClick={handleCancel} className="w-full md:w-auto flex justify-center items-center gap-2 px-6 py-2.5 text-sm font-bold bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-300 rounded-lg transition-colors">
                     <X size={16} /> Cancel
                   </button>
-                  <button type="submit" className="flex items-center gap-2 px-6 py-2.5 text-sm font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg shadow-sm transition-colors">
+                  <button type="submit" className="w-full md:w-auto flex justify-center items-center gap-2 px-6 py-2.5 text-sm font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg shadow-sm transition-colors">
                     <Save size={16} /> Save Changes
                   </button>
                 </div>
@@ -283,34 +292,34 @@ export default function AssetDetailView() {
         </div>
 
         {/* ACCORDIONS */}
-        <div className="space-y-4 mt-8">
+        <div className="space-y-4 mt-6 md:mt-8">
 
           {/* ASSET HISTORY */}
           <div>
-            <button onClick={() => setIsHistoryOpen(!isHistoryOpen)} className="flex items-center gap-3 w-full text-left font-bold text-slate-800 dark:text-zinc-200 bg-white dark:bg-zinc-900 p-5 rounded-2xl border border-slate-200 dark:border-zinc-800 shadow-sm hover:border-slate-300 dark:hover:border-zinc-700 transition-colors outline-none">
-              {isHistoryOpen ? <ChevronDown size={20} className="text-slate-400" /> : <ChevronRight size={20} className="text-slate-400" />}
-              <History size={20} className="text-blue-500" />
-              Asset History Log
-              <span className="ml-auto text-xs bg-slate-100 dark:bg-zinc-800 px-2 py-1 rounded-full text-slate-500">{asset.history?.length || 0} events</span>
+            <button onClick={() => setIsHistoryOpen(!isHistoryOpen)} className="flex items-center gap-2 md:gap-3 w-full text-left font-bold text-slate-800 dark:text-zinc-200 bg-white dark:bg-zinc-900 p-4 md:p-5 rounded-2xl border border-slate-200 dark:border-zinc-800 shadow-sm hover:border-slate-300 dark:hover:border-zinc-700 transition-colors outline-none">
+              {isHistoryOpen ? <ChevronDown size={20} className="text-slate-400 flex-shrink-0" /> : <ChevronRight size={20} className="text-slate-400 flex-shrink-0" />}
+              <History size={18} className="text-blue-500 flex-shrink-0 md:h-5 md:w-5" />
+              <span className="truncate">Asset History</span>
+              <span className="ml-auto text-[10px] md:text-xs bg-slate-100 dark:bg-zinc-800 px-2 py-1 rounded-full text-slate-500 whitespace-nowrap">{asset.history?.length || 0} events</span>
             </button>
             {isHistoryOpen && (
-              <div className="mt-2 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-2xl p-6 shadow-sm animate-in fade-in slide-in-from-top-2">
+              <div className="mt-2 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-2xl p-4 md:p-6 shadow-sm animate-in fade-in slide-in-from-top-2">
                 {asset.history && asset.history.length > 0 ? (
-                  <div className="relative border-l border-slate-200 dark:border-zinc-800 ml-3 space-y-6">
+                  <div className="relative border-l border-slate-200 dark:border-zinc-800 ml-2 md:ml-3 space-y-6">
                     {asset.history.map((h: any) => (
-                      <div key={h.id} className="relative pl-6">
+                      <div key={h.id} className="relative pl-5 md:pl-6">
                         <div className="absolute -left-1.5 mt-1.5 w-3 h-3 rounded-full bg-blue-500 ring-4 ring-white dark:ring-zinc-900"></div>
-                        <div className="flex justify-between items-start mb-1">
+                        <div className="flex flex-col md:flex-row md:justify-between items-start mb-1 gap-1 md:gap-0">
                           <span className="font-bold text-sm text-slate-900 dark:text-zinc-100">{h.action}</span>
-                          <span className="text-xs font-mono text-slate-400">{formatDate(h.timestamp)}</span>
+                          <span className="text-[10px] md:text-xs font-mono text-slate-400">{formatDate(h.timestamp)}</span>
                         </div>
-                        <div className="text-sm text-slate-600 dark:text-zinc-400">{h.details}</div>
-                        <div className="text-xs text-slate-400 mt-1 font-medium">By: {h.user_name || 'System'}</div>
+                        <div className="text-sm text-slate-600 dark:text-zinc-400 break-words">{h.details}</div>
+                        <div className="text-[10px] md:text-xs text-slate-400 mt-1 font-medium">By: {h.user_name || 'System'}</div>
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <div className="text-center text-slate-500 py-6">No history recorded for this asset yet.</div>
+                  <div className="text-center text-slate-500 py-4 md:py-6 text-sm">No history recorded for this asset yet.</div>
                 )}
               </div>
             )}
@@ -318,21 +327,21 @@ export default function AssetDetailView() {
 
           {/* COMPLETED TESTS */}
           <div>
-            <button onClick={() => setIsCompletedTestsOpen(!isCompletedTestsOpen)} className="flex items-center gap-3 w-full text-left font-bold text-slate-800 dark:text-zinc-200 bg-white dark:bg-zinc-900 p-5 rounded-2xl border border-slate-200 dark:border-zinc-800 shadow-sm hover:border-slate-300 dark:hover:border-zinc-700 transition-colors outline-none">
-              {isCompletedTestsOpen ? <ChevronDown size={20} className="text-slate-400" /> : <ChevronRight size={20} className="text-slate-400" />}
-              <CheckCircle size={20} className="text-emerald-500" />
-              Completed Tests
-              <span className="ml-auto text-xs bg-slate-100 dark:bg-zinc-800 px-2 py-1 rounded-full text-slate-500">{asset.completed_tests?.length || 0} tests</span>
+            <button onClick={() => setIsCompletedTestsOpen(!isCompletedTestsOpen)} className="flex items-center gap-2 md:gap-3 w-full text-left font-bold text-slate-800 dark:text-zinc-200 bg-white dark:bg-zinc-900 p-4 md:p-5 rounded-2xl border border-slate-200 dark:border-zinc-800 shadow-sm hover:border-slate-300 dark:hover:border-zinc-700 transition-colors outline-none">
+              {isCompletedTestsOpen ? <ChevronDown size={20} className="text-slate-400 flex-shrink-0" /> : <ChevronRight size={20} className="text-slate-400 flex-shrink-0" />}
+              <CheckCircle size={18} className="text-emerald-500 flex-shrink-0 md:h-5 md:w-5" />
+              <span className="truncate">Completed Tests</span>
+              <span className="ml-auto text-[10px] md:text-xs bg-slate-100 dark:bg-zinc-800 px-2 py-1 rounded-full text-slate-500 whitespace-nowrap">{asset.completed_tests?.length || 0} tests</span>
             </button>
             {isCompletedTestsOpen && (
-              <div className="mt-2 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-2xl p-6 shadow-sm animate-in fade-in slide-in-from-top-2">
+              <div className="mt-2 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-2xl p-4 md:p-6 shadow-sm animate-in fade-in slide-in-from-top-2">
                 {asset.completed_tests && asset.completed_tests.length > 0 ? (
-                  <div className="relative border-l border-slate-200 dark:border-zinc-800 ml-3 space-y-6">
+                  <div className="relative border-l border-slate-200 dark:border-zinc-800 ml-2 md:ml-3 space-y-6">
                     {asset.completed_tests.map((test: any) => (
-                      <div key={test.id} className="relative pl-6">
+                      <div key={test.id} className="relative pl-5 md:pl-6">
                         <div className="absolute -left-1.5 mt-1.5 w-3 h-3 rounded-full bg-emerald-500 ring-4 ring-white dark:ring-zinc-900"></div>
-                        <div className="flex justify-between items-start mb-1">
-                          <span className="font-bold text-sm text-slate-900 dark:text-zinc-100 flex items-center gap-2">
+                        <div className="flex flex-col md:flex-row md:justify-between items-start mb-2 md:mb-1 gap-1 md:gap-0">
+                          <span className="font-bold text-sm text-slate-900 dark:text-zinc-100 flex flex-wrap items-center gap-2">
                             {test.name}
                             {test.start_week && test.start_year && (
                               <span className="px-2 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/30 text-emerald-800 dark:text-emerald-400 text-[10px] font-bold uppercase tracking-wider border border-emerald-200 dark:border-emerald-800/30">
@@ -340,19 +349,19 @@ export default function AssetDetailView() {
                               </span>
                             )}
                           </span>
-                          <span className="text-xs font-mono text-slate-400">{formatDate(test.completion_date)}</span>
+                          <span className="text-[10px] md:text-xs font-mono text-slate-400">{formatDate(test.completion_date)}</span>
                         </div>
                         <div className="text-sm text-slate-600 dark:text-zinc-400">
                           <span className="font-medium text-slate-700 dark:text-zinc-300">Service Lane:</span> {test.service_lane || 'Unknown'}
                         </div>
-                        <div className="text-xs text-slate-400 mt-1 font-medium">
+                        <div className="text-[10px] md:text-xs text-slate-400 mt-1 font-medium">
                           By: <span className="text-slate-700 dark:text-zinc-300">{test.pentesters || 'Unassigned'}</span>
                         </div>
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <div className="text-center text-slate-500 py-6">No completed tests recorded for this asset yet.</div>
+                  <div className="text-center text-slate-500 py-4 md:py-6 text-sm">No completed tests recorded for this asset yet.</div>
                 )}
               </div>
             )}
@@ -361,15 +370,15 @@ export default function AssetDetailView() {
           {/* SERVICENOW METADATA */}
           {asset.snow_data && (
              <div>
-               <button onClick={() => setIsSnowDataOpen(!isSnowDataOpen)} className="flex items-center gap-3 w-full text-left font-bold text-slate-800 dark:text-zinc-200 bg-blue-50 dark:bg-blue-900/10 p-5 rounded-2xl border border-blue-200 dark:border-blue-900/30 shadow-sm hover:border-blue-300 dark:hover:border-blue-800/50 transition-colors outline-none">
-                 {isSnowDataOpen ? <ChevronDown size={20} className="text-blue-500" /> : <ChevronRight size={20} className="text-blue-500" />}
-                 <Database size={20} className="text-blue-500" />
-                 ServiceNow Metadata Extract
+               <button onClick={() => setIsSnowDataOpen(!isSnowDataOpen)} className="flex items-center gap-2 md:gap-3 w-full text-left font-bold text-slate-800 dark:text-zinc-200 bg-blue-50 dark:bg-blue-900/10 p-4 md:p-5 rounded-2xl border border-blue-200 dark:border-blue-900/30 shadow-sm hover:border-blue-300 dark:hover:border-blue-800/50 transition-colors outline-none">
+                 {isSnowDataOpen ? <ChevronDown size={20} className="text-blue-500 flex-shrink-0" /> : <ChevronRight size={20} className="text-blue-500 flex-shrink-0" />}
+                 <Database size={18} className="text-blue-500 flex-shrink-0 md:h-5 md:w-5" />
+                 <span className="truncate">ServiceNow Metadata</span>
                </button>
                {isSnowDataOpen && (
-                 <div className="mt-2 bg-[#0c0c0e] rounded-2xl border border-slate-200 dark:border-zinc-800 shadow-sm overflow-hidden animate-in fade-in slide-in-from-top-2">
-                   <div className="p-4 overflow-x-auto">
-                     <pre className="text-xs text-blue-300 font-mono">
+                 <div className="mt-2 bg-[#0c0c0e] rounded-2xl border border-slate-200 dark:border-zinc-800 shadow-sm overflow-hidden animate-in fade-in slide-in-from-top-2 w-full">
+                   <div className="p-3 md:p-4 overflow-x-auto w-full max-w-[calc(100vw-2rem)] md:max-w-full custom-scrollbar">
+                     <pre className="text-[10px] md:text-xs text-blue-300 font-mono w-max min-w-full">
                        {JSON.stringify(asset.snow_data, null, 2)}
                      </pre>
                    </div>

@@ -59,22 +59,22 @@ export default function AddRawAssetModal({ isOpen, onClose, onSuccess, countries
     }
   };
 
-  const inputClasses = "w-full mt-1 p-2.5 border border-slate-200 dark:border-zinc-800 rounded-lg bg-white dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 focus:ring-2 focus:ring-emerald-500 outline-none";
+  const inputClasses = "w-full mt-1 p-2.5 border border-slate-200 dark:border-zinc-800 rounded-lg bg-white dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 focus:ring-2 focus:ring-emerald-500 outline-none text-sm md:text-base";
   const ratingClasses = "w-full mt-1 p-2 border border-slate-200 dark:border-zinc-800 rounded-lg bg-white dark:bg-zinc-950 text-sm text-slate-900 dark:text-zinc-100 focus:ring-2 focus:ring-emerald-500 outline-none";
 
   return (
-    <div className="fixed inset-0 bg-slate-900/50 dark:bg-zinc-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in overflow-y-auto">
-      <div className="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-2xl p-6 w-full max-w-xl shadow-2xl animate-in zoom-in-95 my-8">
-        <div className="flex justify-between items-center mb-6 border-b border-slate-100 dark:border-zinc-800 pb-4">
-          <h2 className="text-xl font-bold flex items-center gap-2">
+    <div className="fixed inset-0 bg-slate-900/50 dark:bg-zinc-950/80 backdrop-blur-sm z-50 flex items-start sm:items-center justify-center p-2 sm:p-4 animate-in fade-in overflow-y-auto">
+      <div className="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-2xl p-4 sm:p-6 w-[95%] sm:w-full max-w-xl shadow-2xl animate-in zoom-in-95 my-4 sm:my-8 flex-shrink-0">
+        <div className="flex justify-between items-center mb-4 sm:mb-6 border-b border-slate-100 dark:border-zinc-800 pb-4">
+          <h2 className="text-lg sm:text-xl font-bold flex items-center gap-2">
             <Plus size={20} className="text-emerald-500" /> Add Raw Asset
           </h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-900 dark:hover:text-zinc-100 transition-colors">
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-900 dark:hover:text-zinc-100 transition-colors p-1">
             <X size={20} />
           </button>
         </div>
 
-        <form onSubmit={handleCreateAsset} className="space-y-5">
+        <form onSubmit={handleCreateAsset} className="space-y-4 sm:space-y-5">
           {/* Basic Info */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
@@ -95,30 +95,30 @@ export default function AddRawAssetModal({ isOpen, onClose, onSuccess, countries
             <textarea className={`${inputClasses} resize-none h-20`} value={newAsset.description} onChange={e => setNewAsset({...newAsset, description: e.target.value})} placeholder="Brief overview of the asset..." />
           </div>
 
-          {/* 2. WRAPPED IN GRID CONTAINER */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {/* Toggle Buttons Container */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
             <label className="flex items-center gap-3 p-3 bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-lg cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800/50 transition-colors">
-              <input type="checkbox" className="h-4 w-4 rounded text-emerald-500 border-slate-300" checked={newAsset.facing_internet} onChange={e => setNewAsset({...newAsset, facing_internet: e.target.checked})} />
+              <input type="checkbox" className="h-4 w-4 rounded text-emerald-500 border-slate-300 flex-shrink-0" checked={newAsset.facing_internet} onChange={e => setNewAsset({...newAsset, facing_internet: e.target.checked})} />
               <div className="flex flex-col">
                 <span className="text-sm font-bold text-slate-700 dark:text-zinc-300 flex items-center gap-2"><Globe size={14}/> Facing Internet</span>
-                <span className="text-xs text-slate-500">Accessible externally without VPN.</span>
+                <span className="text-xs text-slate-500 leading-tight mt-0.5">Accessible externally without VPN.</span>
               </div>
             </label>
             <label className="flex items-center gap-3 p-3 bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-lg cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800/50 transition-colors">
-              <input type="checkbox" className="h-4 w-4 rounded text-blue-500 border-slate-300" checked={newAsset.duplicate_allowed} onChange={e => setNewAsset({...newAsset, duplicate_allowed: e.target.checked})} />
+              <input type="checkbox" className="h-4 w-4 rounded text-blue-500 border-slate-300 flex-shrink-0" checked={newAsset.duplicate_allowed} onChange={e => setNewAsset({...newAsset, duplicate_allowed: e.target.checked})} />
               <div className="flex flex-col">
                 <span className="text-sm font-bold text-slate-700 dark:text-zinc-300 flex items-center gap-2">Allow Duplicates</span>
-                <span className="text-xs text-slate-500">Permit concurrent active tests.</span>
+                <span className="text-xs text-slate-500 leading-tight mt-0.5">Permit concurrent active tests.</span>
               </div>
             </label>
           </div>
 
           {/* Ratings (CIA Triad & Business Criticality) */}
-          <div className="bg-slate-50 dark:bg-zinc-950/50 p-4 rounded-xl border border-slate-200 dark:border-zinc-800">
+          <div className="bg-slate-50 dark:bg-zinc-950/50 p-3 sm:p-4 rounded-xl border border-slate-200 dark:border-zinc-800">
             <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-zinc-400 mb-3 flex items-center gap-1.5"><ShieldAlert size={14}/> Risk Ratings</h3>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
               <div>
-                <label className="text-xs font-bold text-slate-700 dark:text-zinc-300">Bus. Critical</label>
+                <label className="text-[10px] sm:text-xs font-bold text-slate-700 dark:text-zinc-300 truncate block">Bus. Critical</label>
                 <input
                   type="number"
                   className={`${ratingClasses} bg-slate-100 dark:bg-zinc-800 text-slate-500 font-bold cursor-not-allowed`}
@@ -128,15 +128,15 @@ export default function AddRawAssetModal({ isOpen, onClose, onSuccess, countries
                 />
               </div>
               <div>
-                <label className="text-xs font-bold text-slate-700 dark:text-zinc-300">Confidentiality</label>
+                <label className="text-[10px] sm:text-xs font-bold text-slate-700 dark:text-zinc-300 truncate block">Confidentiality</label>
                 <input type="number" min="0" max="5" className={ratingClasses} value={newAsset.confidentiality_rating} onChange={e => setNewAsset({...newAsset, confidentiality_rating: parseInt(e.target.value) || 0})} />
               </div>
               <div>
-                <label className="text-xs font-bold text-slate-700 dark:text-zinc-300">Integrity</label>
+                <label className="text-[10px] sm:text-xs font-bold text-slate-700 dark:text-zinc-300 truncate block">Integrity</label>
                 <input type="number" min="0" max="5" className={ratingClasses} value={newAsset.integrity_rating} onChange={e => setNewAsset({...newAsset, integrity_rating: parseInt(e.target.value) || 0})} />
               </div>
               <div>
-                <label className="text-xs font-bold text-slate-700 dark:text-zinc-300">Availability</label>
+                <label className="text-[10px] sm:text-xs font-bold text-slate-700 dark:text-zinc-300 truncate block">Availability</label>
                 <input type="number" min="0" max="5" className={ratingClasses} value={newAsset.availability_rating} onChange={e => setNewAsset({...newAsset, availability_rating: parseInt(e.target.value) || 0})} />
               </div>
             </div>
@@ -167,9 +167,14 @@ export default function AddRawAssetModal({ isOpen, onClose, onSuccess, countries
             </div>
           </div>
 
-          <div className="flex justify-end gap-3 pt-6 border-t border-slate-100 dark:border-zinc-800 mt-6">
-            <button type="button" onClick={onClose} className="px-4 py-2.5 text-sm font-medium bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-300 rounded-lg transition-colors">Cancel</button>
-            <button type="submit" className="px-5 py-2.5 text-sm font-medium bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg shadow-sm transition-colors">Save Asset</button>
+          {/* Action Buttons - Stacked on Mobile */}
+          <div className="flex flex-col sm:flex-row justify-end gap-3 pt-4 sm:pt-6 border-t border-slate-100 dark:border-zinc-800 mt-6">
+            <button type="submit" className="w-full sm:w-auto px-5 py-2.5 text-sm font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg shadow-sm transition-colors order-1 sm:order-2 flex justify-center items-center">
+              Save Asset
+            </button>
+            <button type="button" onClick={onClose} className="w-full sm:w-auto px-4 py-2.5 text-sm font-bold bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-300 rounded-lg transition-colors order-2 sm:order-1 flex justify-center items-center">
+              Cancel
+            </button>
           </div>
         </form>
       </div>
