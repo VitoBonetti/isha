@@ -4,7 +4,7 @@ import axios from "axios";
 import TopNav from "../components/TopNav";
 import AddRawAssetModal from "../components/Modals/AddRawAssetModal";
 import ConfirmModal from "../components/Modals/ConfirmModal";
-import { Search, Upload, Plus, Filter, ChevronUp, ChevronDown, ChevronsUpDown, Download, Globe, Database, MoveRight } from "lucide-react";
+import { Search, Plus, Filter, ChevronUp, ChevronDown, ChevronsUpDown, Globe, Database, MoveRight } from "lucide-react";
 import toast, { Toaster } from 'react-hot-toast';
 
 interface RawAsset {
@@ -151,53 +151,6 @@ export default function RawAssetsView() {
     }
   };
 
-  const handleDownloadTemplate = () => {
-    const csvContent = "ID,Name,Description,Asset Type,Country,Service Lane,Category,Facing Internet,Confidentiality,Integrity,Availability\n" +
-                       ",Primary Banking API,Handles routing.,API,United States,,,TRUE,4,4,1\n" +
-                       "550e8400-e29b-41d4-a716-446655440000,Internal HR Portal,Employee management system.,Web Application/Website,GB,,,FALSE,3,2,1";
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.setAttribute("href", url);
-    link.setAttribute("download", "isha_asset_import_template.csv");
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    toast.success("Template downloaded!");
-  };
-
-  const handleImportExcel = async () => {
-    const fileInput = document.createElement('input');
-    fileInput.type = 'file';
-    fileInput.accept = '.csv,.xlsx,.xls';
-    fileInput.onchange = async (e: any) => {
-      const file = e.target.files[0];
-      if (!file) return;
-
-      const toastId = toast.loading("Processing import in background...");
-
-      try {
-        const formData = new FormData();
-        formData.append('file', file);
-        const res = await axios.post('/api/assets/raw/import', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
-
-        toast.dismiss(toastId);
-
-        if (res.data.failed && res.data.failed.length > 0) {
-          toast.success(`Imported/Updated ${res.data.success} assets.`);
-          toast.error(`Failed to import ${res.data.failed.length} assets (e.g. ${res.data.failed[0]}). Check system logs for details.`, { duration: 6000 });
-        } else {
-          toast.success(`Successfully imported/updated all ${res.data.success} assets!`);
-        }
-        fetchRawAssets();
-      } catch (error) {
-        toast.dismiss(toastId);
-        toast.error("Import failed entirely. Please check file format.");
-      }
-    };
-    fileInput.click();
-  };
-
   const filteredCategories = categories.filter(c => !filters.service || c.service_lane_id === filters.service);
 
   const getCriticalityPill = (score: number) => {
@@ -257,8 +210,6 @@ export default function RawAssetsView() {
                 )}
               </div>
             )}
-            <button onClick={handleDownloadTemplate} className="flex items-center gap-2 px-4 py-2 bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 rounded-lg hover:bg-slate-200 dark:hover:bg-zinc-700 transition-colors font-medium"><Download className="h-4 w-4" /> Template</button>
-            <button onClick={handleImportExcel} className="flex items-center gap-2 px-4 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 transition-colors font-medium"><Upload className="h-4 w-4" /> Import Data</button>
             <button onClick={() => setShowAddModal(true)} className="flex items-center gap-2 px-4 py-2 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition-colors font-medium"><Plus className="h-4 w-4" /> Add Asset</button>
           </div>
 
@@ -301,9 +252,7 @@ export default function RawAssetsView() {
                   <th className="p-4 font-semibold text-slate-500 uppercase cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort("country")}><div className="flex items-center gap-2">Loc. <SortIcon column="country" /></div></th>
                   <th className="p-4 font-semibold text-slate-500 uppercase">Criticality</th>
                   <th className="p-4 font-semibold text-slate-500 uppercase cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort("service")}><div className="flex items-center gap-2">Forecast Lane <SortIcon column="service" /></div></th>
-                  {/* Changed Status column layout to match left-align */}
                   <th className="p-4 font-semibold text-slate-500 uppercase cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort("status")}><div className="flex items-center gap-2"><SortIcon column="status" /> Status</div></th>
-                  {/* Added new Actions column header */}
                   <th className="p-4 font-semibold text-slate-500 uppercase text-right">Actions</th>
                 </tr>
               </thead>
@@ -330,11 +279,9 @@ export default function RawAssetsView() {
                       <div className="font-medium">{asset.service_name || '-'}</div>
                       <div className="text-xs text-slate-500">{asset.category_name || '-'}</div>
                     </td>
-                    {/* Status Pill moved to the left */}
                     <td className="p-4">
                       {asset.is_promoted ? <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-400">In Pool</span> : <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-bold bg-slate-100 dark:bg-zinc-800 text-slate-500 dark:text-zinc-400">Raw</span>}
                     </td>
-                    {/* New Actions column with Promote Button */}
                     <td className="p-4 text-right">
                       {!asset.is_promoted && (
                         <button

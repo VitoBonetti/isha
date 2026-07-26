@@ -448,7 +448,7 @@ def is_valid_uuid(val: str):
 
 
 
-# --- SYNCHRONOUS IMPORT IN BACKGROUND THREAD ---
+# --- LEGACY SYNCHRONOUS IMPORT IN BACKGROUND THREAD ---
 def process_excel_import_sync(contents: bytes, filename: str, current_user: dict):
     with db_cursor_context() as cursor:
         if not cursor: return 0, ["Database connection unavailable"]
@@ -592,7 +592,7 @@ def process_excel_import_sync(contents: bytes, filename: str, current_user: dict
             return 0, [f"File formatting error: {str(e)}"]
 
 
-@router.post("/raw/import", summary="[Admin Only]")
+@router.post("/raw/import", summary="[Admin Only]", include_in_schema=False)
 async def import_assets(file: UploadFile = File(...), background_tasks: BackgroundTasks = BackgroundTasks(), current_user: dict = Depends(require_admin)):
     # Mime type validations
     if file.content_type not in ALLOWED_MIME_TYPES:
@@ -622,6 +622,7 @@ async def import_assets(file: UploadFile = File(...), background_tasks: Backgrou
         "failed": failed_items
     }
 
+# --- END LEGACY ---
 
 # --- THE PROMOTION ENGINE ---
 @router.post("/promote", summary="[Admin Only]")
