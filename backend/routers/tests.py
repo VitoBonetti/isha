@@ -212,7 +212,7 @@ def delete_test(test_id: str, background_tasks: BackgroundTasks,
 
 
 # --- BULK GENERATION ---
-def process_bulk_tests_background(asset_ids: List[UUID4], user_id: str, user_name: str,):
+def process_bulk_tests_background(asset_ids: List[UUID4], user_id: str, role: str,):
     tests_to_provision = []
 
     with db_cursor_context() as cursor:
@@ -249,7 +249,7 @@ def process_bulk_tests_background(asset_ids: List[UUID4], user_id: str, user_nam
 
             log_audit_event(
                 user_id=str(user_id),
-                username=str(user_name),
+                role=str(role),
                 action="TEST_CREATED",
                 resource_type="TESTS",
                 resource_id=str(new_test_id),
@@ -276,10 +276,9 @@ def process_bulk_tests_background(asset_ids: List[UUID4], user_id: str, user_nam
 @router.post("/bulk", summary="[Admin Only]")
 def bulk_create_tests(req: BulkTestCreate, background_tasks: BackgroundTasks,
                       current_user: dict = Depends(require_admin)):
-    background_tasks.add_task(process_bulk_tests_background, req.asset_ids, str(current_user['id']), str(current_user['name']))
+    background_tasks.add_task(process_bulk_tests_background, req.asset_ids, str(current_user['id']), str(current_user['role']))
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": f"Generating {len(req.asset_ids)} tests from active pool."}
-
 
 # --- 3. SCHEDULING & STATUS LIFECYCLE ---
 @router.put("/{test_id}/schedule", summary="[Admin Only]")
