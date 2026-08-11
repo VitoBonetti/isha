@@ -10,7 +10,7 @@ import TopNav from '../components/TopNav';
 import { useAppContext } from '../context/AppContext';
 import { getWeekDateRange } from '../utils/helpers';
 import type { BoardData, Test } from '../types/board';
-import { ChevronLeft, ChevronRight, Search, X, History, Edit2, Trash2, Plus, Users, CheckCircle, XCircle, CalendarOff, User, LockOpen, Lock, FolderOpen, FolderPlus, CircleQuestionMark, Calendar, CalendarPlus, Layers } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Search, X, History, Edit2, Trash2, Plus, Users, CheckCircle, XCircle, CalendarOff, User, LockOpen, Lock, FolderOpen, FolderPlus, CircleQuestionMark, Calendar, CalendarPlus, Layers, Presentation, FileText, ListChecks } from 'lucide-react';
 
 interface PlannerViewProps {
   onlineUsers: string[];
@@ -410,6 +410,19 @@ export default function PlannerView({
                                                       </button>
                                                     )}
                                                   </div>
+                                                  {service?.auto_provision_workspace && (
+                                                    <div className="mt-1 pt-1 border-t border-slate-200 dark:border-zinc-600 grid grid-cols-3 gap-1">
+                                                      <button title="Create Presentation" className="p-1.5 flex items-center justify-center rounded text-purple-500 hover:text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-900/30 transition-colors" onClick={(e) => { e.stopPropagation(); console.log("Create Presentation", test.id); }}>
+                                                        <Presentation size={14}/>
+                                                      </button>
+                                                      <button title="Generate PDF" className="p-1.5 flex items-center justify-center rounded text-rose-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/30 transition-colors" onClick={(e) => { e.stopPropagation(); console.log("Generate PDF", test.id); }}>
+                                                        <FileText size={14}/>
+                                                      </button>
+                                                      <button title="Verify Findings" className="p-1.5 flex items-center justify-center rounded text-teal-500 hover:text-teal-600 hover:bg-teal-50 dark:hover:bg-teal-900/30 transition-colors" onClick={(e) => { e.stopPropagation(); console.log("Verify Findings", test.id); }}>
+                                                        <ListChecks size={14}/>
+                                                      </button>
+                                                    </div>
+                                                  )}
                                                 </div>
                                               )}
                                             </div>
@@ -566,6 +579,22 @@ export default function PlannerView({
                           <button onClick={() => setSecretConfirmOpen(test)} className={`p-2 flex items-center justify-center rounded-lg ${test.has_secret ? 'text-indigo-600 bg-indigo-100 dark:bg-indigo-900/30' : 'text-slate-500 bg-slate-100 dark:bg-zinc-800'}`}>
                             {test.has_secret ? <Lock size={14} /> : <LockOpen size={14} />}
                           </button>
+                        )}
+                        {selectedMobileService?.auto_provision_workspace && (
+                          <>
+                            {/* Divider to force a new line */}
+                            <div className="w-full h-px bg-slate-100 dark:bg-zinc-800 my-1"></div>
+
+                            <button title="Create Presentation" className="p-2 flex items-center justify-center rounded-lg text-purple-600 bg-purple-50 dark:bg-purple-900/20" onClick={(e) => { e.stopPropagation(); console.log("Create Presentation", test.id); }}>
+                              <Presentation size={14}/>
+                            </button>
+                            <button title="Generate PDF" className="p-2 flex items-center justify-center rounded-lg text-rose-600 bg-rose-50 dark:bg-rose-900/20" onClick={(e) => { e.stopPropagation(); console.log("Generate PDF", test.id); }}>
+                              <FileText size={14}/>
+                            </button>
+                            <button title="Verify Findings" className="p-2 flex items-center justify-center rounded-lg text-teal-600 bg-teal-50 dark:bg-teal-900/20" onClick={(e) => { e.stopPropagation(); console.log("Verify Findings", test.id); }}>
+                              <ListChecks size={14}/>
+                            </button>
+                          </>
                         )}
                       </div>
                     )}
