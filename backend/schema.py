@@ -129,6 +129,7 @@ class TestBase(BaseModel):
     is_tentative: bool = False
     drive_folder_id: Optional[str] = None
     drive_folder_url: Optional[str] = None
+    kiss24: Optional[UUID4] = None
 
 class TestCreate(TestBase):
     asset_ids: List[UUID4] = []

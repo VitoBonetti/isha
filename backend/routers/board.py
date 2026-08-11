@@ -194,7 +194,7 @@ def get_quarterly_board(year: int, quarter: int, response: Response,
                    (SELECT COUNT(*) FROM test_assets WHERE test_id = t.id),
                    EXISTS(SELECT 1 FROM secret_notes WHERE test_id = t.id),
                    t.drive_folder_url,
-                   t.is_tentative
+                   t.is_tentative, t.kiss24
             FROM tests t
             WHERE t.stages::text = 'NOT_PLANNED'
         ''')
@@ -206,7 +206,8 @@ def get_quarterly_board(year: int, quarter: int, response: Response,
             "credits": r[4], "duration": r[5], "status": enum_map.get(str(r[6]), str(r[6])),
             "asset_count": r[7], "has_secret": r[8],
             "drive_folder_url": r[9],
-            "is_tentative": r[10]
+            "is_tentative": r[10],
+            "kiss24": str(r[11]) if r[11] else None
         })
 
     # 4. Tests (Scheduled) - Force stages::text to prevent serialization errors
@@ -216,7 +217,7 @@ def get_quarterly_board(year: int, quarter: int, response: Response,
                    (SELECT COUNT(*) FROM test_assets WHERE test_id = t.id),
                    EXISTS(SELECT 1 FROM secret_notes WHERE test_id = t.id),
                    t.drive_folder_url,
-                   t.is_tentative
+                   t.is_tentative, t.kiss24
             FROM tests t
             WHERE t.stages::text IN ('SCHEDULED', 'IN_PROGRESS', 'STOPPED', 'COMPLETED') 
               AND t.start_year = %s 
@@ -232,7 +233,8 @@ def get_quarterly_board(year: int, quarter: int, response: Response,
             "credits": r[4], "duration": r[5], "startWeek": r[6], "startYear": r[7],
             "status": enum_map.get(str(r[8]), str(r[8])), "asset_count": r[9], "has_secret": r[10],
             "drive_folder_url": r[11],
-            "is_tentative": r[12]
+            "is_tentative": r[12],
+            "kiss24": str(r[13]) if r[13] else None
         })
 
     # 5. Assignments

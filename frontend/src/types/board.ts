@@ -38,6 +38,7 @@ export interface Test {
   drive_folder_url?: string;
   auto_provision_workspace?: boolean;
   is_tentative?: boolean;
+  kiss24?: string;
 }
 
 export interface Assignment {

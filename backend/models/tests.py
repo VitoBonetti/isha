@@ -32,6 +32,7 @@ class Tests(Base):
     is_tentative = Column(Boolean, default=False)
     drive_folder_id = Column(String(255), nullable=True)
     drive_folder_url = Column(String(1000), nullable=True)
+    kiss24 = Column(UUID(as_uuid=True), nullable=True)
 
     # relationship
     services_lanes = relationship("ServiceLanes", back_populates="tests")

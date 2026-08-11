@@ -104,11 +104,12 @@ def create_test(t: TestCreate, background_tasks: BackgroundTasks,
 def get_all_tests(current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
     cursor.execute('''
         SELECT t.id, t.name, t.start_week, t.start_year, t.duration_weeks, t.stages::text as status,
-               s.name as service_lane_name, s.is_active as is_service_active, 
-               s.auto_provision_workspace, -- <-- NEW
-               COALESCE((SELECT string_agg(DISTINCT u.name, ', ') FROM assignments a JOIN users u ON a.user_id = u.id WHERE a.test_id = t.id), 'Unassigned') as assigned_pentesters,
-               EXISTS(SELECT 1 FROM secret_notes WHERE test_id = t.id) as has_secret,
-               t.drive_folder_url -- <-- NEW
+            s.name as service_lane_name, s.is_active as is_service_active,
+            s.auto_provision_workspace,
+            COALESCE((SELECT string_agg(DISTINCT u.name, ', ') FROM assignments a JOIN users u ON a.user_id = u.id WHERE a.test_id = t.id), 'Unassigned') as assigned_pentesters,
+            EXISTS(SELECT 1 FROM secret_notes WHERE test_id = t.id) as has_secret,
+            t.drive_folder_url,
+            t.kiss24 
         FROM tests t LEFT JOIN services_lanes s ON t.service_lane_id = s.id
         ORDER BY t.start_year DESC NULLS LAST, t.start_week DESC NULLS LAST, t.name ASC
     ''')
@@ -137,13 +138,14 @@ def update_test(test_id: str, t: TestBase, background_tasks: BackgroundTasks,
         cursor.execute('UPDATE tests SET start_week = NULL, start_year = NULL WHERE id = %s', (test_id,))
 
     cat_id = str(t.category_id) if hasattr(t, 'category_id') and t.category_id else None
+    kiss24_val = str(t.kiss24) if hasattr(t, 'kiss24') and t.kiss24 else None
 
     # Update the test
     cursor.execute('''
         UPDATE tests 
-         SET name=%s, service_lane_id=%s, category_id=%s, credits_per_week=%s, duration_weeks=%s, stages=%s, is_tentative=%s
+         SET name=%s, service_lane_id=%s, category_id=%s, credits_per_week=%s, duration_weeks=%s, stages=%s, is_tentative=%s, kiss24=%s
         WHERE id=%s
-    ''', (t.name, str(t.service_lane_id), cat_id, t.credits_per_week, t.duration_weeks, db_stage, t.is_tentative,
+    ''', (t.name, str(t.service_lane_id), cat_id, t.credits_per_week, t.duration_weeks, db_stage, t.is_tentative, kiss24_val,
           test_id))
 
     log_test_history(cursor, test_id, current_user['id'], "UPDATED",

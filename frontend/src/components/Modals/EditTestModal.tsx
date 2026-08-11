@@ -14,6 +14,7 @@ export default function EditTestModal({ isOpen, test, boardData, onClose, onSubm
   const [name, setName] = useState('');
   const [serviceLaneId, setServiceLaneId] = useState('');
   const [categoryId, setCategoryId] = useState('');
+  const [kiss24, setKiss24] = useState('');
   const [credits, setCredits] = useState(2.0);
   const [duration, setDuration] = useState(1);
   const [isTentative, setIsTentative] = useState(false);
@@ -24,6 +25,7 @@ export default function EditTestModal({ isOpen, test, boardData, onClose, onSubm
       setName(test.name || '');
       setServiceLaneId(test.service_lane_id || '');
       setCategoryId(test.category_id || '');
+      setKiss24(test.kiss24 || '');
       setCredits(test.credits || 2.0);
       setDuration(test.duration || 1);
       setIsTentative(test.is_tentative || false);
@@ -43,6 +45,7 @@ export default function EditTestModal({ isOpen, test, boardData, onClose, onSubm
       name,
       service_lane_id: serviceLaneId,
       category_id: categoryId === '' ? null : categoryId,
+      kiss24: kiss24,
       credits_per_week: credits,
       duration_weeks: duration,
       status: test.status,
@@ -97,6 +100,11 @@ export default function EditTestModal({ isOpen, test, boardData, onClose, onSubm
               <label className="block text-[11px] sm:text-xs font-bold text-slate-700 dark:text-zinc-300 mb-1.5">Duration (Weeks)</label>
               <input type="number" step="1" min="1" required value={duration} onChange={e => setDuration(parseInt(e.target.value))} className="w-full px-3 py-2.5 sm:py-2 bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-lg text-sm text-slate-900 dark:text-zinc-100 focus:ring-2 focus:ring-blue-500 outline-none transition-shadow"/>
             </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-700 dark:text-zinc-300 mb-1.5">Keep Secure Test UUID</label>
+            <input type="text" value={kiss24} onChange={e => setKiss24(e.target.value)} className="w-full px-3 py-2.5 sm:py-2 bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-lg text-sm text-slate-900 dark:text-zinc-100 focus:ring-2 focus:ring-blue-500 outline-none transition-shadow"/>
           </div>
 
           <div className="mt-2">
