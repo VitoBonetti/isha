@@ -5,6 +5,7 @@ import base64
 import hashlib
 import httpx
 import json
+import asyncio
 from datetime import datetime
 from cryptography.fernet import Fernet
 from pydantic import BaseModel, UUID4
@@ -17,6 +18,7 @@ from websockets_manager import manager
 from schema import TestCreate, TestBase, AssignmentBase, TestSchedule, BulkTestCreate, AssignmentCreate, SecureNotePayload
 from audit_logger import log_audit_event
 from utils.drive_manager import DriveManager, background_archive_workspace, background_provision_workspace, background_relocate_workspace
+from reports.presentation import generate_presentation
 
 router = APIRouter(prefix="/api/tests", tags=["Tests & Assignments"])
 
@@ -655,61 +657,46 @@ def toggle_tentative(test_id: str, background_tasks: BackgroundTasks,
     return {"message": state_str}
 
 
-# --- External  Generation PPT ---
-async def process_presentation_background(test_id: str, kiss24_id: str, user_id: str, user_email: str, test_name: str):
-    """Background task that calls the Cloud Run function and creates a user notification upon completion."""
-    target_url = "https://us-central1-df-watchtower-prd-e31f.cloudfunctions.net/generate-presentation"
-
+# --- Generation PPT ---
+async def process_presentation_background(test_id: str, kiss24_id: str, user_id: str, user_email: str, test_name: str,
+                                          drive_folder_id: str, service_name: str, snow_number: str):
+    """Background task that generates the presentation locally via a thread."""
     try:
-        # authenticate and get the GCP Identity Token
-        auth_req = google.auth.transport.requests.Request()
-        token = google.oauth2.id_token.fetch_id_token(auth_req, target_url)
+        # Pass the database values to the generator
+        data = await asyncio.to_thread(
+            generate_presentation,
+            kiss24_id,
+            drive_folder_id,
+            service_name,
+            snow_number
+        )
 
-        # caall the  function
-        async with httpx.AsyncClient(timeout=300.0) as client:
-            response = await client.post(
-                target_url,
-                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-                json={"testid": kiss24_id}
-            )
-            response.raise_for_status()
-            data = response.json()
+        drive_link = data.get("driveLink", "No link returned")
+        warnings_dict = data.get("warnings", {})
 
-            # Extract the extended data payload
-            drive_link = data.get("driveLink", "No link returned")
-            warnings_dict = data.get("warnings", {})
+        # Format the unhealthy warnings into a readable list
+        issues = []
+        if isinstance(warnings_dict, dict):
+            for key, info in warnings_dict.items():
+                if isinstance(info, dict) and not info.get("healthy"):
+                    issues.append(f"{key.capitalize()}: {info.get('reason')}")
 
-            # Format the unhealthy warnings into a readable list
-            issues = []
-            if isinstance(warnings_dict, dict):
-                for key, info in warnings_dict.items():
-                    if isinstance(info, dict) and not info.get("healthy"):
-                        issues.append(f"{key.capitalize()}: {info.get('reason')}")
+        if issues:
+            issues_text = "\n\n[!] Warnings:\n- " + "\n- ".join(issues)
+        else:
+            issues_text = "\n\n[+] Health Check: 100% Healthy (No warnings)"
 
-            issues_text = ""
-            if issues:
-                issues_text = "\nWarnings:\n- " + "\n- ".join(issues)
+        message = f"Presentation for '{test_name}' is ready!\nLink: {drive_link}{issues_text}"
+        notif_type = "SUCCESS"
 
-            # Build the rich notification message
-            message = f"Presentation for '{test_name}' is ready!\nLink: {drive_link}{issues_text}"
-            notif_type = "SUCCESS"
-
-            # Broadcast the completion toast directly to the user who requested it
-            await manager.broadcast(json.dumps({
-                "action": "PRESENTATION_READY",
-                "email": user_email,
-                "message": f"Presentation for {test_name} generated successfully!"
-            }))
-
-    except httpx.HTTPStatusError as e:
-        message = f"Generation failed for '{test_name}'. Server returned {e.response.status_code}."
-        notif_type = "ERROR"
         await manager.broadcast(json.dumps({
-            "action": "PRESENTATION_FAILED",
+            "action": "PRESENTATION_READY",
             "email": user_email,
-            "message": message
+            "message": f"Presentation for {test_name} generated successfully!"
         }))
+
     except Exception as e:
+        print(f"Error generating presentation: {e}")
         message = f"Generation failed for '{test_name}'. Error: {str(e)}"
         notif_type = "ERROR"
         await manager.broadcast(json.dumps({
@@ -729,32 +716,46 @@ async def process_presentation_background(test_id: str, kiss24_id: str, user_id:
     await manager.broadcast('{"action": "REFRESH_BOARD"}')
 
 
-@router.post("/{test_id}/presentation")
+@router.post("/{test_id}/presentation", summary="[Admin & Pentester]")
 def trigger_presentation_generation(test_id: str, background_tasks: BackgroundTasks,
                                     current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
-
     if current_user.get('role') == 'read_only':
         raise HTTPException(status_code=403, detail="Read-only users cannot trigger generation.")
 
-    # get the kiss24 UUID from the test
-    cursor.execute("SELECT name, kiss24 FROM tests WHERE id = %s", (test_id,))
+    # SUPERCHARGED QUERY: Get the test, the workspace, the service lane, and the SNOW number all at once
+    cursor.execute("""
+        SELECT t.name, t.kiss24, t.drive_folder_id, sl.name as service_name, ra.snow_number 
+        FROM tests t
+        LEFT JOIN services_lanes sl ON t.service_lane_id = sl.id
+        LEFT JOIN test_assets ta ON t.id = ta.test_id
+        LEFT JOIN assets a ON ta.asset_id = a.id
+        LEFT JOIN raw_assets ra ON a.raw_asset_id = ra.id
+        WHERE t.id = %s LIMIT 1
+    """, (test_id,))
+
     row = cursor.fetchone()
 
     if not row:
         raise HTTPException(status_code=404, detail="Test not found.")
 
-    test_name, kiss24_id = row
+    test_name, kiss24_id, drive_folder_id, service_name, snow_number = row
 
     if not kiss24_id:
         raise HTTPException(status_code=400, detail="Missing kiss24 UUID. Please set it in the test settings first.")
 
-    # longrunning job in the background
+    # REQUIREMENT 1: Ensure the Drive Workspace exists before starting!
+    if not drive_folder_id:
+        raise HTTPException(status_code=400,
+                            detail="Missing Drive Workspace. Please click the 'Create Drive Workspace' button first.")
+
     background_tasks.add_task(
         process_presentation_background,
-        test_id, str(kiss24_id), str(current_user["id"]), current_user["email"], test_name
+        test_id, str(kiss24_id), str(current_user["id"]), current_user["email"], test_name,
+        drive_folder_id, service_name, snow_number
     )
 
-    log_audit_event(str(current_user["id"]), current_user["role"], "PRESENTATION_TRIGGERED", "TESTS", test_id, "Triggered Cloud Function presentation generation.")
+    log_audit_event(str(current_user["id"]), current_user["role"], "PRESENTATION_TRIGGERED", "TESTS", test_id,
+                    "Triggered internal presentation generation.")
 
     return {
         "message": "Presentation generation started in the background. You will receive a notification when it's ready!"}
