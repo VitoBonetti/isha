@@ -3,10 +3,13 @@ import uuid
 import os
 import base64
 import hashlib
+import httpx
 from datetime import datetime
 from cryptography.fernet import Fernet
 from pydantic import BaseModel, UUID4
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
+import google.auth.transport.requests
+import google.oauth2.id_token
 from database import get_db_cursor, db_cursor_context
 from routers.auth import get_current_user, require_admin, require_write_access
 from websockets_manager import manager
@@ -649,3 +652,77 @@ def toggle_tentative(test_id: str, background_tasks: BackgroundTasks,
     cursor.connection.commit()
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": state_str}
+
+
+# --- External  Generation PPT ---
+async def process_presentation_background(test_id: str, kiss24_id: str, user_id: str, test_name: str):
+    """Background task that calls the Cloud Run function and creates a user notification upon completion."""
+    target_url = "https://us-central1-df-watchtower-prd-e31f.cloudfunctions.net/generate-presentation"
+
+    try:
+        # authenticate and get the GCP Identity Token
+        auth_req = google.auth.transport.requests.Request()
+        token = google.oauth2.id_token.fetch_id_token(auth_req, target_url)
+
+        # caall the  function
+        async with httpx.AsyncClient(timeout=300.0) as client:
+            response = await client.post(
+                target_url,
+                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                json={"testid": kiss24_id}
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            drive_link = data.get("driveLink", "No link returned")
+
+            # clickable markdown/html link for the notification
+            message = f"Presentation for '{test_name}' is ready! Link: {drive_link}"
+            notif_type = "SUCCESS"
+
+    except httpx.HTTPStatusError as e:
+        message = f"Generation failed for '{test_name}'. Server returned {e.response.status_code}."
+        notif_type = "ERROR"
+    except Exception as e:
+        message = f"Generation failed for '{test_name}'. Error: {str(e)}"
+        notif_type = "ERROR"
+
+    # save the result as a notification for the user
+    with db_cursor_context() as cursor:
+        if cursor:
+            cursor.execute(
+                "INSERT INTO notifications (id, user_id, message, type, created_at) VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)",
+                (str(uuid.uuid4()), user_id, message, notif_type)
+            )
+
+    await manager.broadcast('{"action": "REFRESH_BOARD"}')
+
+
+@router.post("/{test_id}/presentation")
+def trigger_presentation_generation(test_id: str, background_tasks: BackgroundTasks,
+                                    current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+
+    if current_user.get('role') == 'read_only':
+        raise HTTPException(status_code=403, detail="Read-only users cannot trigger generation.")
+
+    # get the kiss24 UUID from the test
+    cursor.execute("SELECT name, kiss24 FROM tests WHERE id = %s", (test_id,))
+    row = cursor.fetchone()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Test not found.")
+
+    test_name, kiss24_id = row
+
+    if not kiss24_id:
+        raise HTTPException(status_code=400, detail="Missing kiss24 UUID. Please set it in the test settings first.")
+
+    # longrunning job in the background
+    background_tasks.add_task(process_presentation_background, test_id, str(kiss24_id), str(current_user["id"]),
+                              test_name)
+
+    log_audit_event(str(current_user["id"]), current_user["role"], "PRESENTATION_TRIGGERED", "TESTS", test_id,
+                    "Triggered Cloud Function presentation generation.")
+
+    return {
+        "message": "Presentation generation started in the background. You will receive a notification when it's ready!"}

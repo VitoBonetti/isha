@@ -298,6 +298,16 @@ export default function Planner() {
     }
   };
 
+  const handleCreatePresentation = async (testId: string) => {
+    const toastId = toast.loading("Starting presentation generation...");
+    try {
+      const res = await axios.post(`/api/tests/${testId}/presentation`);
+      toast.success(res.data.message, { id: toastId, duration: 5000 });
+    } catch (error: any) {
+      toast.error(error.response?.data?.detail || "Failed to start generation.", { id: toastId })
+    }
+  };
+
   return (
     <>
       <PlannerView
@@ -323,6 +333,7 @@ export default function Planner() {
         handleRevertUnable={handleRevertUnable}
         handleCreateWorkspace={handleCreateWorkspace}
         handleToggleTentative={handleToggleTentative}
+        handleCreatePresentation={handleCreatePresentation}
         assignModalTest={assignModalTest}
         setAssignModalTest={setAssignModalTest}
         backlogFilter={backlogFilter}

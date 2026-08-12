@@ -35,6 +35,7 @@ interface PlannerViewProps {
   handleRevertUnable: (testId: string) => void;
   handleCreateWorkspace: (testId: string) => void;
   handleToggleTentative: (testId: string) => void;
+  handleCreatePresentation: (testId: string) => void;
   assignModalTest: Test | null;
   setAssignModalTest: (test: Test | null) => void;
   backlogFilter: string;
@@ -61,7 +62,7 @@ export default function PlannerView({
   boardData, setNewTest, setShowTestForm,
   onDragEnd, handleAssignTeam, handleCompleteTest, handleUnscheduleTest, handleUnassignPentester,
   handleDeleteTest, handleDuplicateTest, openEditModal, handleMarkUnable, handleRevertComplete, handleRevertUnable, handleCreateWorkspace, handleToggleTentative,
-  assignModalTest, setAssignModalTest, backlogFilter, setBacklogFilter, setTargetYear
+  handleCreatePresentation, assignModalTest, setAssignModalTest, backlogFilter, setBacklogFilter, setTargetYear
 }: PlannerViewProps) {
 
   const navigate = useNavigate();
@@ -412,7 +413,14 @@ export default function PlannerView({
                                                   </div>
                                                   {service?.auto_provision_workspace && (
                                                     <div className="mt-1 pt-1 border-t border-slate-200 dark:border-zinc-600 grid grid-cols-3 gap-1">
-                                                      <button title="Create Presentation" className="p-1.5 flex items-center justify-center rounded text-purple-500 hover:text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-900/30 transition-colors" onClick={(e) => { e.stopPropagation(); console.log("Create Presentation", test.id); }}>
+                                                      <button
+                                                        title="Create Presentation"
+                                                        className="p-1.5 flex items-center justify-center rounded text-purple-500 hover:text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-900/30 transition-colors"
+                                                        onClick={(e) => {
+                                                          e.stopPropagation();
+                                                          handleCreatePresentation(test.id);
+                                                        }}
+                                                      >
                                                         <Presentation size={14}/>
                                                       </button>
                                                       <button title="Generate PDF" className="p-1.5 flex items-center justify-center rounded text-rose-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/30 transition-colors" onClick={(e) => { e.stopPropagation(); console.log("Generate PDF", test.id); }}>
