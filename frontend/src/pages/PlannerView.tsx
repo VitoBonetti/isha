@@ -35,7 +35,7 @@ interface PlannerViewProps {
   handleRevertUnable: (testId: string) => void;
   handleCreateWorkspace: (testId: string) => void;
   handleToggleTentative: (testId: string) => void;
-  handleCreatePresentation: (testId: string) => void;
+  handleCreatePresentation: (test: Test) => void;
   assignModalTest: Test | null;
   setAssignModalTest: (test: Test | null) => void;
   backlogFilter: string;
@@ -418,7 +418,7 @@ export default function PlannerView({
                                                         className="p-1.5 flex items-center justify-center rounded text-purple-500 hover:text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-900/30 transition-colors"
                                                         onClick={(e) => {
                                                           e.stopPropagation();
-                                                          handleCreatePresentation(test.id);
+                                                          handleCreatePresentation(test);
                                                         }}
                                                       >
                                                         <Presentation size={14}/>
@@ -593,7 +593,14 @@ export default function PlannerView({
                             {/* Divider to force a new line */}
                             <div className="w-full h-px bg-slate-100 dark:bg-zinc-800 my-1"></div>
 
-                            <button title="Create Presentation" className="p-2 flex items-center justify-center rounded-lg text-purple-600 bg-purple-50 dark:bg-purple-900/20" onClick={(e) => { e.stopPropagation(); console.log("Create Presentation", test.id); }}>
+                            <button
+                              title="Create Presentation"
+                              className="p-2 flex items-center justify-center rounded-lg text-purple-600 bg-purple-50 dark:bg-purple-900/20"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleCreatePresentation(test);
+                              }}
+                            >
                               <Presentation size={14}/>
                             </button>
                             <button title="Generate PDF" className="p-2 flex items-center justify-center rounded-lg text-rose-600 bg-rose-50 dark:bg-rose-900/20" onClick={(e) => { e.stopPropagation(); console.log("Generate PDF", test.id); }}>

@@ -1,13 +1,15 @@
 import { useState, useEffect, useRef } from "react";
 import axios from "axios";
-import toast from "react-hot-toast";
+import toast, { Toaster } from "react-hot-toast";
 import type { DropResult } from '@hello-pangea/dnd';
+import { useAppContext } from '../context/AppContext';
 import PlannerView from "./PlannerView";
 import ConfirmModal from "../components/Modals/ConfirmModal";
 import EditTestModal from "../components/Modals/EditTestModal";
 import type { BoardData, Test } from "../types/board";
 
 export default function Planner() {
+  const { currentUser } = useAppContext();
   const [boardData, setBoardData] = useState<BoardData | null>(null);
 
   // Time state
@@ -58,7 +60,14 @@ export default function Planner() {
           // Dispatch a global event so your TopNav knows to re-fetch notifications!
           window.dispatchEvent(new CustomEvent('refresh_notifications'));
         }
-        // 3. Listen for User Presence (Other admins opening the page)
+        // 3: Listen for targeted presentation toasts ---
+        else if (data.action === 'PRESENTATION_READY' && data.email === currentUser?.email) {
+          toast.success(data.message, { duration: 8000 });
+        }
+        else if (data.action === 'PRESENTATION_FAILED' && data.email === currentUser?.email) {
+          toast.error(data.message, { duration: 8000 });
+        }
+        // 4. Listen for User Presence (Other admins opening the page)
         else if (data.action === 'ONLINE_USERS' && data.users) {
           setOnlineUsers(data.users);
         }
@@ -298,10 +307,14 @@ export default function Planner() {
     }
   };
 
-  const handleCreatePresentation = async (testId: string) => {
-    const toastId = toast.loading("Starting presentation generation...");
+  const handleCreatePresentation = async (test: Test) => {
+    if (!test.kiss24) {
+      toast.error(`Missing kiss24 UUID for '${test.name}'. Please edit the test and add it first.`);
+      return;
+    }
+    const toastId = toast.loading(`Starting presentation generation for ${test.name}...`);
     try {
-      const res = await axios.post(`/api/tests/${testId}/presentation`);
+      const res = await axios.post(`/api/tests/${test.id}/presentation`);
       toast.success(res.data.message, { id: toastId, duration: 5000 });
     } catch (error: any) {
       toast.error(error.response?.data?.detail || "Failed to start generation.", { id: toastId })
@@ -310,6 +323,7 @@ export default function Planner() {
 
   return (
     <>
+      <Toaster position="bottom-right" />
       <PlannerView
         onlineUsers={onlineUsers}
         targetYear={targetYear}

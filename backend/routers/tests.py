@@ -4,6 +4,7 @@ import os
 import base64
 import hashlib
 import httpx
+import json
 from datetime import datetime
 from cryptography.fernet import Fernet
 from pydantic import BaseModel, UUID4
@@ -655,7 +656,7 @@ def toggle_tentative(test_id: str, background_tasks: BackgroundTasks,
 
 
 # --- External  Generation PPT ---
-async def process_presentation_background(test_id: str, kiss24_id: str, user_id: str, test_name: str):
+async def process_presentation_background(test_id: str, kiss24_id: str, user_id: str, user_email: str, test_name: str):
     """Background task that calls the Cloud Run function and creates a user notification upon completion."""
     target_url = "https://us-central1-df-watchtower-prd-e31f.cloudfunctions.net/generate-presentation"
 
@@ -674,20 +675,50 @@ async def process_presentation_background(test_id: str, kiss24_id: str, user_id:
             response.raise_for_status()
             data = response.json()
 
+            # Extract the extended data payload
             drive_link = data.get("driveLink", "No link returned")
+            warnings_dict = data.get("warnings", {})
 
-            # clickable markdown/html link for the notification
-            message = f"Presentation for '{test_name}' is ready! Link: {drive_link}"
+            # Format the unhealthy warnings into a readable list
+            issues = []
+            if isinstance(warnings_dict, dict):
+                for key, info in warnings_dict.items():
+                    if isinstance(info, dict) and not info.get("healthy"):
+                        issues.append(f"{key.capitalize()}: {info.get('reason')}")
+
+            issues_text = ""
+            if issues:
+                issues_text = "\nWarnings:\n- " + "\n- ".join(issues)
+
+            # Build the rich notification message
+            message = f"Presentation for '{test_name}' is ready!\nLink: {drive_link}{issues_text}"
             notif_type = "SUCCESS"
+
+            # Broadcast the completion toast directly to the user who requested it
+            await manager.broadcast(json.dumps({
+                "action": "PRESENTATION_READY",
+                "email": user_email,
+                "message": f"Presentation for {test_name} generated successfully!"
+            }))
 
     except httpx.HTTPStatusError as e:
         message = f"Generation failed for '{test_name}'. Server returned {e.response.status_code}."
         notif_type = "ERROR"
+        await manager.broadcast(json.dumps({
+            "action": "PRESENTATION_FAILED",
+            "email": user_email,
+            "message": message
+        }))
     except Exception as e:
         message = f"Generation failed for '{test_name}'. Error: {str(e)}"
         notif_type = "ERROR"
+        await manager.broadcast(json.dumps({
+            "action": "PRESENTATION_FAILED",
+            "email": user_email,
+            "message": message
+        }))
 
-    # save the result as a notification for the user
+    # Save the result as a notification for the user
     with db_cursor_context() as cursor:
         if cursor:
             cursor.execute(
@@ -718,11 +749,12 @@ def trigger_presentation_generation(test_id: str, background_tasks: BackgroundTa
         raise HTTPException(status_code=400, detail="Missing kiss24 UUID. Please set it in the test settings first.")
 
     # longrunning job in the background
-    background_tasks.add_task(process_presentation_background, test_id, str(kiss24_id), str(current_user["id"]),
-                              test_name)
+    background_tasks.add_task(
+        process_presentation_background,
+        test_id, str(kiss24_id), str(current_user["id"]), current_user["email"], test_name
+    )
 
-    log_audit_event(str(current_user["id"]), current_user["role"], "PRESENTATION_TRIGGERED", "TESTS", test_id,
-                    "Triggered Cloud Function presentation generation.")
+    log_audit_event(str(current_user["id"]), current_user["role"], "PRESENTATION_TRIGGERED", "TESTS", test_id, "Triggered Cloud Function presentation generation.")
 
     return {
         "message": "Presentation generation started in the background. You will receive a notification when it's ready!"}
