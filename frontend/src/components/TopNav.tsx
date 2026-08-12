@@ -80,6 +80,30 @@ export default function TopNav() {
   const unreadCount = notifications?.length || 0;
   const userInitial = currentUser?.name ? currentUser.name.charAt(0).toUpperCase() : "";
 
+  const renderMessageWithLinks = (text: string) => {
+    if (!text) return null;
+    const urlRegex = /(https?:\/\/[^\s]+)/g;
+    const parts = text.split(urlRegex);
+
+    return parts.map((part, i) => {
+      if (part.match(urlRegex)) {
+        return (
+          <a
+            key={i}
+            href={part}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-blue-500 hover:text-blue-600 hover:underline font-bold"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {part}
+          </a>
+        );
+      }
+      return <span key={i}>{part}</span>;
+    });
+  };
+
   return (
     <>
     <nav className="fixed top-6 left-1/2 -translate-x-1/2 z-50 flex items-center justify-between w-[95%] max-w-5xl px-4 md:px-6 py-3 bg-white/70 dark:bg-zinc-950/60 backdrop-blur-xl border border-slate-200 dark:border-zinc-800/80 rounded-full shadow-xl dark:shadow-2xl transition-colors">
@@ -175,8 +199,10 @@ export default function TopNav() {
                   notifications.map((n: any) => (
                     <div key={n.id} className={`p-4 border-b border-slate-100 dark:border-zinc-800 flex gap-3 ${n.type === 'REMOVAL' ? 'bg-red-50/50 dark:bg-red-950/20' : ''}`}>
                       <div className="text-lg">{n.type === 'REMOVAL' ? '🛑' : '✅'}</div>
-                      <div>
-                        <p className="text-sm font-medium mb-1">{n.message}</p>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium mb-1 whitespace-pre-wrap break-words leading-relaxed">
+                          {renderMessageWithLinks(n.message)}
+                        </p>
                         <span className="text-xs text-slate-400">{new Date(n.created_at).toLocaleString()}</span>
                       </div>
                     </div>
