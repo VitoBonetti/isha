@@ -324,13 +324,13 @@ export default function PlannerView({
                                       <Draggable key={test.id} draggableId={test.id} index={index} isDragDisabled={currentUser?.role === 'pentester' || test.status === 'Completed' || test.status === 'Stopped'}>
                                         {(provided) => (
                                             <div ref={provided.innerRef} {...provided.draggableProps} {...provided.dragHandleProps}
-                                              className={`p-3.5 bg-white dark:bg-zinc-900 rounded-xl shadow-md hover:shadow-xl hover:-translate-y-0.5 mb-2.5 transition-all duration-200 group relative overflow-hidden ${
+                                              className={`p-3.5 bg-white dark:bg-zinc-900 rounded-xl shadow-md hover:shadow-xl hover:-translate-y-0.5 mb-2.5 transition-all duration-200 group relative hover:z-[60] ${
                                                 test.status === 'Stopped' ? 'border border-red-200 bg-red-50/30 dark:border-red-900/50 dark:bg-red-950/20' :
                                                 isAssignedToMe ? 'border-2 border-blue-400 dark:border-blue-500 shadow-[0_4px_12px_rgba(59,130,246,0.2)]' :
                                                 'border border-slate-200 dark:border-zinc-700/80'
                                               } ${shouldDim ? 'opacity-20 grayscale' : 'opacity-100'}`}
                                             >
-                                              <div className="absolute top-0 left-0 right-0 h-1" style={{ backgroundColor: test.status === 'Stopped' ? '#ef4444' : test.status === 'Completed' ? '#10b981' : service.theme_color }} />
+                                              <div className="absolute top-0 left-0 right-0 h-1 rounded-t-xl" style={{ backgroundColor: test.status === 'Stopped' ? '#ef4444' : test.status === 'Completed' ? '#10b981' : service.theme_color }} />
 
                                               <div className="flex justify-between items-start mb-1 mt-1">
                                                 <div className="font-bold text-xs text-slate-900 dark:text-zinc-100 leading-tight pr-4">
@@ -344,7 +344,8 @@ export default function PlannerView({
                                               {renderQualityAndTeam()}
                                               {/* Action Menu (Accessible by Pentesters & Admins) */}
                                               {currentUser?.role !== 'read_only' && (
-                                                <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity bg-white/90 dark:bg-zinc-800/90 backdrop-blur-sm rounded-lg shadow-sm border border-slate-100 dark:border-zinc-700 p-1 z-[100]">
+                                              <div className="absolute top-0 left-[calc(100%-16px)] pl-4 opacity-0 group-hover:opacity-100 transition-opacity z-[100] pointer-events-none group-hover:pointer-events-auto">
+                                                <div className="bg-white/95 dark:bg-zinc-800/95 backdrop-blur-xl rounded-xl shadow-2xl border border-slate-200 dark:border-zinc-700 p-1.5 w-max">
                                                   <div className="grid grid-cols-4 gap-1">
                                                     {test.status === 'Completed' ? (
                                                       <>
@@ -432,6 +433,7 @@ export default function PlannerView({
                                                     </div>
                                                   )}
                                                 </div>
+                                              </div>
                                               )}
                                             </div>
                                         )}

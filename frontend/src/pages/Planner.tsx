@@ -276,6 +276,9 @@ export default function Planner() {
 
   const handleUpdateTest = async (testId: string, updatedData: any) => {
     try {
+      if (updatedData.kiss24 === "") {
+        updatedData.kiss24 = null;
+      }
       await axios.put(`/api/tests/${testId}`, updatedData);
       toast.success("Test settings updated!");
       setEditModalTest(null);
