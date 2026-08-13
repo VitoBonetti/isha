@@ -731,7 +731,7 @@ def generate_presentation(test_uuid: str, db_drive_folder_id: str, db_service_na
     asset = retrieve_asset_info(session, headers, test_uuid)[0]
     vulns = retrieve_vulns_by_test(session, headers, test_uuid)
 
-    # REQUIREMENT 2 & 3: Use the database values, fallback to API if DB is empty
+    # Use the database values, fallback to API if DB is empty
     test_service = db_service_name if db_service_name else retrieve_test_service(session, headers, test_uuid)
     onetrust_id = db_snow_number if db_snow_number else retrieve_onetrust_id(session, headers, asset["uuid"])
 
@@ -745,16 +745,342 @@ def generate_presentation(test_uuid: str, db_drive_folder_id: str, db_service_na
 
     replacements["[DURATION]"] = f"{test_duration_days if test_duration_days > 0 else 1} day(s)"
     replacements["[OPCO]"] = test["organisation"]["name"]
-    replacements["[SERVICE_TYPE]"] = test_service  # DB value
+    replacements["[SERVICE_TYPE]"] = test_service
     replacements["[TARGET_NAME]"] = asset["name"]
-    replacements["[ASSET_ID]"] = onetrust_id  # DB value
+    replacements["[ASSET_ID]"] = onetrust_id
     replacements["[START_DATE]"] = test_start.strftime("%d/%m/%Y")
     replacements["[END_DATE]"] = test_end.strftime("%d/%m/%Y")
     replacements["[TOTAL_VULNS]"] = str(len(vulns))
     replacements["[VULNS_SUMMARY]"] = vulns_summary_text(vulns, presentation)
 
-    # ... [Keep the rest of your original PPTX generation logic] ...
+    h_parser = html2text.HTML2Text()
+    h_parser.body_width = 0
+    details_text = h_parser.handle(test.get('details', ''))
+    req_id_match = re.search(r"ServiceNow Request ID:\s*(\S+)", details_text)
+    replacements["[REQUEST_ID]"] = req_id_match.group(1) if req_id_match else "N/A"
 
+    mgmt_summary_match = re.search(r'\[MANAGEMENT SUMMARY\]\s*\n(.*?)(?=\n#|\Z)', details_text, re.DOTALL | re.I)
+    if mgmt_summary_match:
+        replacements["[MANAGEMENT_SUMMARY]"] = mgmt_summary_match.group(1).strip()
+    else:
+        replacements["[MANAGEMENT_SUMMARY]"] = "No summary provided."
+
+    # --- Build Presentation ---
+    print("Populating presentation slides...")
+
+    for slide in presentation.slides:
+        replace_text_in_slide(slide, replacements)
+
+    severity_order = ["critical", "high", "medium", "low", "info"]
+    sorted_vulns = sorted(vulns, key=lambda v: severity_order.index(v['severity'].lower()))
+
+    # LIST OF FINDINGS slide
+    slide = _add_slide(presentation, "title only", slide_layouts)
+    slide.placeholders[0].text = "list of findings"
+    shape = slide.shapes.add_table(len(sorted_vulns) + 1, 3, Inches(0.8), Inches(1.7), Inches(11), Inches(1))
+    table = shape.table
+    table.columns[0].width, table.columns[1].width, table.columns[2].width = Inches(7), Inches(2), Inches(2)
+    table.cell(0, 0).text, table.cell(0, 1).text, table.cell(0, 2).text = "finding", "severity", "status"
+    for i, vuln in enumerate(sorted_vulns):
+        table.cell(i + 1, 0).text = vuln['description']
+        table.cell(i + 1, 1).text = vuln['severity']
+        state = vuln['state']
+        table.cell(i + 1, 2).text = "Open" if state in ["Unpublished", "Ready To Publish", "New"] else state
+
+    # VULN DETAIL slides
+    for vuln in sorted_vulns:
+        slide = _add_slide(presentation, "detailed vuln", slide_layouts)
+
+        soup = BeautifulSoup(vuln['details'], 'html.parser')
+        sections = {}
+        for h1 in soup.find_all('h1'):
+            content = []
+            for sibling in h1.find_next_siblings():
+                if sibling.name == 'h1':
+                    break
+                content.append(sibling.get_text(strip=True))
+            sections[h1.get_text(strip=True)] = "\n".join(content)
+
+        try:
+            a, b, c, d, e, f, g, h_pl = slide.placeholders
+            a.text = vuln["description"] or "No title provided"
+            b.text = vuln["severity"] or "Unknown"
+            c.text = "impact"
+            d.text = sections.get("Impact", "Not provided.")
+            e.text = "recommendation"
+            f.text = sections.get("Recommendation", "Not provided.")
+            g.text = "description"
+            h_pl.text = sections.get("Description", "Not provided.")
+
+            # Set severity color
+            fill = b.fill
+            fill.solid()
+            fill.fore_color.rgb = gColorsRisk.get(vuln["severity"], gColors['black'])
+            if vuln["severity"] == "Low":
+                b.text_frame.paragraphs[0].runs[0].font.color.rgb = RGBColor(0, 0, 0)
+
+            # Set word wrap and auto size
+            a.text_frame.word_wrap = True
+            a.text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+            b.text_frame.word_wrap = True
+            b.text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+            d.text_frame.word_wrap = True
+            d.text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+            f.text_frame.word_wrap = True
+            f.text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+            h_pl.text_frame.word_wrap = True
+            h_pl.text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+        except ValueError as err:
+            print(f"Error accessing placeholders for vulnerability {vuln['description']}: {err}")
+            # Fallback: Add text boxes
+            title_box = slide.shapes.add_textbox(Inches(1), Inches(1), Inches(11), Inches(0.5))
+            tf = title_box.text_frame
+            tf.word_wrap = True
+            p = tf.add_paragraph()
+            p.text = vuln["description"] or "No title provided"
+            p.font.size = Pt(18)
+            p.font.bold = True
+            p.alignment = PP_PARAGRAPH_ALIGNMENT.LEFT
+
+            severity_box = slide.shapes.add_textbox(Inches(1), Inches(1.7), Inches(11), Inches(0.5))
+            tf = severity_box.text_frame
+            tf.word_wrap = True
+            p = tf.add_paragraph()
+            p.text = f"Severity: {vuln['severity'] or 'Unknown'}"
+            p.font.size = Pt(14)
+            p.font.color.rgb = gColorsRisk.get(vuln["severity"], gColors['black'])
+            if vuln["severity"] == "Low":
+                p.font.color.rgb = RGBColor(0, 0, 0)
+            p.alignment = PP_PARAGRAPH_ALIGNMENT.LEFT
+
+            desc_label_box = slide.shapes.add_textbox(Inches(1), Inches(2.4), Inches(11), Inches(0.3))
+            tf = desc_label_box.text_frame
+            tf.word_wrap = True
+            p = tf.add_paragraph()
+            p.text = "Description"
+            p.font.size = Pt(12)
+            p.font.bold = True
+            p.alignment = PP_PARAGRAPH_ALIGNMENT.LEFT
+
+            desc_box = slide.shapes.add_textbox(Inches(1), Inches(2.7), Inches(11), Inches(1.5))
+            tf = desc_box.text_frame
+            tf.word_wrap = True
+            p = tf.add_paragraph()
+            p.text = sections.get("Description", "Not provided.")
+            p.font.size = Pt(12)
+            p.alignment = PP_PARAGRAPH_ALIGNMENT.LEFT
+
+            impact_label_box = slide.shapes.add_textbox(Inches(1), Inches(4.3), Inches(11), Inches(0.3))
+            tf = impact_label_box.text_frame
+            tf.word_wrap = True
+            p = tf.add_paragraph()
+            p.text = "Impact"
+            p.font.size = Pt(12)
+            p.font.bold = True
+            p.alignment = PP_PARAGRAPH_ALIGNMENT.LEFT
+
+            impact_box = slide.shapes.add_textbox(Inches(1), Inches(4.6), Inches(11), Inches(1.5))
+            tf = impact_box.text_frame
+            tf.word_wrap = True
+            p = tf.add_paragraph()
+            p.text = sections.get("Impact", "Not provided.")
+            p.font.size = Pt(12)
+            p.alignment = PP_PARAGRAPH_ALIGNMENT.LEFT
+
+            rec_label_box = slide.shapes.add_textbox(Inches(1), Inches(6.2), Inches(11), Inches(0.3))
+            tf = rec_label_box.text_frame
+            tf.word_wrap = True
+            p = tf.add_paragraph()
+            p.text = "Recommendation"
+            p.font.size = Pt(12)
+            p.font.bold = True
+            p.alignment = PP_PARAGRAPH_ALIGNMENT.LEFT
+
+            rec_box = slide.shapes.add_textbox(Inches(1), Inches(6.5), Inches(11), Inches(1.5))
+            tf = rec_box.text_frame
+            tf.word_wrap = True
+            p = tf.add_paragraph()
+            p.text = sections.get("Recommendation", "Not provided.")
+            p.font.size = Pt(12)
+            p.alignment = PP_PARAGRAPH_ALIGNMENT.LEFT
+
+        if int(vuln.get("attachments", {}).get("total", 0)) > 0:
+            print(f"Retrieving attachments for vulnerability {vuln['description']}")
+            retrieve_vuln_attachments(presentation, slide_layouts, session, headers, vuln["uuid"])
+
+    _add_slide(presentation, "divider dark blue", slide_layouts).placeholders[0].text = "what's next"
+
+    # FINDINGS DUE DATE slide
+    slide = _add_slide(presentation, "title only", slide_layouts)
+    slide.placeholders[0].text = "findings due date overview"
+    shape = slide.shapes.add_table(len(sorted_vulns) + 1, 3, Inches(0.8), Inches(1.7), Inches(11), Inches(1))
+    table = shape.table
+    table.columns[0].width, table.columns[1].width, table.columns[2].width = Inches(7), Inches(2), Inches(2)
+    table.cell(0, 0).text, table.cell(0, 1).text, table.cell(0, 2).text = "finding", "severity", "due date"
+    due_dates = {"Critical": "14 days", "High": "30 days", "Medium": "45 days", "Low": "60 days",
+                 "Info": "9 months"}
+    for i, vuln in enumerate(sorted_vulns):
+        table.cell(i + 1, 0).text = vuln['description']
+        table.cell(i + 1, 1).text = vuln['severity']
+        table.cell(i + 1, 2).text = due_dates.get(vuln['severity'], "N/A")
+
+    # Slide 1 - START
+    slide = _add_slide(presentation, "title only", slide_layouts)
+    slide.placeholders[0].text = "steps for an efficient fix validation (retest)"
+
+    txBox = slide.shapes.add_textbox(Inches(1), Inches(1.5), Inches(11), Inches(5))
+    tf = txBox.text_frame
+    tf.word_wrap = True
+    tf.auto_size = MSO_AUTO_SIZE.NONE
+    tf.clear()
+
+    p1 = tf.add_paragraph()
+    p1.alignment = PP_PARAGRAPH_ALIGNMENT.LEFT
+    run1 = p1.add_run()
+    run1.text = "Our shared goal is to verify and close security findings as quickly and efficiently as possible. When you mark a vulnerability as \"solved,\" our retest process begins. Here’s how you can help make that process seamless and fast."
+
+    tf.add_paragraph()
+    p_heading = tf.add_paragraph()
+    run_heading = p_heading.add_run()
+    run_heading.text = "1. Retest Readiness"
+    run_heading.font.size = Pt(18)
+
+    tf.add_paragraph()
+    p2 = tf.add_paragraph()
+    run2a = p2.add_run()
+    run2a.text = "To validate your fix, "
+    run2b = p2.add_run()
+    run2b.text = "we need the same access we had during the original test"
+    run2b.font.color.rgb = RGBColor(0x98, 0x00, 0x00)
+    run2c = p2.add_run()
+    run2c.text = ". Delays in access are the #1 reason for delays in closing findings."
+
+    tf.add_paragraph()
+    p_b1 = tf.add_paragraph()
+    p_b1.bullet = True
+    p_b1.level = 0
+    run_b1a = p_b1.add_run()
+    run_b1a.text = "- Test accounts: "
+    run_b1a.font.bold = True
+    run_b1b = p_b1.add_run()
+    run_b1b.text = "Ensure test accounts remain functional or provide new ones"
+
+    p_b2 = tf.add_paragraph()
+    p_b2.bullet = True
+    p_b2.level = 0
+    run_b2a = p_b2.add_run()
+    run_b2a.text = "- Network Access: "
+    run_b2a.font.bold = True
+    run_b2b = p_b2.add_run()
+    run_b2b.text = "If not internet facing, help us with the connectivity whenever possible"
+
+    p_b3 = tf.add_paragraph()
+    p_b3.bullet = True
+    p_b3.level = 0
+    run_b3a = p_b3.add_run()
+    run_b3a.text = "- Notify changes: "
+    run_b3a.font.bold = True
+    run_b3b = p_b3.add_run()
+    run_b3b.text = "If the application URL or environment changes, please let us know"
+
+    tf.add_paragraph()
+    p_last = tf.add_paragraph()
+    run_last = p_last.add_run()
+    run_last.text = "A ready environment means we can start validating immediately. A blocked environment means delays for everyone."
+    # Slide 1 - END
+
+    # Slide 2 - START
+    slide = _add_slide(presentation, "title only", slide_layouts)
+    slide.placeholders[0].text = "steps for an efficient fix validation (retest)"
+
+    txBox = slide.shapes.add_textbox(Inches(1), Inches(1.5), Inches(11), Inches(5))
+    tf = txBox.text_frame
+    tf.word_wrap = True
+    tf.auto_size = MSO_AUTO_SIZE.NONE
+    tf.clear()
+
+    p1 = tf.add_paragraph()
+    p1.alignment = PP_PARAGRAPH_ALIGNMENT.LEFT
+    run1 = p1.add_run()
+    run1.text = "Our shared goal is to verify and close security findings as quickly and efficiently as possible. When you mark a vulnerability as \"solved,\" our retest process begins. Here’s how you can help make that process seamless and fast."
+
+    tf.add_paragraph()
+    p_heading = tf.add_paragraph()
+    run_heading = p_heading.add_run()
+    run_heading.text = "2. Provide Clear Fix Context & Evidence"
+    run_heading.font.size = Pt(18)
+
+    tf.add_paragraph()
+    p2 = tf.add_paragraph()
+    run2a = p2.add_run()
+    run2a.text = "When you mark a finding as \"solved\" in the platform, "
+    run2b = p2.add_run()
+    run2b.text = "tell us about the fix. The context is invaluable."
+    run2b.font.color.rgb = RGBColor(0x98, 0x00, 0x00)
+
+    tf.add_paragraph()
+    p_b1 = tf.add_paragraph()
+    p_b1.bullet = True
+    p_b1.level = 0
+    run_b1a = p_b1.add_run()
+    run_b1a.text = "- Add a Comment: "
+    run_b1a.font.bold = True
+    run_b1b = p_b1.add_run()
+    run_b1b.text = "In the vulnerability ticket, briefly describe the change you made."
+
+    p_b2 = tf.add_paragraph()
+    p_b2.bullet = True
+    p_b2.level = 1
+    run_b2a = p_b2.add_run()
+    run_b2a.text = "  Example: \"We have implemented server-side validation on the user profile form to sanitize input and prevent XSS.\" "
+    run_b2a.font.italic = True
+    run_b2a.font.size = Pt(11)
+
+    tf.add_paragraph()
+    p_b3 = tf.add_paragraph()
+    p_b3.bullet = True
+    p_b3.level = 0
+    run_b3a = p_b3.add_run()
+    run_b3a.text = "- Attach Evidence: "
+    run_b3a.font.bold = True
+    run_b3b = p_b3.add_run()
+    run_b3b.text = "For straightforward changes and fixes, a screenshot can significantly speed up validation."
+
+    p_b4 = tf.add_paragraph()
+    p_b4.bullet = True
+    p_b4.level = 1
+    run_b4a = p_b4.add_run()
+    run_b4a.text = "  Good examples: A screenshot showing a security header has been enabled, a directory listing has been disabled, or a debug mode has been turned off. "
+    run_b4a.font.italic = True
+    run_b4a.font.size = Pt(11)
+    # Slide 2 - END
+
+    # Vulnerability Life Cycle and Retest Info Slides
+    slide = _add_slide(presentation, "title only", slide_layouts)
+    slide.placeholders[0].text = "vulnerability life cycle"
+    slide.shapes.add_picture(vuln_life_cycle_image_stream, Inches(1), Inches(1.5), width=Inches(11), height=Inches(5))
+
+    _add_slide(presentation, "questions", slide_layouts)
+    _add_slide(presentation, "divider dark blue", slide_layouts).placeholders[0].text = "appendix"
+
+    # APPENDIX slide
+    slide = _add_slide(presentation, "title only", slide_layouts)
+    slide.placeholders[0].text = "group of tests performed"
+    txBox = slide.shapes.add_textbox(Inches(1), Inches(1.5), Inches(11), Inches(0.5))
+    tf = txBox.text_frame
+    p = tf.add_paragraph()
+    run = p.add_run()
+    run.text = "example of tests performed during the pentest campaign"
+    p.alignment = PP_PARAGRAPH_ALIGNMENT.CENTER
+    shape = slide.shapes.add_table(len(group_of_tests), 3, Inches(0.8), Inches(2), Inches(11.5), Inches(1))
+    table = shape.table
+    table.columns[0].width, table.columns[1].width, table.columns[2].width = Inches(0.5), Inches(3), Inches(8)
+    for i, (key, (group, example)) in enumerate(group_of_tests.items()):
+        table.cell(i, 0).text, table.cell(i, 1).text, table.cell(i, 2).text = key, group, example
+
+    _add_slide(presentation, "last page", slide_layouts)
+
+    # --- Save and Upload ---
     print("Saving presentation to memory...")
     output_stream = BytesIO()
     presentation.save(output_stream)
@@ -766,12 +1092,11 @@ def generate_presentation(test_uuid: str, db_drive_folder_id: str, db_service_na
     )
 
     print(f"Uploading '{output_filename}' to Google Drive...")
-    # REQUIREMENT 1: Upload directly to the specific Test's workspace folder instead of the generic output folder!
     file_link = upload_drive_file(drive_service, db_drive_folder_id, output_filename, output_stream)
+    print("Upload complete.")
 
     return {
         "message": "Presentation generated successfully!",
         "driveLink": file_link,
         "warnings": healthy_check
     }
-
