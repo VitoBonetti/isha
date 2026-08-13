@@ -6,7 +6,7 @@ import hashlib
 import httpx
 import json
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 from cryptography.fernet import Fernet
 from pydantic import BaseModel, UUID4
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
@@ -18,7 +18,10 @@ from websockets_manager import manager
 from schema import TestCreate, TestBase, AssignmentBase, TestSchedule, BulkTestCreate, AssignmentCreate, SecureNotePayload
 from audit_logger import log_audit_event
 from utils.drive_manager import DriveManager, background_archive_workspace, background_provision_workspace, background_relocate_workspace
+from utils.secret_manager import get_secret
 from presentations.presentation import generate_presentation
+from reports import osrgt_v3, pdf_gen
+
 
 router = APIRouter(prefix="/api/tests", tags=["Tests & Assignments"])
 
@@ -792,3 +795,165 @@ def trigger_presentation_generation(test_id: str, background_tasks: BackgroundTa
 
     return {
         "message": "Presentation generation started in the background. You will receive a notification when it's ready!"}
+
+
+# --- Generation PDF ---
+def get_report_type_id(display_order: int) -> int:
+    """Maps the service lane's display_order to the report type expected by osrgt_v3."""
+    if display_order == 1:
+        return 1  # Adversary Simulation
+    elif display_order == 2:
+        return 3  # White Box
+    else:
+        return 2  # Black/Grey Box
+
+
+async def process_report_background(test_id: str, kiss24_id: str, user_id: str, user_email: str,
+                                    test_name: str, drive_folder_id: str, display_order: int,
+                                    start_week: int, start_year: int, duration_weeks: float):
+    """Background task that generates the HTML & PDF reports and uploads them to Drive."""
+    try:
+        # Calculate precise start and end dates from the planner (format: DD-MM-YYYY)
+        try:
+            test_start = datetime.fromisocalendar(start_year, start_week, 1)
+            dur_weeks = max(1, int(duration_weeks or 1))
+            test_end = test_start + timedelta(days=(dur_weeks - 1) * 7 + 4) # Friday of the final week
+            start_date_str = test_start.strftime("%d-%m-%Y")
+            end_date_str = test_end.strftime("%d-%m-%Y")
+        except Exception as e:
+            print(f"Warning: Could not calculate dates from planner: {e}")
+            start_date_str = None
+            end_date_str = None
+
+        # Fetch the KISS24 API Key securely
+        api_key = get_secret(os.environ.get("KISS_24_API_KEY_NAME", "kiss24-apikey"))
+        report_type = get_report_type_id(display_order)
+
+        # Build the arguments exactly as the Flask app expected them, injecting our DB dates
+        report_args = {
+            "pentest": kiss24_id,
+            "type": report_type,
+            "api_key": api_key,
+            "action": "generate",
+            "minify": False,
+            "environment": "sec24prd",
+            "loglevel": "info",
+            "devoteam": False,
+            "start": start_date_str,
+            "end": end_date_str
+        }
+
+        # 1. Generate HTML (Run sync code in a background thread to prevent blocking)
+        html_content, html_filename = await asyncio.to_thread(osrgt_v3.generate_html_report, report_args)
+
+        # 2. Convert HTML to PDF
+        pdf_content, pdf_filename = await asyncio.to_thread(pdf_gen.convert_html_to_pdf, html_content, html_filename)
+
+        # 3. Upload both files to the test's dynamic Google Drive folder
+        drive_manager = DriveManager()
+
+        await asyncio.to_thread(
+            drive_manager.upload_file,
+            drive_folder_id,
+            html_filename,
+            html_content.encode('utf-8'),
+            'text/html'
+        )
+
+        pdf_link = await asyncio.to_thread(
+            drive_manager.upload_file,
+            drive_folder_id,
+            pdf_filename,
+            pdf_content,
+            'application/pdf'
+        )
+
+        # 4. Success! Notify the user via WebSocket and Database Notification
+        message = f"Report for '{test_name}' is ready!\nPDF Link: {pdf_link}"
+        await manager.broadcast(json.dumps({
+            "action": "REPORT_READY",
+            "email": user_email,
+            "message": message
+        }))
+
+        with db_cursor_context() as cursor:
+            if cursor:
+                cursor.execute(
+                    "INSERT INTO notifications (id, user_id, message, type, created_at) VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)",
+                    (str(uuid.uuid4()), user_id, message, "SUCCESS")
+                )
+
+    except Exception as e:
+        print(f"Error generating report: {e}")
+        message = f"Report generation failed for '{test_name}'. Error: {str(e)}"
+
+        await manager.broadcast(json.dumps({
+            "action": "REPORT_FAILED",
+            "email": user_email,
+            "message": message
+        }))
+
+        with db_cursor_context() as cursor:
+            if cursor:
+                cursor.execute(
+                    "INSERT INTO notifications (id, user_id, message, type, created_at) VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)",
+                    (str(uuid.uuid4()), user_id, message, "ERROR")
+                )
+
+    # Refresh the UI in both scenarios
+    await manager.broadcast('{"action": "REFRESH_BOARD"}')
+
+
+@router.post("/{test_id}/report", summary="[Admin & Pentester]")
+def trigger_report_generation(test_id: str, background_tasks: BackgroundTasks,
+                              current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+    """API Endpoint to trigger the background report generation."""
+
+    if current_user.get('role') == 'read_only':
+        raise HTTPException(status_code=403, detail="Read-only users cannot trigger generation.")
+
+    # Fetch all necessary metadata from the database, including the planner dates and service order
+    cursor.execute("""
+        SELECT t.name, t.kiss24, t.drive_folder_id, sl.display_order,
+               t.start_week, t.start_year, t.duration_weeks
+        FROM tests t
+        LEFT JOIN services_lanes sl ON t.service_lane_id = sl.id
+        WHERE t.id = %s LIMIT 1
+    """, (test_id,))
+    row = cursor.fetchone()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Test not found.")
+
+    test_name, kiss24_id, drive_folder_id, display_order, start_week, start_year, duration_weeks = row
+
+    # Validations
+    if not kiss24_id:
+        raise HTTPException(status_code=400, detail="Missing kiss24 UUID. Please set it in the test settings first.")
+
+    if not drive_folder_id:
+        raise HTTPException(status_code=400, detail="Missing Drive Workspace. Please provision the workspace first.")
+
+    # Default to 99 (or whatever logic handles missing lanes) if display_order is somehow null
+    safe_display_order = display_order if display_order is not None else 99
+
+    # Hand off to the background thread
+    background_tasks.add_task(
+        process_report_background,
+        test_id, str(kiss24_id), str(current_user["id"]), current_user["email"],
+        test_name, drive_folder_id, safe_display_order, start_week, start_year, duration_weeks
+    )
+
+    # Audit logging
+    log_audit_event(
+        user_id=str(current_user["id"]),
+        role=str(current_user["role"]),
+        action="REPORT_TRIGGERED",
+        resource_type="REPORTING",
+        resource_id=str(test_id),
+        details=f"Report generation triggered for test {test_name} (Kiss24: {kiss24_id})."
+    )
+
+    return {
+        "message": "Report generation started in the background. You will receive a notification when it's ready!"
+    }

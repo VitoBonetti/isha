@@ -61,10 +61,10 @@ export default function Planner() {
           window.dispatchEvent(new CustomEvent('refresh_notifications'));
         }
         // 3: Listen for targeted presentation toasts ---
-        else if (data.action === 'PRESENTATION_READY' && data.email === currentUser?.email) {
+        else if ((data.action === 'PRESENTATION_READY' || data.action === 'REPORT_READY') && data.email === currentUser?.email) {
           toast.success(data.message, { duration: 8000 });
         }
-        else if (data.action === 'PRESENTATION_FAILED' && data.email === currentUser?.email) {
+        else if ((data.action === 'PRESENTATION_FAILED' || data.action === 'REPORT_FAILED') && data.email === currentUser?.email) {
           toast.error(data.message, { duration: 8000 });
         }
         // 4. Listen for User Presence (Other admins opening the page)
@@ -321,6 +321,16 @@ export default function Planner() {
     }
   };
 
+  const handleGenerateReport = async (test: Test) => {
+    const toastId = toast.loading(`Starting report generation for ${test.name}...`);
+    try {
+      const res = await axios.post(`/api/tests/${test.id}/report`);
+      toast.success(res.data.message, { id: toastId, duration: 5000 });
+    } catch (error: any) {
+      toast.error(error.response?.data?.detail || "Failed to start generation.", { id: toastId });
+    }
+  };
+
   return (
     <>
       <Toaster position="bottom-right" />
@@ -348,6 +358,7 @@ export default function Planner() {
         handleCreateWorkspace={handleCreateWorkspace}
         handleToggleTentative={handleToggleTentative}
         handleCreatePresentation={handleCreatePresentation}
+        handleGenerateReport={handleGenerateReport}
         assignModalTest={assignModalTest}
         setAssignModalTest={setAssignModalTest}
         backlogFilter={backlogFilter}

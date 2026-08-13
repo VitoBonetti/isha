@@ -1,0 +1,47 @@
+<!-- Finding numbering and title -->
+<h2>{FINDING_NUM}<span style="margin-left:1em">{FINDING_TITLE}</span></h2>
+<!-- Finding overview table, shows information such as severity -->
+<table class="finding_top_table" aria-describedby="Overview table for specific finding">
+   <tbody>
+      <tr>
+         <!-- Finding Severity -->
+         <td colspan="1" rowspan="1" class="finding_top_table_heading">
+            <strong>Severity</strong>
+         </td>
+         <td colspan="1" rowspan="1">
+            {FINDING_SEVERITY}
+         </td>
+      </tr>
+      <tr>
+         <!-- Finding Component, such as API or backend -->
+         <td colspan="1" rowspan="1" class="finding_top_table_heading">
+            <strong>Component</strong>
+         </td>
+         <td colspan="1" rowspan="1">
+            {FINDING_COMPONENT}
+         </td>
+      </tr>
+      <tr>
+         <!-- Finding Status, such as Low, Medium or High -->
+         <td colspan="1" rowspan="1" class="finding_top_table_heading">
+           <strong>Status</strong>
+         </td>
+         <td colspan="1" rowspan="1">
+            {FINDING_STATUS}
+         </td>
+      </tr>
+      <tr>
+         <!-- Finding VULN Reference -->
+         <td colspan="1" rowspan="1" class="finding_top_table_heading">
+            <strong>Reference</strong>
+         </td>
+         <td colspan="1" rowspan="1">
+            {FINDING_REF}
+         </td>
+      </tr>
+   </tbody>
+</table>
+<!-- Finding Description with reproduction steps -->
+<h3>{FINDING_SUBNUM1}<span style="margin-left:1em">Finding</span></h3>
+<p>{FINDING_DESCRIPTION}</p>
+<div class="page-break"></div>

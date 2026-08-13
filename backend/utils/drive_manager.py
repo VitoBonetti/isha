@@ -1,6 +1,8 @@
 import os
 import google.auth
 from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseUpload
+import io
 from database import db_cursor_context
 import uuid
 from datetime import datetime
@@ -95,7 +97,6 @@ class DriveManager:
                 print(f"Error scanning folder {folder_id}: {e}")
                 return []
 
-
     def run_daily_document_sync(self):
         """Finds all provisioned test folders and indexes their files into the database."""
         print("Starting Daily Drive Document Sync...")
@@ -187,6 +188,28 @@ class DriveManager:
 
         except Exception as e:
             print(f"Failed to relocate Drive workspace: {e}")
+
+    def upload_file(self, folder_id: str, filename: str, file_bytes: bytes, mimetype: str):
+        """Uploads a file byte-stream to a specific Google Drive folder."""
+        try:
+            file_metadata = {'name': filename, 'parents': [folder_id]}
+            media = MediaIoBaseUpload(
+                io.BytesIO(file_bytes),
+                mimetype=mimetype,
+                resumable=True
+            )
+            file = self.drive_service.files().create(
+                body=file_metadata,
+                media_body=media,
+                fields='id, webViewLink',
+                supportsAllDrives=True
+            ).execute()
+
+            print(f"Uploaded {filename} to Drive successfully.")
+            return file.get('webViewLink')
+        except Exception as e:
+            print(f"Failed to upload file {filename}: {e}")
+            raise e
 
 # Add this to the bottom with your other async helpers:
 async def background_relocate_workspace(folder_id, year, service_name, market, test_name):

@@ -1,0 +1,295 @@
+
+    /*  Randstad font
+      https://randstad.design/styleguide/typography/
+
+      FOR WEB DEVELOPERS
+
+        - use the .WOFF2, .WOFF, .EOT and .TTF files 
+        - load them on the website via @font-face
+        - language support for Latin*/
+        @charset "UTF-8";
+        @font-face {
+          font-family: 'Randstad Graphik';
+          src: url('Font/Graphik-Regular.eot'),
+               url('Font/Graphik-Regular.woff2') format('woff2'),
+               url('Font/Graphik-Regular.woff') format('woff'), 
+               url('Font/Graphik-Regular.ttf')  format('truetype');
+        }
+    
+        /* Normal tags */
+        body {
+          font-family: 'Randstad Graphik', 'Tahoma', sans-serif;
+          color: #0F1941;
+          /*body L*/
+          font-size: 15px;
+        }
+
+        .page-break {
+          page-break-after: always;
+        }
+
+        @page {
+          size: A4;
+          margin: 2cm;
+          font-family: 'Randstad Graphik', 'Tahoma', sans-serif;
+
+          @bottom-right {
+            content: counter(page) " of " counter(pages);
+            font-size: 13px;
+            color: #999999;
+          }
+          
+          @bottom-left {
+            content: "C4. Confidential";
+            font-size: 13px;
+            color: #999999;
+          }
+        }
+
+        @page:first {
+          margin: 0;
+
+          @bottom-right {
+            content: "";
+          }
+          
+          @bottom-left {
+            content: "";
+          }
+        }
+
+        .cover-page {
+          page-break-after: always;
+          height: 100%;
+          clear: both;
+        }
+
+
+        .cover-main {
+          float: left;
+          width: 75%;
+          height: 100%;
+          padding: 60px;
+          background-color: #0F1941 !important;
+          color: #FFFFFF;
+          box-sizing: border-box;
+        }
+
+
+
+        .cover-main h1, .cover-main h2, .cover-main h3, .cover-main h4 {
+          font-weight: 300;
+        }
+
+        .cover-main h1 {
+          font-size: 30px;
+        }
+
+        .cover-main h2 {
+          font-size: 24px;
+        }
+
+        .cover-main h4 {
+          font-size: 18px;
+          margin-bottom: -5px;
+        }
+
+        .cover-main p {
+          font-size: 12px;
+          line-height: 18px;
+        }
+
+
+        .cover-sidebar {
+          float: left;
+          width: 25%;
+          height: 100%;
+          padding: 60px 20px;
+          background-color: #FFFFFF !important;
+          box-sizing: border-box;
+        }
+        .cover-sidebar img {
+          width: 100%;
+        }
+
+        .cover-sidebar p {
+          font-size: 12px;
+          line-height: 16px;
+        }
+
+        /* PAGES */
+
+        .page h1, .page h2, .page h3, .page h4 {
+          text-transform: uppercase;
+        }
+
+        .page h1 {
+          font-size: 26px;
+        }
+
+        .page h2 {
+          font-size: 23px;
+        }
+
+        .page h3 {
+          font-size: 20px;
+        }
+
+        .page h4 {
+          font-size: 16px;
+        }
+
+        .page p {
+          font-size: 15px;
+        }
+
+        /* TABLE OF CONTENTS */
+
+        .table_of_contents ul {
+          padding-left: 0;
+          /* If you want you can change the list type from inside or outside */
+          list-style: inside decimal;
+        }
+
+        .table_of_contents ol li {
+          margin-bottom: 10px;
+          font-size: 16px;
+        }
+
+        .table_of_contents li:not(ol ol li) {
+          margin-bottom: 14px;
+        }
+
+        .toc {
+          margin-left: -35px;
+        }
+
+        .table_of_contents ol li ol {
+          margin-top: 10px;
+        }
+
+        /* Tables */
+        table {
+          width: 100%;
+          border-collapse: collapse;
+          text-align: center;
+        }
+
+        table td, table tr, table th {
+          padding: 10px;
+          font-size: 15px;
+          border: 1px solid #D7D7D7;
+        }
+
+        table th {
+          font-size: 15px;
+          background-color: #0F1941;
+          color: #FFFFFF;
+          text-transform: uppercase;
+        }
+
+        /* FINDINGS */
+        .finding_description h1{
+          font-size: 16px;
+          margin-bottom: 0px;
+          color: #0F1941;
+        }
+
+        .finding_description h1 span{
+          color: #0F1941 !important;
+        }
+
+        #findings {
+          word-wrap: break-word;
+        }
+
+        /* Severities Color Background Palette */
+        #critical {
+          background-color: #a80000;
+        }
+
+        #high {
+          background-color: #da130e;
+        }
+
+        #medium {
+          background-color: #ed7d31;
+        }
+
+        #low {
+          background-color: #ffc000;
+        }
+
+        #info {
+          background-color: #0070c0;
+        }
+
+        #status_resolved_text {
+          color: #31AA74; /* Green */
+        }
+        
+        #critical-f {
+          color: #a80000;
+        }
+
+        #high-f {
+          color: #da130e;
+        }
+
+        #medium-f {
+          color: #ed7d31;
+        }
+
+        #low-f {
+          color: #ffc000;
+        }
+
+        #info-f {
+          color: #0070c0;
+        }
+
+        /* Links */
+        a {
+          color: #2175d9;
+          text-decoration: none;
+          white-space: pre;           /* CSS 2.0 */
+          white-space: pre-wrap;      /* CSS 2.1 */
+          white-space: pre-line;      /* CSS 3.0 */
+          white-space: -pre-wrap;     /* Opera 4-6 */
+          white-space: -o-pre-wrap;   /* Opera 7 */
+          white-space: -moz-pre-wrap; /* Mozilla */
+          white-space: -hp-pre-wrap;  /* HP Printers */
+          word-wrap: break-word;      /* IE 5+ */
+        }
+        
+        a:hover {
+          text-decoration: underline;
+        }
+
+        /* General image properties */
+        img {
+          max-width: 100%;
+          height: auto;
+        }
+
+        /* Numbered (Nested) List*/
+        ol {
+          counter-reset: item;
+        }
+        ol li {
+          display: block;
+        }
+        ol li:before {
+          content: counters(item, ".") ". ";
+          counter-increment: item;
+        }
+      
+        /* ToC jump links */
+        .table_of_content_jump_link {
+          float: right;
+          font-size: 18px;
+        }
+    
+        
+    
+    

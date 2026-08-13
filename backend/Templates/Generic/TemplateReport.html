@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang = "en">
+<head>
+  <meta charset = "utf-8">
+  <!-- Pentest report description with proper naming convention for generating PDF -->
+  <title>{REFERENCE} - GOST pentest report {APPLICATION_NAME} - {YEAR}</title>
+  <link rel="stylesheet" type="text/css" href="Report/Static/CSS/report.css">
+<!--  <link rel="stylesheet" type="text/css" href="CSS/custom.css">-->
+</head>
+<body>
+   <!-- Cover Page -->
+  <div class="cover-page">
+    <div class="cover-main">
+      <h2>Global Offensive Security Team</h2>
+      <h3 style="margin-top: -14px;">{SERVICE_TYPE} Security Assessment</h3>
+      <br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br>
+      <h1>{APPLICATION_NAME}</h1>
+      <h1>{OPCO}</h1>   
+      <br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br>
+      <h4>C4. Confidential</h4>
+      <p>This document may only by processed by a specified selection of employees of the Randstad Group Companies, operating companies and third parties.</p>
+    </div>
+    <div class="cover-sidebar">
+      <img src="Report/Static/Images/randstad logo_main.png">
+      <p>www.randstad.com<br>Diemermere, 25<br>NL-1112<br>TC Diemen</p>
+      <br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br>
+      <p><b>Report Version:</b><br>{STATUS}</p>
+      <p><b>Generated On:</b><br>{LAST_MODIFIED}</p>
+      <p><b>Manager:</b><br>Richard van Kalsbeek</p>
+      <p><b>Technical Lead:</b><br>Rodrigo Magalhaes</p>
+      <p><b>Service Lead:</b><br>{SERVICE_LEAD}</p>
+      {PERFORMED_BY}
+    </div>
+  </div>
+  <div style="clear: both;"></div>
+
+  <!-- Table of Contents -->
+  <div class="page">
+    <section class="table_of_contents" id="table_of_contents_jump">
+      <h1>Table of Contents</h1>
+      <ol class="toc">
+        <li><a href="#management-summary">Management Summary</a>
+          <ol>
+            <li><a href="#context">Context</a></li>
+            <li><a href="#goal">Goal</a></li>
+            <li><a href="#summary">Summary</a></li>
+            <li><a href="#findings-overview">Findings Overview</a></li>
+          </ol>
+        </li>
+        
+        <li><a href="#scope-reminder">Scope Reminder</a>
+          <ol>
+            <li><a href="#objectives">Objectives</a></li>
+            <li><a href="#timeline">Timeline</a></li>
+            <li><a href="#scope">Scope</a></li>
+          </ol>
+        </li>
+
+        <li><a href="#methodology">Methodology</a>
+          <ol>
+            <li><a href="#scores-scales">Scores and Scales</a></li>
+            <li><a href="#remediation-priority">Remediation Priority</a></li>
+          </ol>
+        </li>
+
+        <li><a href="#findings">Findings</a></li>
+
+        <li><a href="#whats-next">What's Next</a>
+          <ol>
+            <li><a href="#findings-due-date">Findings Due Date Overview</a></li>
+          </ol>
+        </li>
+
+        <li><a href="#appendix">Appendix</a></li>
+      </ol>
+    </section>
+    
+  </div>
+  <div class="page-break"></div>
+
+  <!-- Management summary with high-level overview of results -->
+  <div class="page">
+    <section id="management-summary">
+      <!-- workaround for some CSS issue -->
+      <h1>1. Management Summary <a class="table_of_content_jump_link" href="#table_of_contents_jump">&#8593;</a></h1>
+      <article>
+        <p>For all vulnerabilities discovered, the following risk classifications has been assigned:</p>
+        <table class="risks_overview_table" aria-describedby="Table with overview of risks, sorted by severity">
+          <thead>
+            <tr>
+              <th id="critical">CRITICAL</th>
+              <th id="high">HIGH</th>
+              <th id="medium">MEDIUM</th>
+              <th id="low">LOW</th>
+              <th id="info">INFO</th>
+            </tr>
+          </thead>
+          <tbody>
+            {RISKS_SUMMARY}
+          </tbody>
+        </table>
+      </article>
+
+      <h2 id="context">1.1. Context</h2>
+      <article>
+        <p>{OPCO}, in the context of the Global Offensive Security Team (GOST) services, requested a test for {APPLICATION_NAME}.</p>
+        <p>The audit was conducted under the {SERVICE_TYPE} service for {DURATION} between {START_DATE} and {END_DATE} and followed well known industry standards and methodologies such as OWASP Testing Guide and PTES.</p>
+      </article>
+
+      <h2 id="goal">1.2. Goal</h2>
+      <article>
+        <p>The purpose of this assessment is to enable Randstad to achieve a better understanding of its current exposure levels, and to identify any additional security controls that may be required to protect its business from cyber attacks.</p>
+      </article>
+
+      <h2 id="summary">1.3. Summary</h2>
+      <article>
+        <p>{MANAGEMENT_SUMMARY}</p>
+      </article>
+
+      <h2 id="findings-overview">1.4. Findings Overview</h2>
+      <table aria-describedby="Table with overview of findings, sorted by severity">
+        <tr>
+          <th>Finding</th>
+          <th>Severity</th>
+          <th>Status</th>
+          <th>Due Date</th>
+        </tr>
+        {FINDINGS_SUMMARY}
+      </table>
+    </section>
+    
+  </div>
+  <div class="page-break"></div>
+
+  <!-- Technical description of the scope and the type of assessment -->
+  <div class="page">
+    <section id="scope-reminder">
+      <h1>2. Scope Reminder <a class="table_of_content_jump_link" href="#table_of_contents_jump">&#8593;</a></h1>
+
+      <h2 id="objectives">2.1. Objectives</h2>
+      <article>
+        <p>The Global Offensive Security Team (GOST) conducted a {SERVICE_TYPE} Security Assessment to determine {OPCO} exposure to a target attack on {APPLICATION_NAME}.</p>
+        <p>The service request was submitted via ServiceNow and registered under {REQUEST_ID}.</p>
+        <p>This report represents the findings from the assessment and the associated remediation recommendations to assist {OPCO} strengthen its security posture.</p>
+      </article>
+
+      <h2 id="timeline">2.2. Timeline</h2>
+      <article>
+        <p>The assessment lasted {DURATION} between {START_DATE} and {END_DATE}.</p>
+      </article>
+
+      <h2 id="scope">2.3. Scope</h2>
+      <article>
+        <p>Were included in the scope of tests:</p>
+        <ul>
+          <li>{SCOPE_DESCRIPTION}</li>
+        </ul>
+        <p>It has been agreed that during the service the following are excluded:</p>
+        <ul>
+          <li>Stress tests or denial of service attempts were excluded.</li>
+          <li>No social engineering was performed.</li>
+          <li>Connected or referred third parties were excluded from the scope of this campaign.</li>
+        </ul>
+      </article>
+    </section>
+    
+  </div>
+  <div class="page-break"></div>
+
+  <!-- Test methodology -->
+  <div class="page">
+    <section id="methodology">
+      <h1>3. Methodology <a class="table_of_content_jump_link" href="#table_of_contents_jump">&#8593;</a></h1>
+      <article>
+        {METHODOLOGY}
+      </article>
+      <h2 id="scores-scales">3.1. Scores and Scales</h2>
+      <article>
+        <p>In this report, we have categorized the identified vulnerabilities based on their overall severity and their potential impact on business operations.</p>
+        <p>The severity of each vulnerability is evaluated using the following scale:</p>
+        <ul>
+            <li><b>Critical:</b> Critical-severity vulnerabilities signify an imminent and severe threat to the target system, demanding immediate corrective action or, in extreme cases, the immediate shutdown of the affected service.</li>
+            <li><b>High:</b> High-severity vulnerabilities indicate a significant risk to the target system, requiring prompt correction to prevent or minimize potential adverse effects.</li>
+            <li><b>Medium:</b> Moderate-severity vulnerabilities present a discernible risk to the target system, requiring timely correction in the medium term to mitigate potential consequences.</li>
+            <li><b>Low:</b> Low-severity vulnerabilities pose minimal risk to the target system and may need corrective measures to prevent potential impacts in the future.</li>
+            <li><b>Informational:</b> Informational findings do not represent immediate security threats. They highlight areas for improvement in best practices to enhance the overall security posture of the system.</li>
+        </ul>
+      </article>
+      <h2 id="remediation-priority">3.2. Remediation Priority</h2>
+      <article>
+        <p>For each vulnerability there is a priority indicator with a guideline of the remediation times in accordance with Randstad's policy:</p>
+        <ul>
+          <li><b>Critical (P1):</b> Within 14 days</li>
+          <li><b>High (P2):</b> Within 30 days</li>
+          <li><b>Medium (P3):</b> Within 45 days</li>
+          <li><b>Low (P4):</b> Within 60 days</li>
+          <li><b>Informational (P5):</b> Within 270 days</li>
+        </ul>
+      </article>
+    </section>
+    
+  </div>
+  <div class="page-break"></div>
+
+  <!-- A detailled overview of all the findings -->
+  <div class="page">
+    <section id="findings">
+      <h1>4. Findings <a class="table_of_content_jump_link" href="#table_of_contents_jump">&#8593;</a></h1>
+      <article>
+        {FINDINGS}
+      </article>
+    </section>
+  </div>
+
+  <!-- What's next -->
+  <div class="page">
+    <section id="whats-next">
+      <h1>5. What's Next <a class="table_of_content_jump_link" href="#table_of_contents_jump">&#8593;</a></h1>
+      <article>
+        <p>The Global Offensive Security Team published all vulnerabilities on the Keep It Secure 24 platform. Every severity level has its own maximum time to solve. The table below will give you an approximate due date.</p>
+
+        <p>The vulnerabilities <b>need to be resolved before this due date.</b></p>
+          
+        <p>When the vulnerability has been fixed, the Global Offensive Security Team will retest the fix. With this validation, the team will take a close look at the implementation and bypass techniques for the fix itself.</p>
+          
+        <p>To make sure that the findings that are reported are being resolved within the designed time to solve window, the ISO must track the vulnerability status.</p>
+          
+        <p>A fix may take more time to resolve due to multiple reasons. When this happens an exception for extra time must be raised via ServiceNow: <a href="https://randstadglobal.service-now.com/motion?id=sc_cat_item&table=sc_cat_item&sys_id=cbb8774a970159108f77be7fe153af6f">Request Security Exception</a>. Once a Security exception has been approved, you may update the vulnerability status to "Parked" in Keep It Secure 24.</p>
+        <p>If you need instructions on how to raise a security exception, please refer to Appendix 6.2. section.</p>
+      </article>
+      <h2 id="findings-due-date">5.1. Findings Due Date Overview</h2>
+      <table aria-describedby="Table with overview of the due dates, sorted by severity">
+        <tr>
+          <th id="finding_overview_findingdescription">
+            Finding
+          </th>
+          <th id="finding_overview_findingseverity">
+            Severity
+          </th>
+          <th id="finding_overview_findingstatus">
+            Due date
+          </th>
+        </tr>
+        {FINDINGS_DUE_SUMMARY}
+      </table>
+    </section>
+    
+  </div>
+  <div class="page-break"></div>
+
+  <!-- Appendix -->
+  <div class="page">
+    <section id="appendix">
+      <h1>6. Appendix <a class="table_of_content_jump_link" href="#table_of_contents_jump">&#8593;</a></h1>
+      <h2>6.1 Appendix - Disclaimer</h2>
+      <article>
+        <p>Our analysis and conclusions, despite the expertise of our team, are subject to certain limitations:</p>
+        <ul>
+          <li>The penetration test performed makes it possible to detect certain vulnerabilities. In no case they prove the absence of vulnerabilities, especially within the limited timeframe.</li>
+          <li>Our team operates within defined scope boundaries, unlike malicious actors who are not bound by the same limitations of scope and time.</li>
+          <li>This report does not predict the future evolution of the target environment and associated threats. It reflects only the security status of the systems at the time of the penetration test.</li>
+        </ul>
+      </article>
+    </section>    
+  </div>
+
+  <div class="page-break"></div>
+  
+  <div class="page">
+    <section>
+      <h2>6.2. Appendix - Raising a Security Exception</h2>
+      <article>
+        <p>Instructions for submitting a Global Security Exception:</p>
+        <p><b>Step 1: Accessing the Security Exception Reequest Form</b></p>
+        <p>Navigate to the designated Global Security Exception Request Form using the following link: <a href="https://randstadglobal.service-now.com/motion?id=sc_cat_item&table=sc_cat_item&sys_id=cbb8774a970159108f77be7fe153af6f">https://randstadglobal.service-now.com/motion?id=sc_cat_item&table=sc_cat_item&sys_id=cbb8774a970159108f77be7fe153af6f</a>.</p>
+        <p>Once on the form, proceed to complete the required fields as outlined in the subsequent steps.</p>
+        <img src="../Static/Images/security_exception_01.png" style="width: 480px; text-align: center; display: block; margin: auto">
+        <p><b>a.</b> Copy the information provided in the green square as is.<br>
+          <b>b.</b> For other fields requiring specific details, refer to the list of possible choices available. Provide accurate and relevant information, including the "Short Description", "Description of the Non-Compliance" and "Business Justification for Non-Compliance".</p>
+        <p><b>Step 2: Additional Form Submission</b></p>
+        <p>Upon clicking the "Add" button, a secondary form will appear for detailed information regarding the identified vulnerability.</p>
+        <img src="../Static/Images/security_exception_02.png" style="width: 480px; text-align: center; display: block; margin: auto">
+        <p>Here is an example:</p>
+        <ul>
+          <li><b>Threat Perceived:</b> Information disclosure of application's functioning and password policy.</li>
+          <li><b>Vulnerability Perceived:</b> Hardcoded Credentials</li>
+          <li><b>Existing controls:</b> No controls are in place.</li>
+          <li><b>Mitigation steps taken to reduce the risk:</b> None</li>
+          <li><b>Plan for the full solution implementation in the specified exception duration:</b> None (unless you have a plan for resolving the issue)</li>
+          <li><b>Value of an asset based on the cia rating:</b> According to OneTrust</li>
+          <li><b>Is the server/instance/resource/asset internet facing?</b> Yes/No</li>
+          <li><b>Probability of risk occurrence</b> [it will appear after you fill the previous fields]</li>
+          <li><b>Business impact</b> [it will appear after you fill the previous fields]</li>
+          <li><b>Calculated risk value</b> (it will be filled up by itself)</li>
+          <li><b>Risk response:</b> Accept</li>
+          <li><b>Process policy deviation:</b> Security policy</li>
+        </ul>
+      </article>
+    </section>    
+  </div>
+  <div class="page-break"></div>
+
+  {APPENDIX}
+  <!-- End of Appendix -->
+
+
+</body>
+</html>

@@ -36,6 +36,7 @@ interface PlannerViewProps {
   handleCreateWorkspace: (testId: string) => void;
   handleToggleTentative: (testId: string) => void;
   handleCreatePresentation: (test: Test) => void;
+  handleGenerateReport: (test: Test) => void;
   assignModalTest: Test | null;
   setAssignModalTest: (test: Test | null) => void;
   backlogFilter: string;
@@ -62,7 +63,7 @@ export default function PlannerView({
   boardData, setNewTest, setShowTestForm,
   onDragEnd, handleAssignTeam, handleCompleteTest, handleUnscheduleTest, handleUnassignPentester,
   handleDeleteTest, handleDuplicateTest, openEditModal, handleMarkUnable, handleRevertComplete, handleRevertUnable, handleCreateWorkspace, handleToggleTentative,
-  handleCreatePresentation, assignModalTest, setAssignModalTest, backlogFilter, setBacklogFilter, setTargetYear
+  handleCreatePresentation, handleGenerateReport, assignModalTest, setAssignModalTest, backlogFilter, setBacklogFilter, setTargetYear
 }: PlannerViewProps) {
 
   const navigate = useNavigate();
@@ -424,7 +425,14 @@ export default function PlannerView({
                                                       >
                                                         <Presentation size={14}/>
                                                       </button>
-                                                      <button title="Generate PDF" className="p-1.5 flex items-center justify-center rounded text-rose-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/30 transition-colors" onClick={(e) => { e.stopPropagation(); console.log("Generate PDF", test.id); }}>
+                                                      <button
+                                                        title="Generate PDF"
+                                                        className="p-1.5 flex items-center justify-center rounded text-rose-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/30 transition-colors"
+                                                        onClick={(e) => {
+                                                          e.stopPropagation();
+                                                          handleGenerateReport(test);
+                                                        }}
+                                                      >
                                                         <FileText size={14}/>
                                                       </button>
                                                       <button title="Verify Findings" className="p-1.5 flex items-center justify-center rounded text-teal-500 hover:text-teal-600 hover:bg-teal-50 dark:hover:bg-teal-900/30 transition-colors" onClick={(e) => { e.stopPropagation(); console.log("Verify Findings", test.id); }}>
@@ -605,7 +613,14 @@ export default function PlannerView({
                             >
                               <Presentation size={14}/>
                             </button>
-                            <button title="Generate PDF" className="p-2 flex items-center justify-center rounded-lg text-rose-600 bg-rose-50 dark:bg-rose-900/20" onClick={(e) => { e.stopPropagation(); console.log("Generate PDF", test.id); }}>
+                            <button
+                              title="Generate PDF"
+                              className="p-2 flex items-center justify-center rounded-lg text-rose-600 bg-rose-50 dark:bg-rose-900/20"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleGenerateReport(test);
+                              }}
+                            >
                               <FileText size={14}/>
                             </button>
                             <button title="Verify Findings" className="p-2 flex items-center justify-center rounded-lg text-teal-600 bg-teal-50 dark:bg-teal-900/20" onClick={(e) => { e.stopPropagation(); console.log("Verify Findings", test.id); }}>
