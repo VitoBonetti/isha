@@ -658,7 +658,7 @@ def toggle_tentative(test_id: str, background_tasks: BackgroundTasks,
 
 
 # --- Generation PPT ---
-async def process_presentation_background(test_id: str, kiss24_id: str, user_id: str, user_email: str, test_name: str,
+async def process_presentation_background(test_id: str, kiss24_id: str, user_id: str, user_email: str, user_role: str, test_name: str,
                                           drive_folder_id: str, service_name: str, snow_number: str,
                                           start_week: int, start_year: int, duration_weeks: float):
     """Background task that generates the presentation locally via a thread."""
@@ -740,26 +740,55 @@ def trigger_presentation_generation(test_id: str, background_tasks: BackgroundTa
     row = cursor.fetchone()
 
     if not row:
+        log_audit_event(
+            user_id=str(current_user["id"]),
+            role=str(current_user["role"]),
+            action="GENERATION_PRESENTATION_TEST_NOT_FOUND",
+            resource_type="PRESENTATION",
+            resource_id=str(test_id),
+            details=f"Test with ID {test_id} was not found."
+        )
         raise HTTPException(status_code=404, detail="Test not found.")
 
     test_name, kiss24_id, drive_folder_id, service_name, snow_number, start_week, start_year, duration_weeks = row
 
     if not kiss24_id:
+        log_audit_event(
+            user_id=str(current_user["id"]),
+            role=str(current_user["role"]),
+            action="GENERATION_PRESENTATION_TEST_NO_KISS UUID",
+            resource_type="PRESENTATION",
+            resource_id=str(test_id),
+            details=f"Test with ID {test_id} is Missing kiss24 UUID."
+        )
         raise HTTPException(status_code=400, detail="Missing kiss24 UUID. Please set it in the test settings first.")
 
-    # REQUIREMENT 1: Ensure the Drive Workspace exists before starting!
     if not drive_folder_id:
+        log_audit_event(
+            user_id=str(current_user["id"]),
+            role=str(current_user["role"]),
+            action="GENERATION_PRESENTATION_TEST_NO_DRIVE_WORKSPACE",
+            resource_type="PRESENTATION",
+            resource_id=str(test_id),
+            details=f"Test with ID {test_id} is missing Google Drive Workspace."
+        )
         raise HTTPException(status_code=400,
                             detail="Missing Drive Workspace. Please click the 'Create Drive Workspace' button first.")
 
     background_tasks.add_task(
         process_presentation_background,
-        test_id, str(kiss24_id), str(current_user["id"]), current_user["email"], test_name,
+        test_id, str(kiss24_id), str(current_user["id"]), current_user["email"], str(current_user["role"]), test_name,
         drive_folder_id, service_name, snow_number, start_week, start_year, duration_weeks
     )
 
-    log_audit_event(str(current_user["id"]), current_user["role"], "PRESENTATION_TRIGGERED", "TESTS", test_id,
-                    "Triggered internal presentation generation.")
+    log_audit_event(
+        user_id=str(current_user["id"]),
+        role=str(current_user["role"]),
+        action="PRESENTATION_TRIGGERED",
+        resource_type="PRESENTATION",
+        resource_id=str(test_id),
+        details=f"Presentation for Kiss24 test with ID: {kiss24_id} was started. Service Lane: {service_name}. SNow Asset ID {snow_number}. Start week: {start_week}. Start year: {start_year}"
+    )
 
     return {
         "message": "Presentation generation started in the background. You will receive a notification when it's ready!"}

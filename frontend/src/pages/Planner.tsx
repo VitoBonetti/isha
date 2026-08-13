@@ -311,10 +311,7 @@ export default function Planner() {
   };
 
   const handleCreatePresentation = async (test: Test) => {
-    if (!test.kiss24) {
-      toast.error(`Missing kiss24 UUID for '${test.name}'. Please edit the test and add it first.`);
-      return;
-    }
+
     const toastId = toast.loading(`Starting presentation generation for ${test.name}...`);
     try {
       const res = await axios.post(`/api/tests/${test.id}/presentation`);
