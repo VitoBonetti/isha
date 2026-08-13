@@ -18,7 +18,7 @@ from websockets_manager import manager
 from schema import TestCreate, TestBase, AssignmentBase, TestSchedule, BulkTestCreate, AssignmentCreate, SecureNotePayload
 from audit_logger import log_audit_event
 from utils.drive_manager import DriveManager, background_archive_workspace, background_provision_workspace, background_relocate_workspace
-from reports.presentation import generate_presentation
+from presentations.presentation import generate_presentation
 
 router = APIRouter(prefix="/api/tests", tags=["Tests & Assignments"])
 
