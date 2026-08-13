@@ -296,6 +296,8 @@ class Builder:
                                                                 get_severity_as_html(vuln['Severity']))
             findings_table_template_builder.replace_in_template('{FINDINGSUMMARY_STATUS}',
                                                                 html_status_resolved(vuln['Status']))
+            findings_table_template_builder.replace_in_template('{FINDINGSUMMARY_EFFORT}',
+                                                                vuln.get('RemediationEffort', '-'))
             try:
                 findings_table_template_builder.replace_in_template('{FINDINGSUMMARY_DUE}',
                                                                     calculate_due_date(self, vuln))
@@ -311,6 +313,7 @@ class Builder:
             findings_table_template_builder.replace_in_template('{FINDINGSUMMARY_TITLE}', "No findings")
             findings_table_template_builder.replace_in_template('{FINDINGSUMMARY_SEVERITY}', "-")
             findings_table_template_builder.replace_in_template('{FINDINGSUMMARY_STATUS}', "-")
+            findings_table_template_builder.replace_in_template('{FINDINGSUMMARY_EFFORT}', "-")
             findings_table_template_builder.replace_in_template('{FINDINGSUMMARY_DUE}', "-")
             findings_table = findings_table_template_builder.get_template_content()
 
@@ -348,6 +351,8 @@ class Builder:
             findings_due_table_template_builder.replace_in_template('{FINDINGSUMMARY_TITLE}', vuln["Title"])
             findings_due_table_template_builder.replace_in_template('{FINDINGSUMMARY_SEVERITY}',
                                                                     get_severity_as_html(vuln['Severity']))
+            findings_due_table_template_builder.replace_in_template('{FINDINGSUMMARY_EFFORT}',
+                                                                    vuln.get('RemediationEffort', '-'))
             try:
                 findings_due_table_template_builder.replace_in_template('{FINDINGSUMMARY_DUE}',
                                                                         calculate_due_date(self, vuln))
@@ -363,6 +368,7 @@ class Builder:
             findings_due_table_template_builder.load_template()
             findings_due_table_template_builder.replace_in_template('{FINDINGSUMMARY_TITLE}', "No findings")
             findings_due_table_template_builder.replace_in_template('{FINDINGSUMMARY_SEVERITY}', "-")
+            findings_due_table_template_builder.replace_in_template('{FINDINGSUMMARY_EFFORT}', "-")
             findings_due_table_template_builder.replace_in_template('{FINDINGSUMMARY_DUE}', "-")
 
             findings_due_table += findings_due_table_template_builder.get_template_content()

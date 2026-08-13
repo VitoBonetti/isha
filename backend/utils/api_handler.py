@@ -181,6 +181,20 @@ class Secure24APIHandler:
             else:
                 attachment_enrichment = []
 
+            # Extract Remediation Effort from memory
+            vuln_uuid = vuln_item['uuid']
+            custom_fields = getattr(self.parsed_args, 'custom_fields', {})
+            fields_for_this_vuln = custom_fields.get(vuln_uuid, [])
+
+            remediation_effort = "N/A"
+            for field in fields_for_this_vuln:
+                if field.get('custom_field', {}).get('name') == 'Remediation Effort':
+                    val = field.get('value')
+                    if val:
+                        # Handle both strings and arrays correctly
+                        remediation_effort = val if isinstance(val, str) else ", ".join(val)
+                    break
+
             ## Mapping KISS24 values to Randstad vuln naming
             vuln_enrichment['state'] = 'Open' if (vuln_item['state'] == 'New') else vuln_item['state']
 
@@ -203,6 +217,7 @@ class Secure24APIHandler:
                 "Type": vuln_enrichment['vulnerability_type'],
                 "Finding": vuln_enrichment['details'],
                 "PublishedAt": vuln_enrichment['published_at'],
+                "RemediationEffort": remediation_effort,
                 "Impact": "",
                 "Recommendation": "",
                 "Attachments": attachment_enrichment,
@@ -310,6 +325,20 @@ class Secure24APIHandler:
             else:
                 attachment_enrichment = []
 
+            # Extract Remediation Effort from memory
+            vuln_uuid = vuln_item['uuid']
+            custom_fields = getattr(self.parsed_args, 'custom_fields', {})
+            fields_for_this_vuln = custom_fields.get(vuln_uuid, [])
+
+            remediation_effort = "N/A"
+            for field in fields_for_this_vuln:
+                if field.get('custom_field', {}).get('name') == 'Remediation Effort':
+                    val = field.get('value')
+                    if val:
+                        # Handle both strings and arrays correctly
+                        remediation_effort = val if isinstance(val, str) else ", ".join(val)
+                    break
+
             ## Mapping KISS24 values to Randstad vuln naming
             vuln_enrichment['state'] = 'Open' if (vuln_item['state'] == 'New') else vuln_item['state']
 
@@ -332,6 +361,7 @@ class Secure24APIHandler:
                 "Type": vuln_enrichment['vulnerability_type'],
                 "Finding": vuln_enrichment['details'],
                 "PublishedAt": vuln_enrichment['published_at'],
+                "RemediationEffort": remediation_effort,
                 "Impact": "",
                 "Recommendation": "",
                 "Attachments": attachment_enrichment,

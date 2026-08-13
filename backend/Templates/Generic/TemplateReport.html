@@ -15,7 +15,7 @@
       <h3 style="margin-top: -14px;">{SERVICE_TYPE} Security Assessment</h3>
       <br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br>
       <h1>{APPLICATION_NAME}</h1>
-      <h1>{OPCO}</h1>   
+      <h1>{OPCO}</h1>
       <br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br>
       <h4>C4. Confidential</h4>
       <p>This document may only by processed by a specified selection of employees of the Randstad Group Companies, operating companies and third parties.</p>
@@ -47,7 +47,7 @@
             <li><a href="#findings-overview">Findings Overview</a></li>
           </ol>
         </li>
-        
+
         <li><a href="#scope-reminder">Scope Reminder</a>
           <ol>
             <li><a href="#objectives">Objectives</a></li>
@@ -74,7 +74,7 @@
         <li><a href="#appendix">Appendix</a></li>
       </ol>
     </section>
-    
+
   </div>
   <div class="page-break"></div>
 
@@ -123,12 +123,16 @@
           <th>Finding</th>
           <th>Severity</th>
           <th>Status</th>
+          <th>Effort</th>
           <th>Due Date</th>
         </tr>
         {FINDINGS_SUMMARY}
       </table>
+      <div class="effort_disclaimer">
+        <i>* Estimated Remediation Effort: this value represents a preliminary assessment and may differ based on specific development environments or internal architectures.</i>
+      </div>
     </section>
-    
+
   </div>
   <div class="page-break"></div>
 
@@ -163,7 +167,7 @@
         </ul>
       </article>
     </section>
-    
+
   </div>
   <div class="page-break"></div>
 
@@ -198,7 +202,7 @@
         </ul>
       </article>
     </section>
-    
+
   </div>
   <div class="page-break"></div>
 
@@ -220,11 +224,11 @@
         <p>The Global Offensive Security Team published all vulnerabilities on the Keep It Secure 24 platform. Every severity level has its own maximum time to solve. The table below will give you an approximate due date.</p>
 
         <p>The vulnerabilities <b>need to be resolved before this due date.</b></p>
-          
+
         <p>When the vulnerability has been fixed, the Global Offensive Security Team will retest the fix. With this validation, the team will take a close look at the implementation and bypass techniques for the fix itself.</p>
-          
+
         <p>To make sure that the findings that are reported are being resolved within the designed time to solve window, the ISO must track the vulnerability status.</p>
-          
+
         <p>A fix may take more time to resolve due to multiple reasons. When this happens an exception for extra time must be raised via ServiceNow: <a href="https://randstadglobal.service-now.com/motion?id=sc_cat_item&table=sc_cat_item&sys_id=cbb8774a970159108f77be7fe153af6f">Request Security Exception</a>. Once a Security exception has been approved, you may update the vulnerability status to "Parked" in Keep It Secure 24.</p>
         <p>If you need instructions on how to raise a security exception, please refer to Appendix 6.2. section.</p>
       </article>
@@ -237,12 +241,18 @@
           <th id="finding_overview_findingseverity">
             Severity
           </th>
+          <th>
+            Effort
+          </th>
           <th id="finding_overview_findingstatus">
             Due date
           </th>
         </tr>
         {FINDINGS_DUE_SUMMARY}
       </table>
+      <div class="effort_disclaimer">
+        <i>* Estimated Remediation Effort: this value represents a preliminary assessment and may differ based on specific development environments or internal architectures.</i>
+      </div>
     </section>
     
   </div>
@@ -274,12 +284,12 @@
         <p><b>Step 1: Accessing the Security Exception Reequest Form</b></p>
         <p>Navigate to the designated Global Security Exception Request Form using the following link: <a href="https://randstadglobal.service-now.com/motion?id=sc_cat_item&table=sc_cat_item&sys_id=cbb8774a970159108f77be7fe153af6f">https://randstadglobal.service-now.com/motion?id=sc_cat_item&table=sc_cat_item&sys_id=cbb8774a970159108f77be7fe153af6f</a>.</p>
         <p>Once on the form, proceed to complete the required fields as outlined in the subsequent steps.</p>
-        <img src="../Static/Images/security_exception_01.png" style="width: 480px; text-align: center; display: block; margin: auto">
+        <img src="Report/Static/Images/security_exception_01.png" style="width: 480px; text-align: center; display: block; margin: auto">
         <p><b>a.</b> Copy the information provided in the green square as is.<br>
           <b>b.</b> For other fields requiring specific details, refer to the list of possible choices available. Provide accurate and relevant information, including the "Short Description", "Description of the Non-Compliance" and "Business Justification for Non-Compliance".</p>
         <p><b>Step 2: Additional Form Submission</b></p>
         <p>Upon clicking the "Add" button, a secondary form will appear for detailed information regarding the identified vulnerability.</p>
-        <img src="../Static/Images/security_exception_02.png" style="width: 480px; text-align: center; display: block; margin: auto">
+        <img src="Report/Static/Images/security_exception_02.png" style="width: 480px; text-align: center; display: block; margin: auto">
         <p>Here is an example:</p>
         <ul>
           <li><b>Threat Perceived:</b> Information disclosure of application's functioning and password policy.</li>

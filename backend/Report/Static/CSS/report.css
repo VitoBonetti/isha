@@ -12,10 +12,10 @@
           font-family: 'Randstad Graphik';
           src: url('Font/Graphik-Regular.eot'),
                url('Font/Graphik-Regular.woff2') format('woff2'),
-               url('Font/Graphik-Regular.woff') format('woff'), 
+               url('Font/Graphik-Regular.woff') format('woff'),
                url('Font/Graphik-Regular.ttf')  format('truetype');
         }
-    
+
         /* Normal tags */
         body {
           font-family: 'Randstad Graphik', 'Tahoma', sans-serif;
@@ -38,7 +38,7 @@
             font-size: 13px;
             color: #999999;
           }
-          
+
           @bottom-left {
             content: "C4. Confidential";
             font-size: 13px;
@@ -52,7 +52,7 @@
           @bottom-right {
             content: "";
           }
-          
+
           @bottom-left {
             content: "";
           }
@@ -227,7 +227,7 @@
         #status_resolved_text {
           color: #31AA74; /* Green */
         }
-        
+
         #critical-f {
           color: #a80000;
         }
@@ -261,7 +261,7 @@
           white-space: -hp-pre-wrap;  /* HP Printers */
           word-wrap: break-word;      /* IE 5+ */
         }
-        
+
         a:hover {
           text-decoration: underline;
         }
@@ -283,13 +283,20 @@
           content: counters(item, ".") ". ";
           counter-increment: item;
         }
-      
+
         /* ToC jump links */
         .table_of_content_jump_link {
           float: right;
           font-size: 18px;
         }
-    
+
+        /* Effort disclaimer under tables 1.4 and 5.1 */
+        .effort_disclaimer {
+          font-family: Helvetica, Arial, sans-serif;
+          font-size: 12px;
+          font-style: italic !important;
+        }
+
         
     
     
