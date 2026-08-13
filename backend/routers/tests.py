@@ -720,7 +720,7 @@ async def process_presentation_background(test_id: str, kiss24_id: str, user_id:
     await manager.broadcast('{"action": "REFRESH_BOARD"}')
 
 
-@router.post("/{test_id}/presentation", summary="[Admin & Pentester]")
+@router.post("/{test_id}/presentation")
 def trigger_presentation_generation(test_id: str, background_tasks: BackgroundTasks,
                                     current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
     if current_user.get('role') == 'read_only':
