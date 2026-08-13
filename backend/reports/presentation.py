@@ -701,7 +701,7 @@ def vulns_summary_text(vulns, presentation):
 
 # --- Generate presentation ---
 def generate_presentation(test_uuid: str, db_drive_folder_id: str, db_service_name: str,
-                                   db_snow_number: str) -> dict:
+                                   db_snow_number: str, start_week: int, start_year: int, duration_weeks: float) -> dict:
     """
     Main entry point for the backend to call.
     """
@@ -735,23 +735,31 @@ def generate_presentation(test_uuid: str, db_drive_folder_id: str, db_service_na
     test_service = db_service_name if db_service_name else retrieve_test_service(session, headers, test_uuid)
     onetrust_id = db_snow_number if db_snow_number else retrieve_onetrust_id(session, headers, asset["uuid"])
 
+    try:
+        test_start = datetime.fromisocalendar(start_year, start_week, 1)
+        dur_weeks = max(1, int(duration_weeks or 1))
+        test_end = test_start + timedelta(days=(dur_weeks - 1) * 7 + 4)
+        start_date_str = test_start.strftime("%d/%m/%Y")
+        end_date_str = test_end.strftime("%d/%m/%Y")
+        duration_days = int((duration_weeks or 1) * 5)
+    except Exception as e:
+        print(f"Warning: Could not calculate dates from planner: {e}")
+        start_date_str = "N/A"
+        end_date_str = "N/A"
+        duration_days = 0
+
     replacements = {
         "[TIMESTAMP]": f"Generated on {datetime.now().strftime('%d-%m-%Y')}",
+        "[DURATION]": f"{duration_days} day(s)",
+        "[OPCO]": test["organisation"]["name"],
+        "[SERVICE_TYPE]": test_service,
+        "[TARGET_NAME]": asset["name"],
+        "[ASSET_ID]": onetrust_id,
+        "[START_DATE]": start_date_str,
+        "[END_DATE]": end_date_str,
+        "[TOTAL_VULNS]": str(len(vulns)),
+        "[VULNS_SUMMARY]": vulns_summary_text(vulns, presentation)
     }
-
-    test_start = datetime.strptime(test["started_at"], "%Y-%m-%d %H:%M:%S")
-    test_end = datetime.strptime(test["ended_at"], "%Y-%m-%d %H:%M:%S")
-    test_duration_days = (test_end - test_start).days
-
-    replacements["[DURATION]"] = f"{test_duration_days if test_duration_days > 0 else 1} day(s)"
-    replacements["[OPCO]"] = test["organisation"]["name"]
-    replacements["[SERVICE_TYPE]"] = test_service
-    replacements["[TARGET_NAME]"] = asset["name"]
-    replacements["[ASSET_ID]"] = onetrust_id
-    replacements["[START_DATE]"] = test_start.strftime("%d/%m/%Y")
-    replacements["[END_DATE]"] = test_end.strftime("%d/%m/%Y")
-    replacements["[TOTAL_VULNS]"] = str(len(vulns))
-    replacements["[VULNS_SUMMARY]"] = vulns_summary_text(vulns, presentation)
 
     h_parser = html2text.HTML2Text()
     h_parser.body_width = 0

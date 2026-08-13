@@ -659,7 +659,8 @@ def toggle_tentative(test_id: str, background_tasks: BackgroundTasks,
 
 # --- Generation PPT ---
 async def process_presentation_background(test_id: str, kiss24_id: str, user_id: str, user_email: str, test_name: str,
-                                          drive_folder_id: str, service_name: str, snow_number: str):
+                                          drive_folder_id: str, service_name: str, snow_number: str,
+                                          start_week: int, start_year: int, duration_weeks: float):
     """Background task that generates the presentation locally via a thread."""
     try:
         # Pass the database values to the generator
@@ -668,7 +669,10 @@ async def process_presentation_background(test_id: str, kiss24_id: str, user_id:
             kiss24_id,
             drive_folder_id,
             service_name,
-            snow_number
+            snow_number,
+            start_week,
+            start_year,
+            duration_weeks
         )
 
         drive_link = data.get("driveLink", "No link returned")
@@ -722,9 +726,9 @@ def trigger_presentation_generation(test_id: str, background_tasks: BackgroundTa
     if current_user.get('role') == 'read_only':
         raise HTTPException(status_code=403, detail="Read-only users cannot trigger generation.")
 
-    # SUPERCHARGED QUERY: Get the test, the workspace, the service lane, and the SNOW number all at once
     cursor.execute("""
-        SELECT t.name, t.kiss24, t.drive_folder_id, sl.name as service_name, ra.snow_number 
+        SELECT t.name, t.kiss24, t.drive_folder_id, sl.name as service_name, ra.snow_number,
+               t.start_week, t.start_year, t.duration_weeks
         FROM tests t
         LEFT JOIN services_lanes sl ON t.service_lane_id = sl.id
         LEFT JOIN test_assets ta ON t.id = ta.test_id
@@ -738,7 +742,7 @@ def trigger_presentation_generation(test_id: str, background_tasks: BackgroundTa
     if not row:
         raise HTTPException(status_code=404, detail="Test not found.")
 
-    test_name, kiss24_id, drive_folder_id, service_name, snow_number = row
+    test_name, kiss24_id, drive_folder_id, service_name, snow_number, start_week, start_year, duration_weeks = row
 
     if not kiss24_id:
         raise HTTPException(status_code=400, detail="Missing kiss24 UUID. Please set it in the test settings first.")
@@ -751,7 +755,7 @@ def trigger_presentation_generation(test_id: str, background_tasks: BackgroundTa
     background_tasks.add_task(
         process_presentation_background,
         test_id, str(kiss24_id), str(current_user["id"]), current_user["email"], test_name,
-        drive_folder_id, service_name, snow_number
+        drive_folder_id, service_name, snow_number, start_week, start_year, duration_weeks
     )
 
     log_audit_event(str(current_user["id"]), current_user["role"], "PRESENTATION_TRIGGERED", "TESTS", test_id,
