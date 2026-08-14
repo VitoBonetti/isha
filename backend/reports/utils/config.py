@@ -13,7 +13,7 @@ class ReportConfig:
     def __init__(self, parsed_args):
         self.service = parsed_args.type
         self.config = None
-        self.configFile = "configuration/config.json"
+        self.configFile = "reports/utils/configuration/config.json"
         self.environmentName = parsed_args.environment
         self.environmentURL = None
         self.commonIssues = None

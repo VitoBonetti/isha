@@ -1,0 +1,63 @@
+{
+  "environmentURLs": {
+    "sec24fac": "https://demo2.keepitsecure24.com/randstad/",
+    "sec24prd": "https://randstad.eu.vulnmanager.com/"
+  },
+  "dueDates": {
+    "info": 270,
+    "low": 60,
+    "medium": 45,
+    "high": 30,
+    "critical": 14
+  },
+  "reportTypes": {
+    "adversarySimulation": {
+      "ReportPentestTemplates": {
+        "reportTemplateFile": "reports/Templates/Generic/TemplateReport.html",
+        "riskTableTemplateFile": "reports/Templates/Generic/TemplateRiskTable.html",
+        "findingTableTemplateFile": "reports/Templates/Generic/TemplateFindingTable.html",
+        "findingDueTableTemplateFile": "reports/Templates/Generic/TemplateFindingDueTable.html",
+        "findingTemplateFile": "reports/Templates/Generic/TemplateFinding.html",
+        "methodologyFile": "reports/Templates/Advsim/Methodology.html",
+        "appendixFile": "reports/Templates/Advsim/Appendix.html"
+      },
+      "ReportVulnTemplates": {
+        "reportVulnTemplateFile": "reports/Templates/Generic/TemplateReportMinify.html",
+        "findingVulnTemplateFile": "reports/Templates/Generic/TemplateFinding.html"
+      },
+      "ReportOutputFolder": "reports/Reports/AdvSimReports"
+    },
+    "whiteBox": {
+      "ReportPentestTemplates": {
+        "reportTemplateFile": "reports/Templates/Generic/TemplateReport.html",
+        "riskTableTemplateFile": "reports/Templates/Generic/TemplateRiskTable.html",
+        "findingTableTemplateFile": "reports/Templates/Generic/TemplateFindingTable.html",
+        "findingDueTableTemplateFile": "reports/Templates/Generic/TemplateFindingDueTable.html",
+        "findingTemplateFile": "reports/Templates/Generic/TemplateFinding.html",
+        "methodologyFile": "reports/Templates/Whitebox/Methodology.html",
+        "appendixFile": "reports/Templates/Whitebox/Appendix.html"
+      },
+      "ReportVulnTemplates": {
+        "reportVulnTemplateFile": "reports/Templates/Generic/TemplateReportMinify.html",
+        "findingVulnTemplateFile": "reports/Templates/Generic/TemplateFinding.html"
+      },
+      "ReportOutputFolder": "reports/Reports/WhiteBoxReports"
+    },
+    "blackBox": {
+      "ReportPentestTemplates": {
+        "reportTemplateFile": "reports/Templates/Generic/TemplateReport.html",
+        "riskTableTemplateFile": "reports/Templates/Generic/TemplateRiskTable.html",
+        "findingTableTemplateFile": "reports/Templates/Generic/TemplateFindingTable.html",
+        "findingDueTableTemplateFile": "reports/Templates/Generic/TemplateFindingDueTable.html",
+        "findingTemplateFile": "reports/Templates/Generic/TemplateFinding.html",
+        "methodologyFile": "reports/Templates/Blackbox/Methodology.html",
+        "appendixFile": "reports/Templates/Blackbox/Appendix.html"
+      },
+      "ReportVulnTemplates": {
+        "reportVulnTemplateFile": "reports/Templates/Generic/TemplateReportMinify.html",
+        "findingVulnTemplateFile": "reports/Templates/Generic/TemplateFinding.html"
+      },
+      "ReportOutputFolder": "reports/Reports/BlackBoxReports"
+    }
+  }
+}

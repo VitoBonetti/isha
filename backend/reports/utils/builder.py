@@ -2,7 +2,7 @@ import datetime
 import logging
 import os
 import re
-from helpers.helpers import (
+from reports.helpers.helpers import (
     sort_vuln_by_severity,
     get_severity_as_html,
     html_status_resolved,

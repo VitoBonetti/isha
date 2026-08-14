@@ -1,8 +1,8 @@
 import argparse
-from utils.log_levels import set_log_level
-from utils.config import ReportConfig
-from utils.api_handler import APIHandler, Secure24APIHandler
-from utils.builder import Builder
+from reports.utils.log_levels import set_log_level
+from reports.utils.config import ReportConfig
+from reports.utils.api_handler import APIHandler, Secure24APIHandler
+from reports.utils.builder import Builder
 import logging
 import os
 
