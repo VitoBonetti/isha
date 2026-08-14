@@ -6,7 +6,7 @@ import ApiKeysModal from './Modals/ApiKeysModal';
 import {
   Sun, Moon, Laptop, LogOut, User as UserIcon, Bell,
   SprayCan, Snail, SunMoon, Fingerprint, Rabbit, Cat, Shell, Turtle, Radar, HandMetal, Drum, TentTree,
-  Wifi, WifiOff, Loader2, ChevronDown, Key, LockOpen, Lock, Menu, X
+  Wifi, WifiOff, Loader2, ChevronDown, Key, LockOpen, Lock, Menu, X, Feather, PawPrint, Origami
 } from 'lucide-react';
 
 export default function TopNav() {
@@ -19,7 +19,7 @@ export default function TopNav() {
   const [isUserOpen, setIsUserOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isApiModalOpen, setIsApiModalOpen] = useState(false);
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false); // Mobile Menu State
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   const themeRef = useRef<HTMLDivElement>(null);
   const userRef = useRef<HTMLDivElement>(null);
@@ -28,7 +28,7 @@ export default function TopNav() {
   const mobileMenuRef = useRef<HTMLDivElement>(null);
 
   // Rotating Logo Icons Logic
-  const logoIcons = [SprayCan, Snail, SunMoon, Fingerprint, Rabbit, Cat, Shell, Turtle, Radar, HandMetal, Drum, TentTree, Wifi, WifiOff, LockOpen, Lock];
+  const logoIcons = [SprayCan, Snail, SunMoon, Fingerprint, Rabbit, Cat, Shell, Turtle, Radar, HandMetal, Drum, TentTree, Wifi, WifiOff, LockOpen, Lock, Feather, PawPrint, Origami];
   const ICON_ROTATION_TIME = 1000 * 60 * 5;
   const iconIndex = Math.floor(Date.now() / ICON_ROTATION_TIME) % logoIcons.length;
   const LogoIcon = logoIcons[iconIndex];
@@ -167,7 +167,7 @@ export default function TopNav() {
             <WifiOff className="h-4 w-4 text-red-500 animate-pulse" />
           )}
 
-          <div className="absolute top-full mt-3 right-0 md:left-1/2 md:-translate-x-1/2 px-2.5 py-1 bg-slate-900 dark:bg-zinc-100 text-white dark:text-slate-900 text-[10px] font-bold uppercase tracking-wider rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none shadow-lg">
+          <div className="absolute top-full mt-3 right-0 md:right-auto md:left-1/2 md:-translate-x-1/2 w-max px-2.5 py-1 bg-slate-900 dark:bg-zinc-100 text-white dark:text-slate-900 text-[10px] font-bold uppercase tracking-wider rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none shadow-lg z-50">
             Live Sync: {wsStatus}
           </div>
         </div>

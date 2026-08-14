@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import toast from 'react-hot-toast';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import type { DropResult, DragStart } from '@hello-pangea/dnd';
 import { useNavigate } from 'react-router-dom';
@@ -435,7 +436,14 @@ export default function PlannerView({
                                                       >
                                                         <FileText size={14}/>
                                                       </button>
-                                                      <button title="Verify Findings" className="p-1.5 flex items-center justify-center rounded text-teal-500 hover:text-teal-600 hover:bg-teal-50 dark:hover:bg-teal-900/30 transition-colors" onClick={(e) => { e.stopPropagation(); console.log("Verify Findings", test.id); }}>
+                                                      <button
+                                                        title="Verify Findings"
+                                                        className="p-1.5 flex items-center justify-center rounded text-teal-500 hover:text-teal-600 hover:bg-teal-50 dark:hover:bg-teal-900/30 transition-colors"
+                                                        onClick={(e) => {
+                                                          e.stopPropagation();
+                                                          toast.error("Verify Findings is still under development.");
+                                                        }}
+                                                      >
                                                         <ListChecks size={14}/>
                                                       </button>
                                                     </div>
@@ -623,7 +631,14 @@ export default function PlannerView({
                             >
                               <FileText size={14}/>
                             </button>
-                            <button title="Verify Findings" className="p-2 flex items-center justify-center rounded-lg text-teal-600 bg-teal-50 dark:bg-teal-900/20" onClick={(e) => { e.stopPropagation(); console.log("Verify Findings", test.id); }}>
+                            <button
+                              title="Verify Findings"
+                              className="p-2 flex items-center justify-center rounded-lg text-teal-600 bg-teal-50 dark:bg-teal-900/20"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toast.error("Verify Findings is still under development.");
+                              }}
+                            >
                               <ListChecks size={14}/>
                             </button>
                           </>
