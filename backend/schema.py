@@ -16,6 +16,10 @@ class TestStatus(str, Enum):
     completed = "Completed"
     unable = "Unable"
 
+# --- SERVICENOW SYNC ---
+class SnowSyncRequest(BaseModel):
+    pass
+
 # --- LOCATIONS & COUNTRIES ---
 class LocationBase(BaseModel):
     name: str
@@ -43,6 +47,7 @@ class ServiceLaneBase(BaseModel):
     target_goal: Optional[int] = 0
     is_active: bool = True
     display_order: int = 99
+    auto_provision_workspace: bool = False
 
 class ServiceLaneResponse(ServiceLaneBase):
     id: UUID4
@@ -60,13 +65,10 @@ class UserBase(BaseModel):
 
 class UserCreate(UserBase):
     email: EmailStr  # We invite by email now
-    # github_id and avatar_url will be populated automatically during first login
 
 class UserResponse(UserBase):
     id: UUID4
     email: EmailStr
-    github_id: Optional[str] = None
-    avatar_url: Optional[str] = None
 
 class NotificationResponse(BaseModel):
     id: UUID4
@@ -93,6 +95,8 @@ class RawAssetCreate(AssetBase):
     availability_rating: Optional[int] = None
     facing_internet: bool = False
     duplicate_allowed: bool = False
+    snow_number: Optional[str] = None
+    team_note: Optional[str] = None
 
 class AssetResponse(AssetBase):
     id: UUID4
@@ -122,6 +126,10 @@ class TestBase(BaseModel):
     start_week: Optional[int] = None
     start_year: Optional[int] = None
     status: TestStatus = TestStatus.not_planned
+    is_tentative: bool = False
+    drive_folder_id: Optional[str] = None
+    drive_folder_url: Optional[str] = None
+    kiss24: Optional[UUID4] = None
 
 class TestCreate(TestBase):
     asset_ids: List[UUID4] = []
@@ -162,6 +170,7 @@ class EventType(str, Enum):
     team_day = "team_day"
     personal_time_off = "personal_time_off"
     sick_day = "sick_day"
+    working_from_abroad = "working_from_abroad"
 
 class EventBase(BaseModel):
     event_type: EventType

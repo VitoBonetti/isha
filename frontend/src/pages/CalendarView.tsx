@@ -108,183 +108,214 @@ export default function CalendarView() {
   const events = boardData?.events || [];
   const localPentesters = pentesters.length > 0 ? pentesters : (boardData?.pentesters || []);
 
+  const getIsoWeek = (date: Date) => {
+    const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+    const dayNum = d.getUTCDay() || 7;
+    d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+    const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+    return Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+  };
+
+  const isUserActiveOnDate = (user: any, dateStr: string) => {
+    if (!dateStr) return true;
+    const d = new Date(dateStr);
+    const eventYear = d.getFullYear();
+    const eventWeek = getIsoWeek(d);
+
+    if (user.start_year > eventYear || (user.start_year === eventYear && user.start_week > eventWeek)) return false;
+    if (user.end_year && (user.end_year < eventYear || (user.end_year === eventYear && user.end_week < eventWeek))) return false;
+    return true;
+  };
+
+  // Filter the pentesters dynamically based on the modal's selected start date
+  const activeHolidayPentesters = localPentesters.filter(p => isUserActiveOnDate(p, activeHoliday?.start_date));
+
   return (
     <div className="min-h-screen dark:bg-[#09090b] text-slate-900 dark:text-zinc-100 flex flex-col relative overflow-hidden transition-colors duration-300">
-
 
       <TopNav />
       <Toaster position="bottom-right" />
 
-      <main className="flex-1 pt-32 pb-12 px-6 max-w-7xl mx-auto w-full relative z-10 flex flex-col">
+      <main className="flex-1 pt-28 md:pt-32 pb-12 px-4 md:px-6 max-w-7xl mx-auto w-full relative z-10 flex flex-col">
 
-        {/* Header */}
-        <div className="flex justify-between items-center mb-6 shrink-0">
+        {/* Header - Stacked on Mobile */}
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 md:gap-0 mb-4 md:mb-6 shrink-0 w-full">
           <div>
-            <h1 className="text-2xl font-extrabold flex items-center gap-2">
-              <Palmtree size={28} className="text-emerald-500" />
+            <h1 className="text-xl md:text-2xl font-extrabold flex items-center gap-2">
+              <Palmtree size={24} className="text-emerald-500 md:w-7 md:h-7" />
               Holiday Tracker
             </h1>
-            <p className="text-sm text-slate-500 dark:text-zinc-400 mt-1">Manage personal time off and national holidays across regions.</p>
+            <p className="text-xs md:text-sm text-slate-500 dark:text-zinc-400 mt-1">Manage personal time off and national holidays across regions.</p>
           </div>
 
-          <div className="flex items-center gap-4 bg-white dark:bg-zinc-900 p-2 rounded-xl border border-slate-200 dark:border-zinc-800 shadow-sm">
+          <div className="flex items-center justify-between md:justify-start gap-1 md:gap-4 w-full md:w-auto bg-white dark:bg-zinc-900 p-1.5 md:p-2 rounded-xl border border-slate-200 dark:border-zinc-800 shadow-sm">
             <button onClick={handlePrevMonth} className="p-2 hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-lg transition-colors text-slate-600 dark:text-zinc-400"><ChevronLeft size={20} /></button>
-            <div className="w-40 text-center font-bold text-lg">{monthName} {year}</div>
+            <div className="w-32 md:w-40 text-center font-bold text-base md:text-lg">{monthName} {year}</div>
             <button onClick={handleNextMonth} className="p-2 hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-lg transition-colors text-slate-600 dark:text-zinc-400"><ChevronRight size={20} /></button>
-            <div className="w-px h-6 bg-slate-200 dark:bg-zinc-800 mx-1"></div>
-            <button onClick={handleToday} className="px-4 py-1.5 text-sm font-bold bg-blue-50 dark:bg-blue-500/10 hover:bg-blue-100 dark:hover:bg-blue-500/20 text-blue-600 dark:text-blue-400 rounded-lg transition-colors">
+            <div className="w-px h-6 bg-slate-200 dark:bg-zinc-800 mx-0.5 hidden md:block"></div>
+            <button onClick={handleToday} className="px-3 md:px-4 py-1.5 text-xs md:text-sm font-bold bg-blue-50 dark:bg-blue-500/10 hover:bg-blue-100 dark:hover:bg-blue-500/20 text-blue-600 dark:text-blue-400 rounded-lg transition-colors">
               Today
             </button>
           </div>
         </div>
 
-        {/* Grid Container */}
-        <div className="flex-1 flex flex-col bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-2xl shadow-sm overflow-hidden min-h-[600px]">
+        {/* Horizontally Scrollable Calendar Wrapper for Mobile */}
+        <div className="w-full overflow-x-auto custom-scrollbar pb-4 -mx-4 px-4 sm:mx-0 sm:px-0 sm:pb-0">
+          {/* Grid Container - Locked minimum width so cells don't crush */}
+          <div className="flex-1 flex flex-col bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-2xl shadow-sm overflow-hidden min-h-[600px] min-w-[800px]">
 
-          {/* Days Header */}
-          <div className="grid grid-cols-5 border-b border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-950/50 shrink-0">
-            {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'].map(day => (
-              <div key={day} className="p-4 text-center text-xs font-extrabold tracking-widest uppercase text-slate-500 dark:text-zinc-500 border-r border-slate-200 dark:border-zinc-800 last:border-r-0">
-                {day}
-              </div>
-            ))}
-          </div>
-
-          {/* Calendar Body */}
-          <div className="flex-1 flex flex-col">
-            {weeks.map((week, weekIdx) => {
-              const refDay = week.find(d => d !== null);
-              if (!refDay) return null;
-              const refIdx = week.indexOf(refDay);
-
-              const trueWeekStart = new Date(refDay);
-              trueWeekStart.setDate(refDay.getDate() - refIdx);
-              const trueWeekStartStr = toDateStr(trueWeekStart);
-
-              const trueWeekEnd = new Date(refDay);
-              trueWeekEnd.setDate(refDay.getDate() - refIdx + 4);
-              const trueWeekEndStr = toDateStr(trueWeekEnd);
-
-              const weekEvents = events.filter((evt: any) => {
-                const eStart = extractDateStr(evt.start_date || evt.start);
-                const eEnd = extractDateStr(evt.end_date || evt.end);
-                return eStart <= trueWeekEndStr && eEnd >= trueWeekStartStr;
-              });
-
-              return (
-                <div key={weekIdx} className="relative w-full grow shrink-0 basis-auto border-b border-slate-200 dark:border-zinc-800 last:border-b-0 min-h-[120px]">
-
-                  {/* Background Day Cells */}
-                  <div className="absolute inset-0 grid grid-cols-5">
-                    {week.map((day, dayIdx) => {
-                      const isToday = day && toDateStr(day) === toDateStr(new Date());
-                      return (
-                        <div
-                          key={dayIdx}
-                          onClick={() => {
-                            if (!day) return;
-                            const dStr = toDateStr(day);
-                            const defaultUserId = currentUser?.role === 'admin' ? '' : (currentUser?.id || '');
-
-                            setActiveHoliday({
-                              event_type: 'personal_time_off',
-                              user_id: defaultUserId,
-                              location_id: '',
-                              start_date: dStr,
-                              end_date: dStr
-                            });
-                            setModalOpen(true);
-                          }}
-                          className={`border-r border-slate-200 dark:border-zinc-800 last:border-r-0 p-3 h-full cursor-pointer transition-colors ${!day ? 'bg-slate-50/50 dark:bg-zinc-950/50' : 'hover:bg-slate-50 dark:hover:bg-zinc-800/30'}`}
-                        >
-                          {day && (
-                            <span className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-sm font-bold ${isToday ? 'bg-blue-600 text-white shadow-md' : 'text-slate-600 dark:text-zinc-400'}`}>
-                              {day.getDate()}
-                            </span>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  {/* Event Bars Overlay - Content Layer expands parent so no absolute clipping/overlaps occur! */}
-                  <div className="relative z-10 pt-14 pb-2 pointer-events-none grid grid-cols-5 auto-rows-max gap-y-1 px-1">
-                    {weekEvents.map((evt: any, evtIdx: number) => {
-                      const eStart = extractDateStr(evt.start_date || evt.start);
-                      const eEnd = extractDateStr(evt.end_date || evt.end);
-                      const eType = evt.event_type || evt.type;
-
-                      let startCol = null;
-                      let endCol = null;
-
-                      for (let idx = 0; idx < 5; idx++) {
-                        const cellDate = new Date(trueWeekStart);
-                        cellDate.setDate(trueWeekStart.getDate() + idx);
-                        const cellDateStr = toDateStr(cellDate);
-
-                        if (cellDateStr >= eStart && cellDateStr <= eEnd) {
-                          if (startCol === null) startCol = idx + 1;
-                          endCol = idx + 2;
-                        }
-                      }
-
-                      if (startCol === null) return null;
-
-                      const user = localPentesters.find((p: any) => p.id === evt.user_id);
-                      let label = user?.name || 'Unknown User';
-
-                      let bgClass, borderClass, textClass;
-
-                      if (eType === 'national_holiday') {
-                        bgClass = 'bg-red-100 dark:bg-red-500/20'; borderClass = 'border-red-500'; textClass = 'text-red-800 dark:text-red-400';
-                        const locName = locations.find(l => l.id === evt.location_id)?.name || 'Global';
-                        label = `🌍 Public Holiday (${locName})`;
-                      } else if (eType === 'team_day') {
-                        bgClass = 'bg-fuchsia-100 dark:bg-fuchsia-500/20'; borderClass = 'border-fuchsia-500'; textClass = 'text-fuchsia-800 dark:text-fuchsia-400';
-                        label = `🚀 Team Day`;
-                      } else if (eType === 'sick_day') {
-                        bgClass = 'bg-orange-100 dark:bg-orange-500/20'; borderClass = 'border-orange-500'; textClass = 'text-orange-800 dark:text-orange-400';
-                        label = `🤒 ${user?.name || 'Unknown User'} (Sick)`;
-                      } else {
-                        const theme = getUserColor(user?.id, localPentesters);
-                        bgClass = theme.bg; borderClass = theme.border; textClass = theme.text;
-                      }
-
-                      const isAdmin = currentUser?.role === 'admin';
-                      const isOwner = String(user?.id) === String(currentUser?.id);
-                      const canEdit = isAdmin || (['personal_time_off', 'sick_day'].includes(eType) && isOwner);
-
-                      return (
-                        <div
-                          key={evt.id || evtIdx}
-                          title={label}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (!canEdit) return;
-                            setActiveHoliday({
-                              id: evt.id,
-                              event_type: eType,
-                              user_id: evt.user_id || '',
-                              location_id: evt.location_id || '',
-                              start_date: eStart,
-                              end_date: eEnd
-                            });
-                            setModalOpen(true);
-                          }}
-                          style={{ gridColumn: `${startCol} / ${endCol}` }}
-                          className={`mx-1 px-2.5 py-1.5 rounded-lg text-xs font-bold truncate pointer-events-auto shadow-sm transition-transform hover:scale-[1.01] flex items-center gap-1.5 ${bgClass} ${textClass} ${canEdit ? 'cursor-pointer hover:opacity-80' : 'cursor-default'} ${startCol !== 1 || eStart >= trueWeekStartStr ? `border-l-4 ${borderClass}` : ''}`}
-                        >
-                          {eType === 'personal_time_off' && user?.avatar_url && (
-                            <img src={user.avatar_url} alt="" className="w-4 h-4 rounded-full shadow-sm shrink-0" />
-                          )}
-                          <span className="truncate">{label}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
+            {/* Days Header */}
+            <div className="grid grid-cols-5 border-b border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-950/50 shrink-0">
+              {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'].map(day => (
+                <div key={day} className="p-4 text-center text-xs font-extrabold tracking-widest uppercase text-slate-500 dark:text-zinc-500 border-r border-slate-200 dark:border-zinc-800 last:border-r-0">
+                  {day}
                 </div>
-              );
-            })}
+              ))}
+            </div>
+
+            {/* Calendar Body */}
+            <div className="flex-1 flex flex-col">
+              {weeks.map((week, weekIdx) => {
+                const refDay = week.find(d => d !== null);
+                if (!refDay) return null;
+                const refIdx = week.indexOf(refDay);
+
+                const trueWeekStart = new Date(refDay);
+                trueWeekStart.setDate(refDay.getDate() - refIdx);
+                const trueWeekStartStr = toDateStr(trueWeekStart);
+
+                const trueWeekEnd = new Date(refDay);
+                trueWeekEnd.setDate(refDay.getDate() - refIdx + 4);
+                const trueWeekEndStr = toDateStr(trueWeekEnd);
+
+                const weekEvents = events.filter((evt: any) => {
+                  const eStart = extractDateStr(evt.start_date || evt.start);
+                  const eEnd = extractDateStr(evt.end_date || evt.end);
+                  return eStart <= trueWeekEndStr && eEnd >= trueWeekStartStr;
+                });
+
+                return (
+                  <div key={weekIdx} className="relative w-full grow shrink-0 basis-auto border-b border-slate-200 dark:border-zinc-800 last:border-b-0 min-h-[120px]">
+
+                    {/* Background Day Cells */}
+                    <div className="absolute inset-0 grid grid-cols-5">
+                      {week.map((day, dayIdx) => {
+                        const isToday = day && toDateStr(day) === toDateStr(new Date());
+                        return (
+                          <div
+                            key={dayIdx}
+                            onClick={() => {
+                              if (!day) return;
+                              const dStr = toDateStr(day);
+                              const defaultUserId = currentUser?.role === 'admin' ? '' : (currentUser?.id || '');
+
+                              setActiveHoliday({
+                                event_type: 'personal_time_off',
+                                user_id: defaultUserId,
+                                location_id: '',
+                                start_date: dStr,
+                                end_date: dStr
+                              });
+                              setModalOpen(true);
+                            }}
+                            className={`border-r border-slate-200 dark:border-zinc-800 last:border-r-0 p-3 h-full cursor-pointer transition-colors ${!day ? 'bg-slate-50/50 dark:bg-zinc-950/50' : 'hover:bg-slate-50 dark:hover:bg-zinc-800/30'}`}
+                          >
+                            {day && (
+                              <span className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-sm font-bold ${isToday ? 'bg-blue-600 text-white shadow-md' : 'text-slate-600 dark:text-zinc-400'}`}>
+                                {day.getDate()}
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Event Bars Overlay - Content Layer expands parent so no absolute clipping/overlaps occur! */}
+                    <div className="relative z-10 pt-14 pb-2 pointer-events-none grid grid-cols-5 auto-rows-max gap-y-1 px-1">
+                      {weekEvents.map((evt: any, evtIdx: number) => {
+                        const eStart = extractDateStr(evt.start_date || evt.start);
+                        const eEnd = extractDateStr(evt.end_date || evt.end);
+                        const eType = evt.event_type || evt.type;
+
+                        let startCol = null;
+                        let endCol = null;
+
+                        for (let idx = 0; idx < 5; idx++) {
+                          const cellDate = new Date(trueWeekStart);
+                          cellDate.setDate(trueWeekStart.getDate() + idx);
+                          const cellDateStr = toDateStr(cellDate);
+
+                          if (cellDateStr >= eStart && cellDateStr <= eEnd) {
+                            if (startCol === null) startCol = idx + 1;
+                            endCol = idx + 2;
+                          }
+                        }
+
+                        if (startCol === null) return null;
+
+                        const user = localPentesters.find((p: any) => p.id === evt.user_id);
+                        let label = user?.name || 'Unknown User';
+
+                        let bgClass, borderClass, textClass;
+
+                        if (eType === 'national_holiday') {
+                          bgClass = 'bg-red-100 dark:bg-red-500/20'; borderClass = 'border-red-500'; textClass = 'text-red-800 dark:text-red-400';
+                          const locName = locations.find(l => l.id === evt.location_id)?.name || 'Global';
+                          label = `🌍 Public Holiday (${locName})`;
+                        } else if (eType === 'team_day') {
+                          bgClass = 'bg-fuchsia-100 dark:bg-fuchsia-500/20'; borderClass = 'border-fuchsia-500'; textClass = 'text-fuchsia-800 dark:text-fuchsia-400';
+                          label = `🚀 Team Day`;
+                        } else if (eType === 'sick_day') {
+                          bgClass = 'bg-orange-100 dark:bg-orange-500/20'; borderClass = 'border-orange-500'; textClass = 'text-orange-800 dark:text-orange-400';
+                          label = `🤒 ${user?.name || 'Unknown User'} (Sick)`;
+                        } else if (eType === 'working_from_abroad') {
+                          // NEW THEME: WFA Display
+                          bgClass = 'bg-teal-100 dark:bg-teal-500/20'; borderClass = 'border-teal-500'; textClass = 'text-teal-800 dark:text-teal-400';
+                          const locName = locations.find(l => l.id === evt.location_id)?.name || 'Other';
+                          label = `✈️ ${user?.name || 'Unknown User'} (WFA: ${locName})`;
+                        } else {
+                          const theme = getUserColor(user?.id, localPentesters);
+                          bgClass = theme.bg; borderClass = theme.border; textClass = theme.text;
+                        }
+
+                        const isAdmin = currentUser?.role === 'admin';
+                        const isOwner = String(user?.id) === String(currentUser?.id);
+                        const canEdit = isAdmin || (['personal_time_off', 'sick_day', 'working_from_abroad'].includes(eType) && isOwner);
+
+                        return (
+                          <div
+                            key={evt.id || evtIdx}
+                            title={label}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (!canEdit) return;
+                              setActiveHoliday({
+                                id: evt.id,
+                                event_type: eType,
+                                user_id: evt.user_id || '',
+                                location_id: evt.location_id || '',
+                                start_date: eStart,
+                                end_date: eEnd
+                              });
+                              setModalOpen(true);
+                            }}
+                            style={{ gridColumn: `${startCol} / ${endCol}` }}
+                            className={`mx-1 px-2.5 py-1.5 rounded-lg text-xs font-bold truncate pointer-events-auto shadow-sm transition-transform hover:scale-[1.01] flex items-center gap-1.5 ${bgClass} ${textClass} ${canEdit ? 'cursor-pointer hover:opacity-80' : 'cursor-default'} ${startCol !== 1 || eStart >= trueWeekStartStr ? `border-l-4 ${borderClass}` : ''}`}
+                          >
+                            {eType === 'personal_time_off' && user?.name && (
+                              <div className="w-4 h-4 rounded-full shadow-sm shrink-0 bg-black/20 flex items-center justify-center text-[10px] font-bold">
+                                {user?.name?.charAt(0).toUpperCase() || 'U'}
+                              </div>
+                            )}
+                            <span className="truncate">{label}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
 
@@ -293,7 +324,7 @@ export default function CalendarView() {
           onClose={() => setModalOpen(false)}
           holidayData={activeHoliday}
           setHolidayData={setActiveHoliday}
-          pentesters={localPentesters}
+          pentesters={activeHolidayPentesters}
           locations={locations}
           currentUser={currentUser}
           onSave={async () => {

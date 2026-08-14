@@ -13,20 +13,9 @@ export default defineConfig({
     },
     proxy: {
       '/api': {
-        target: 'http://isha-backend:8000', // Uses Docker internal DNS to hit the backend container
+        target: 'http://localhost:8000', // Uses Docker internal DNS to hit the backend container
         changeOrigin: true,
-      },
-      '/ws': {
-        target: 'ws://isha-backend:8000',
         ws: true,
-      },
-      '/docs': {
-        target: 'http://isha-backend:8000',
-        changeOrigin: true,
-      },
-      '/openapi.json': {
-        target: 'http://isha-backend:8000',
-        changeOrigin: true,
       }
     }
   },

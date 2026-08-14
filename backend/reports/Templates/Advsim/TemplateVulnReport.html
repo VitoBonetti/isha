@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang = "en">
+<head>
+  <meta charset = "utf-8">
+  <!-- Pentest report description with proper naming convention for generating PDF -->
+  <title>{REFERENCE} - RGN VULN {VULN_NAME} - {YEAR}</title>
+  <link rel="stylesheet" type="text/css" href="CSS/report.css">
+</head>
+<body>
+
+  <header class = "report_header">
+
+    <!-- Heading for title page -->
+    <h1>Security Assessment</h1>
+    <h2>{VULN_NAME}</h2>
+    <h4>{STATUS} report</h4>
+    
+    <!-- Title page heading logo -->
+    <div class = "report_header_logo">
+      <img src="Images/image1.png" class="report_header_image" alt="Title page company logo">
+      <br/>
+      <img src="Images/image2.png" class="report_header_image" alt="Title page team logo">
+
+      <p>Randstad NL Internal <a href="https://randstad.prepend.net/confluence/display/SET/Security%2BTesting">Security Test Team</a></p>
+    </div>
+    
+    <!-- Title page table for basic document information -->
+    <table class = "report_header_table" aria-describedby="Table for title page with document information">
+       <tbody>
+          <tr>
+             <!-- When the report was generated -->
+             <td colspan="1" rowspan="1" class="report_header_table_leftheader">
+                <strong>Generated On</strong>
+             </td>
+             <td colspan="1" rowspan="1">
+                {LAST_MODIFIED}
+             </td>
+          </tr>
+          <tr>
+             <!-- Internal PT reference -->
+             <td colspan="1" rowspan="1" class="report_header_table_leftheader">
+                <strong>Ref</strong>
+             </td>
+             <td colspan="1" rowspan="1">
+                {REFERENCE}
+             </td>
+          </tr>
+          <tr>
+             <!-- Classisication is always classified -->
+             <td colspan="1" rowspan="1" class="report_header_table_leftheader">
+                <strong>Classification</strong>
+             </td>
+             <td colspan="1" rowspan="1">
+                C4 - Confidential
+             </td>
+          </tr>
+          <tr>
+             <!-- Contact information for team PO -->
+             <td colspan="1" rowspan="1" class="report_header_table_leftheader">
+                <strong>Product Owner</strong>
+             </td>
+             <td colspan="1" rowspan="1">
+                Richard van Kalsbeek
+             </td>
+          </tr>
+       </tbody>
+    </table>
+
+  </header>
+
+  <!-- A detailled overview of all the findings -->
+  <section>
+    <header>
+      <h1 class="page_title">1. Finding<a id="findings_title"> </a><a class="table_of_content_jump_link" href="#table_of_contents_jump">↑</a></h1>
+    </header>
+    <article>
+      {FINDINGS}
+    </article>
+  </section>
+
+
+</body>
+</html>

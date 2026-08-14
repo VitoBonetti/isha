@@ -18,6 +18,7 @@ export interface ServiceLane {
   is_active?: boolean;
   max_concurrent_per_week?: number;
   display_order?: number;
+  auto_provision_workspace?: boolean;
 }
 
 export interface Test {
@@ -33,6 +34,11 @@ export interface Test {
   asset_count: number;
   has_secret?: boolean;
   is_service_active?: boolean;
+  drive_folder_id?: string;
+  drive_folder_url?: string;
+  auto_provision_workspace?: boolean;
+  is_tentative?: boolean;
+  kiss24?: string;
 }
 
 export interface Assignment {

@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang = "en">
+    <head>
+        <!--
+        GOST
+        Internal reporting template
+
+        This HTML template is used to generate reports for the Global Offensive Security Team.
+        See our confluence link for more information about the team and contact information.
+
+        The GOST performs regular internal security tests to keep the security of the
+        Randstad environment. The team can be contacted for security tests and
+        for questions about security, be it for development, design or workspace security.
+        -->
+        <meta charset = "utf-8">
+        <!-- Pentest report description with proper naming convention for generating PDF -->
+        <title>{REFERENCE} - GOST pentest report {APPLICATION_NAME} - {YEAR}</title>
+        <link rel="stylesheet" type="text/css" href="reports/Reports/Static/CSS/report.css">
+        <link rel="stylesheet" type="text/css" href="reports/Reports/Static/CSS/custom.css">
+    </head>
+    <body>
+    <!-- Cover Page -->
+        <div class="cover-page">
+            <div class="cover-main">
+                <h2>Global Offensive Security Team</h2>
+                <h3 style="margin-top: -14px;">{SERVICE_TYPE} Security Assessment</h3>
+                <br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br>
+                <h1>{APPLICATION_NAME}</h1>
+                <h1>{OPCO}</h1>
+                <br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br>
+                <h4>C4. Confidential</h4>
+                <p>This document may only by processed by a specified selection of employees of the Randstad Group Companies, operating companies and third parties.</p>
+            </div>
+            <div class="cover-sidebar">
+                <img src="reports/Reports/Static/Images/randstad logo_main.png">
+                <p>www.randstad.com<br>Diemermere, 25<br>NL-1112<br>TC Diemen</p>
+                <br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br>
+                <p><b>Report Version:</b><br>{STATUS}</p>
+                <p><b>Generated On:</b><br>{LAST_MODIFIED}</p>
+                <p><b>Manager:</b><br>Richard van Kalsbeek</p>
+                <p><b>Technical Lead:</b><br>Rodrigo Magalhaes</p>
+                <p><b>Service Lead:</b><br>{SERVICE_LEAD}</p>
+                {PERFORMED_BY}
+            </div>
+        </div>
+
+        <div class="page-break"></div>
+
+        <!-- A detailled overview of all the findings -->
+        <div class="page">
+            <section id="findings">
+                <h1>1. Findings <a class="table_of_content_jump_link" href="#table_of_contents_jump">&#8593;</a></h1>
+                <article>
+                    {FINDINGS}
+                </article>
+            </section>
+        </div>
+
+    </body>
+</html>

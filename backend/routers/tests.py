@@ -3,14 +3,27 @@ import uuid
 import os
 import base64
 import hashlib
+import httpx
+import json
+import asyncio
+import requests
+import traceback
+from datetime import datetime, timedelta, timezone
 from cryptography.fernet import Fernet
 from pydantic import BaseModel, UUID4
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
+import google.auth.transport.requests
+import google.oauth2.id_token
 from database import get_db_cursor, db_cursor_context
 from routers.auth import get_current_user, require_admin, require_write_access
 from websockets_manager import manager
 from schema import TestCreate, TestBase, AssignmentBase, TestSchedule, BulkTestCreate, AssignmentCreate, SecureNotePayload
 from audit_logger import log_audit_event
+from utils.drive_manager import DriveManager, background_archive_workspace, background_provision_workspace, background_relocate_workspace
+from utils.secret_manager import get_secret
+from presentations.presentation import generate_presentation
+from reports import osrgt_v3, pdf_gen
+
 
 router = APIRouter(prefix="/api/tests", tags=["Tests & Assignments"])
 
@@ -24,6 +37,9 @@ FRONTEND_TO_DB_STAGES = {
     "Completed": "COMPLETED",
     "Archived": "ARCHIVED"
 }
+
+KISS24_BASE_URL = str(os.environ.get("KISS_24_ENDPOINT"))
+CUTOFF_DATE = datetime(2026, 5, 1, tzinfo=timezone.utc)
 
 
 # --- SECURITY: ENCRYPTION CIPHER ---
@@ -64,6 +80,128 @@ def log_test_history(cursor, test_id: str, user_id: str, action: str, details: s
         ''', (new_asset_hist_id, str(raw_asset_id), str(user_id) if user_id else None, action, asset_details))
 
 
+# --- HELPER: PDF GENERATION ---
+def fetch_all_kiss24(endpoint: str, api_key: str, payload: dict = None):
+    """Helper to fetch all paginated results from KISS24 with safe JSON parsing."""
+    if payload is None: payload = {}
+
+    # CRITICAL FIX: Ensure no newlines exist in the API key header
+    headers = {'x-api-key': api_key.strip(), 'Content-Type': 'application/json'}
+    items = []
+    page = 1
+
+    with requests.Session() as session:
+        while True:
+            url = f"{KISS24_BASE_URL}{endpoint}"
+            response = session.post(url, headers=headers, params={'page': page}, json=payload, timeout=30)
+
+            if not response.ok:
+                if response.status_code == 400 and "Invalid Page Number" in response.text:
+                    break
+                else:
+                    raise ValueError(f"API Error on {endpoint}. Status: {response.status_code}, Body: {response.text}")
+
+            # CRITICAL FIX: Catch non-JSON HTML pages returned by WAFs
+            try:
+                data = response.json()
+            except Exception:
+                raise ValueError(
+                    f"Invalid JSON returned from {url}. Status: {response.status_code}. Raw Body: {response.text[:300]}")
+
+            items.extend(data.get('items', []))
+
+            page_count = int(data.get('page_count', 1))
+            if page >= page_count: break
+            page += 1
+
+    return items
+
+
+def get_vuln_fields_map(vuln_uuids: list, api_key: str):
+    """Fetches custom fields for vulnerabilities in chunks."""
+    vuln_fields_map = {}
+    if not vuln_uuids: return vuln_fields_map
+
+    chunk_size = 20
+    for i in range(0, len(vuln_uuids), chunk_size):
+        chunk = vuln_uuids[i:i + chunk_size]
+        fields_data = fetch_all_kiss24('fields', api_key, {"vulnerabilities": chunk})
+
+        for item in fields_data:
+            v_uuid = item.get('entity', {}).get('uuid')
+            if v_uuid:
+                if v_uuid not in vuln_fields_map:
+                    vuln_fields_map[v_uuid] = []
+                vuln_fields_map[v_uuid].append(item)
+
+    return vuln_fields_map
+
+
+def _is_field_populated(field_obj):
+    val = field_obj.get('value')
+    if val is None: return False
+    if isinstance(val, list): return len(val) > 0
+    if isinstance(val, str): return bool(val.strip())
+    return True
+
+
+def validate_kiss24_findings(vulns: list, vuln_fields_map: dict, report_type: int, api_key: str):
+    """Validates contexts and MITRE ID fields, returning a list of violations."""
+    invalid_findings = []
+    context_cache = {}
+
+    for vuln in vulns:
+        vuln_uuid = vuln['uuid']
+        reasons = []
+
+        if report_type == 1:
+            ctx_name = vuln.get('context', {}).get('name', '')
+            if not ctx_name:
+                vt_uuid = vuln.get('vulnerability_type', {}).get('uuid')
+                if vt_uuid:
+                    if vt_uuid not in context_cache:
+                        ctxs = fetch_all_kiss24('provider/contexts', api_key,
+                                                {"vulnerability_types": [vt_uuid]})
+                        context_cache[vt_uuid] = ctxs[0].get('name', '') if ctxs else ''
+                    ctx_name = context_cache[vt_uuid]
+
+            if not ctx_name.startswith("[Adv Sim]"):
+                reasons.append(f"Context '{ctx_name}' does not start with '[Adv Sim]'")
+
+            mitre_filled = False
+            for field in vuln_fields_map.get(vuln_uuid, []):
+                if field.get('custom_field', {}).get('name') == 'MITRE ID':
+                    if _is_field_populated(field): mitre_filled = True
+                    break
+            if not mitre_filled:
+                reasons.append("MITRE ID custom field is empty or missing")
+
+        created_at_str = vuln.get('created_at') or vuln.get('published_at', '')
+        try:
+            created_date = datetime.fromisoformat(created_at_str.replace('Z', '+00:00'))
+            if created_date.tzinfo is None:
+                created_date = created_date.replace(tzinfo=timezone.utc)
+        except (ValueError, TypeError):
+            created_date = datetime.now(timezone.utc)
+
+        if created_date > CUTOFF_DATE:
+            effort_filled = False
+            for field in vuln_fields_map.get(vuln_uuid, []):
+                if field.get('custom_field', {}).get('name') == 'Remediation Effort':
+                    if _is_field_populated(field): effort_filled = True
+                    break
+            if not effort_filled:
+                reasons.append("Remediation Effort custom field is missing (Required for new vulns)")
+
+        if reasons:
+            invalid_findings.append({
+                "vuln_uuid": vuln_uuid,
+                "reasons": reasons
+            })
+
+    return invalid_findings
+
+
 # --- CORE TEST MANAGEMENT ---
 @router.post("/", summary="[Admin Only]")
 def create_test(t: TestCreate, background_tasks: BackgroundTasks,
@@ -81,7 +219,17 @@ def create_test(t: TestCreate, background_tasks: BackgroundTasks,
             cursor.execute('INSERT INTO test_assets (test_id, asset_id) VALUES (%s, %s)', (new_id, str(asset_id)))
 
     log_test_history(cursor, new_id, current_user['id'], "CREATED", f"Test manually created.")
+
     cursor.connection.commit()
+
+    log_audit_event(
+        user_id=str(current_user["id"]),
+        role=current_user["role"],
+        action="TEST_CREATED",
+        resource_type="TESTS",
+        resource_id=str(new_test_id),
+        details=f"Test {t.name} with ID: {new_test_id} was created. Service Lane ID: {t.service_lane_id}."
+    )
 
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
@@ -92,9 +240,12 @@ def create_test(t: TestCreate, background_tasks: BackgroundTasks,
 def get_all_tests(current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
     cursor.execute('''
         SELECT t.id, t.name, t.start_week, t.start_year, t.duration_weeks, t.stages::text as status,
-               s.name as service_lane_name, s.is_active as is_service_active,
-               COALESCE((SELECT string_agg(DISTINCT u.name, ', ') FROM assignments a JOIN users u ON a.user_id = u.id WHERE a.test_id = t.id), 'Unassigned') as assigned_pentesters,
-               EXISTS(SELECT 1 FROM secret_notes WHERE test_id = t.id) as has_secret
+            s.name as service_lane_name, s.is_active as is_service_active,
+            s.auto_provision_workspace,
+            COALESCE((SELECT string_agg(DISTINCT u.name, ', ') FROM assignments a JOIN users u ON a.user_id = u.id WHERE a.test_id = t.id), 'Unassigned') as assigned_pentesters,
+            EXISTS(SELECT 1 FROM secret_notes WHERE test_id = t.id) as has_secret,
+            t.drive_folder_url,
+            t.kiss24 
         FROM tests t LEFT JOIN services_lanes s ON t.service_lane_id = s.id
         ORDER BY t.start_year DESC NULLS LAST, t.start_week DESC NULLS LAST, t.name ASC
     ''')
@@ -105,22 +256,60 @@ def get_all_tests(current_user: dict = Depends(get_current_user), cursor=Depends
 @router.put("/{test_id}", summary="[Admin Only]")
 def update_test(test_id: str, t: TestBase, background_tasks: BackgroundTasks,
                 current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
-    db_stage = FRONTEND_TO_DB_STAGES.get(t.status, "NOT_PLANNED")
+    # 1. Fetch old data to see if we need to relocate the Google Drive folder
+    cursor.execute('''
+        SELECT t.drive_folder_id, s.name, c.name, t.start_year
+        FROM tests t
+        LEFT JOIN services_lanes s ON t.service_lane_id = s.id
+        LEFT JOIN test_assets ta ON t.id = ta.test_id
+        LEFT JOIN assets a ON ta.asset_id = a.id
+        LEFT JOIN countries c ON a.country_id = c.id
+        WHERE t.id = %s LIMIT 1
+    ''', (test_id,))
+    old_data = cursor.fetchone()
 
+    db_stage = FRONTEND_TO_DB_STAGES.get(t.status, "NOT_PLANNED")
     if db_stage == 'NOT_PLANNED':
         cursor.execute('DELETE FROM assignments WHERE test_id = %s', (test_id,))
         cursor.execute('UPDATE tests SET start_week = NULL, start_year = NULL WHERE id = %s', (test_id,))
 
     cat_id = str(t.category_id) if hasattr(t, 'category_id') and t.category_id else None
+    kiss24_val = str(t.kiss24) if hasattr(t, 'kiss24') and t.kiss24 else None
 
+    # Update the test
     cursor.execute('''
         UPDATE tests 
-        SET name=%s, service_lane_id=%s, category_id=%s, credits_per_week=%s, duration_weeks=%s, stages=%s
+         SET name=%s, service_lane_id=%s, category_id=%s, credits_per_week=%s, duration_weeks=%s, stages=%s, is_tentative=%s, kiss24=%s
         WHERE id=%s
-    ''', (t.name, str(t.service_lane_id), cat_id, t.credits_per_week, t.duration_weeks, db_stage, test_id))
+    ''', (t.name, str(t.service_lane_id), cat_id, t.credits_per_week, t.duration_weeks, db_stage, t.is_tentative, kiss24_val,
+          test_id))
 
-    log_test_history(cursor, test_id, current_user['id'], "UPDATED", f"Settings updated: {t.credits_per_week}cr, {t.duration_weeks}wks.")
+    log_test_history(cursor, test_id, current_user['id'], "UPDATED",
+                     f"Settings updated: {t.credits_per_week}cr, {t.duration_weeks}wks.")
     cursor.connection.commit()
+
+    log_audit_event(
+        user_id=str(current_user["id"]),
+        role=current_user["role"],
+        action="TEST_UPDATED",
+        resource_type="TESTS",
+        resource_id=str(test_id),
+        details=f"Test with ID: {test_id} was updated."
+    )
+
+    # 2. Trigger Folder Relocation if a folder exists
+    if old_data and old_data[0]:
+        folder_id = old_data[0]
+        country_name = old_data[2] or "General"
+
+        # Ensure we pass the NEW year if it was updated, otherwise fallback to the old year
+        target_year = t.start_year if t.start_year else (old_data[3] or datetime.now().year)
+
+        # Get the new service name to construct the new path
+        cursor.execute("SELECT name FROM services_lanes WHERE id = %s", (str(t.service_lane_id),))
+        new_service_name = cursor.fetchone()[0]
+
+        background_tasks.add_task(background_relocate_workspace, folder_id, target_year, new_service_name, country_name, t.name)
 
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Test updated successfully."}
@@ -129,6 +318,11 @@ def update_test(test_id: str, t: TestBase, background_tasks: BackgroundTasks,
 @router.delete("/{test_id}", summary="[Admin Only]")
 def delete_test(test_id: str, background_tasks: BackgroundTasks,
                 current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+
+    # Fetch test name and drive_folder_id before deleting
+    cursor.execute("SELECT name, drive_folder_id FROM tests WHERE id = %s", (test_id,))
+    test_data = cursor.fetchone()
+
     # Log deletion BEFORE removing links, so the assets receive the cascade
     log_test_history(cursor, test_id, current_user['id'], "DELETED", "Test permanently deleted and assets freed.")
 
@@ -137,57 +331,92 @@ def delete_test(test_id: str, background_tasks: BackgroundTasks,
     cursor.execute('DELETE FROM tests WHERE id = %s', (test_id,))
     cursor.connection.commit()
 
+    log_audit_event(
+        user_id=str(current_user["id"]),
+        role=current_user["role"],
+        action="TEST_DELETED",
+        resource_type="TESTS",
+        resource_id=str(test_id),
+        details=f"Test with ID: {test_id} was deleted."
+    )
+
+    if test_data and test_data[1]:
+        test_name, folder_id = test_data[0], test_data[1]
+        background_tasks.add_task(background_archive_workspace, folder_id, test_name)
+
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
     return {"message": "Test permanently deleted and assets freed."}
 
 
 # --- BULK GENERATION ---
-def process_bulk_tests_background(asset_ids: List[UUID4], user_id: str):
+def process_bulk_tests_background(asset_ids: List[UUID4], user_id: str, role: str,):
+    tests_to_provision = []
+
     with db_cursor_context() as cursor:
         if not cursor: return
         for asset_id in asset_ids:
             cursor.execute('''
-                SELECT r.name, r.service_forecast_id, s.default_credits, s.default_duration_weeks
+                SELECT r.name, r.service_forecast_id, s.default_credits, s.default_duration_weeks,
+                       s.name as service_name, c.name as country_name, s.auto_provision_workspace
                 FROM assets a
                 JOIN raw_assets r ON a.raw_asset_id = r.id
                 LEFT JOIN services_lanes s ON r.service_forecast_id = s.id
+                LEFT JOIN countries c ON r.country_id = c.id
                 WHERE a.id = %s 
-                AND (r.duplicate_allowed = TRUE OR NOT EXISTS (
+                 AND (r.duplicate_allowed = TRUE OR NOT EXISTS (
                     SELECT 1 FROM test_assets ta 
-                    JOIN tests t ON ta.test_id = t.id 
-                    WHERE ta.asset_id = a.id 
-                        AND t.stages::text IN ('NOT_PLANNED', 'SCHEDULED', 'IN_PROGRESS')
+                     JOIN tests t ON ta.test_id = t.id 
+                     WHERE ta.asset_id = a.id 
+                         AND t.stages::text IN ('NOT_PLANNED', 'SCHEDULED', 'IN_PROGRESS')
                 ))
             ''', (str(asset_id),))
-
             asset_data = cursor.fetchone()
             if not asset_data or not asset_data[1]: continue
 
-            asset_name, service_lane_id, default_credits, default_duration_weeks = asset_data
-            new_test_id = str(uuid.uuid4())
+            asset_name, service_lane_id, default_credits, default_duration_weeks, service_name, country_name, auto_provision = asset_data
 
+            new_test_id = str(uuid.uuid4())
             credits = float(default_credits) if default_credits is not None else 2.0
             duration = int(default_duration_weeks) if default_duration_weeks is not None else 1
 
             cursor.execute('''
                 INSERT INTO tests (id, name, service_lane_id, credits_per_week, duration_weeks, stages) 
-                VALUES (%s, %s, %s, %s, %s, 'NOT_PLANNED') RETURNING id
+                 VALUES (%s, %s, %s, %s, %s, 'NOT_PLANNED') RETURNING id
             ''', (new_test_id, asset_name, str(service_lane_id), credits, duration))
+
+            log_audit_event(
+                user_id=str(user_id),
+                role=str(role),
+                action="TEST_CREATED",
+                resource_type="TESTS",
+                resource_id=str(new_test_id),
+                details=f"Test {asset_name} with ID: {new_test_id} was created. Service Lane ID: {service_lane_id} in a Bulk Action."
+            )
 
             cursor.execute('INSERT INTO test_assets (test_id, asset_id) VALUES (%s, %s)', (new_test_id, str(asset_id)))
             log_test_history(cursor, new_test_id, user_id, "GENERATED", f"Test generated from Asset Pool.")
 
+            # Store the data to provision later
+            current_year = datetime.now().year
+            tests_to_provision.append(
+                (new_test_id, current_year, service_name, country_name, asset_name, auto_provision))
+
+        # Commit the transaction so the database unlocks the rows!
         cursor.connection.commit()
+
+    # Now that the DB is unlocked, we can safely contact Google Drive
+    for test_id, year, s_name, c_name, t_name, auto_prov in tests_to_provision:
+        if auto_prov:
+            DriveManager().provision_test_workspace(test_id, year, s_name, c_name, t_name)
 
 
 @router.post("/bulk", summary="[Admin Only]")
 def bulk_create_tests(req: BulkTestCreate, background_tasks: BackgroundTasks,
                       current_user: dict = Depends(require_admin)):
-    background_tasks.add_task(process_bulk_tests_background, req.asset_ids, str(current_user['id']))
+    background_tasks.add_task(process_bulk_tests_background, req.asset_ids, str(current_user['id']), str(current_user['role']))
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": f"Generating {len(req.asset_ids)} tests from active pool."}
-
 
 # --- 3. SCHEDULING & STATUS LIFECYCLE ---
 @router.put("/{test_id}/schedule", summary="[Admin Only]")
@@ -227,6 +456,15 @@ def schedule_test(test_id: str, schedule: TestSchedule, background_tasks: Backgr
                      f"Scheduled for Week {schedule.start_week}, {schedule.start_year}.")
     cursor.connection.commit()
 
+    log_audit_event(
+        user_id=str(current_user["id"]),
+        role=current_user["role"],
+        action="TEST_SCHEDULED",
+        resource_type="TESTS",
+        resource_id=str(test_id),
+        details=f"Test with ID: {test_id} was scheduled for Week {schedule.start_week}, {schedule.start_year}."
+    )
+
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Test scheduled on the board."}
 
@@ -251,6 +489,16 @@ def unschedule_test(test_id: str, background_tasks: BackgroundTasks,
 
     log_test_history(cursor, test_id, current_user['id'], "UNSCHEDULED",
                      "Test removed from calendar and returned to backlog.")
+
+    log_audit_event(
+        user_id=str(current_user["id"]),
+        role=current_user["role"],
+        action="TEST_UNSCHEDULED",
+        resource_type="TESTS",
+        resource_id=str(test_id),
+        details=f"Test with ID: {test_id} was unscheduled."
+    )
+
     cursor.connection.commit()
 
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
@@ -492,3 +740,362 @@ def delete_test_secret(test_id: str, background_tasks: BackgroundTasks,
     cursor.connection.commit()
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Secure note permanently deleted."}
+
+
+@router.post("/{test_id}/workspace", summary="[Admin Only]")
+def provision_workspace_manually(test_id: str, background_tasks: BackgroundTasks,
+                                 current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    # Fetch required metadata to create the folder path
+    cursor.execute('''
+        SELECT t.name, s.name, c.name, t.start_year
+        FROM tests t
+        LEFT JOIN services_lanes s ON t.service_lane_id = s.id
+        LEFT JOIN test_assets ta ON t.id = ta.test_id
+        LEFT JOIN assets a ON ta.asset_id = a.id
+        LEFT JOIN countries c ON a.country_id = c.id
+        WHERE t.id = %s LIMIT 1
+    ''', (test_id,))
+
+    test_data = cursor.fetchone()
+    if not test_data:
+        raise HTTPException(status_code=404, detail="Test not found.")
+
+    test_name, service_name, country_name, start_year = test_data
+    target_year = start_year if start_year else datetime.now().year
+
+    # Run the provisioner in the background. It will automatically broadcast a REFRESH_BOARD event when done!
+    background_tasks.add_task(background_provision_workspace, test_id, target_year, service_name, country_name,
+                              test_name)
+
+    return {"message": "Workspace provisioning started."}
+
+
+@router.put("/{test_id}/tentative", summary="[Admin Only]")
+def toggle_tentative(test_id: str, background_tasks: BackgroundTasks,
+                     current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    # Flips the boolean from True to False, or False to True
+    cursor.execute("UPDATE tests SET is_tentative = NOT is_tentative WHERE id = %s", (test_id,))
+
+    # Log it
+    cursor.execute("SELECT is_tentative FROM tests WHERE id = %s", (test_id,))
+    is_tent = cursor.fetchone()[0]
+    state_str = "Marked as Tentative (TBC)" if is_tent else "Removed Tentative mark"
+    log_test_history(cursor, test_id, current_user['id'], "UPDATED", state_str)
+
+    cursor.connection.commit()
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+    return {"message": state_str}
+
+
+# --- Generation PPT ---
+async def process_presentation_background(test_id: str, kiss24_id: str, user_id: str, user_email: str, user_role: str, test_name: str,
+                                          drive_folder_id: str, service_name: str, snow_number: str,
+                                          start_week: int, start_year: int, duration_weeks: float):
+    """Background task that generates the presentation locally via a thread."""
+    try:
+        # Pass the database values to the generator
+        data = await asyncio.to_thread(
+            generate_presentation,
+            kiss24_id,
+            drive_folder_id,
+            service_name,
+            snow_number,
+            start_week,
+            start_year,
+            duration_weeks
+        )
+
+        drive_link = data.get("driveLink", "No link returned")
+        warnings_dict = data.get("warnings", {})
+
+        # Format the unhealthy warnings into a readable list
+        issues = []
+        if isinstance(warnings_dict, dict):
+            for key, info in warnings_dict.items():
+                if isinstance(info, dict) and not info.get("healthy"):
+                    issues.append(f"{key.capitalize()}: {info.get('reason')}")
+
+        if issues:
+            issues_text = "\n\n[!] Warnings:\n- " + "\n- ".join(issues)
+        else:
+            issues_text = "\n\n[+] Health Check: 100% Healthy (No warnings)"
+
+        message = f"Presentation for '{test_name}' is ready!\nLink: {drive_link}{issues_text}"
+        notif_type = "SUCCESS"
+
+        await manager.broadcast(json.dumps({
+            "action": "PRESENTATION_READY",
+            "email": user_email,
+            "message": f"Presentation for {test_name} generated successfully!"
+        }))
+
+    except Exception as e:
+        print(f"Error generating presentation: {e}")
+        message = f"Generation failed for '{test_name}'. Error: {str(e)}"
+        notif_type = "ERROR"
+        await manager.broadcast(json.dumps({
+            "action": "PRESENTATION_FAILED",
+            "email": user_email,
+            "message": message
+        }))
+
+    # Save the result as a notification for the user
+    with db_cursor_context() as cursor:
+        if cursor:
+            cursor.execute(
+                "INSERT INTO notifications (id, user_id, message, type, created_at) VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)",
+                (str(uuid.uuid4()), user_id, message, notif_type)
+            )
+
+    await manager.broadcast('{"action": "REFRESH_BOARD"}')
+
+
+@router.post("/{test_id}/presentation")
+def trigger_presentation_generation(test_id: str, background_tasks: BackgroundTasks,
+                                    current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+    if current_user.get('role') == 'read_only':
+        raise HTTPException(status_code=403, detail="Read-only users cannot trigger generation.")
+
+    cursor.execute("""
+        SELECT t.name, t.kiss24, t.drive_folder_id, sl.name as service_name, ra.snow_number,
+               t.start_week, t.start_year, t.duration_weeks
+        FROM tests t
+        LEFT JOIN services_lanes sl ON t.service_lane_id = sl.id
+        LEFT JOIN test_assets ta ON t.id = ta.test_id
+        LEFT JOIN assets a ON ta.asset_id = a.id
+        LEFT JOIN raw_assets ra ON a.raw_asset_id = ra.id
+        WHERE t.id = %s LIMIT 1
+    """, (test_id,))
+
+    row = cursor.fetchone()
+
+    if not row:
+        log_audit_event(
+            user_id=str(current_user["id"]),
+            role=str(current_user["role"]),
+            action="GENERATION_PRESENTATION_TEST_NOT_FOUND",
+            resource_type="PRESENTATION",
+            resource_id=str(test_id),
+            details=f"Test with ID {test_id} was not found."
+        )
+        raise HTTPException(status_code=404, detail="Test not found.")
+
+    test_name, kiss24_id, drive_folder_id, service_name, snow_number, start_week, start_year, duration_weeks = row
+
+    if not kiss24_id:
+        log_audit_event(
+            user_id=str(current_user["id"]),
+            role=str(current_user["role"]),
+            action="GENERATION_PRESENTATION_TEST_NO_KISS UUID",
+            resource_type="PRESENTATION",
+            resource_id=str(test_id),
+            details=f"Test with ID {test_id} is Missing kiss24 UUID."
+        )
+        raise HTTPException(status_code=400, detail="Missing kiss24 UUID. Please set it in the test settings first.")
+
+    if not drive_folder_id:
+        log_audit_event(
+            user_id=str(current_user["id"]),
+            role=str(current_user["role"]),
+            action="GENERATION_PRESENTATION_TEST_NO_DRIVE_WORKSPACE",
+            resource_type="PRESENTATION",
+            resource_id=str(test_id),
+            details=f"Test with ID {test_id} is missing Google Drive Workspace."
+        )
+        raise HTTPException(status_code=400,
+                            detail="Missing Drive Workspace. Please click the 'Create Drive Workspace' button first.")
+
+    background_tasks.add_task(
+        process_presentation_background,
+        test_id, str(kiss24_id), str(current_user["id"]), current_user["email"], str(current_user["role"]), test_name,
+        drive_folder_id, service_name, snow_number, start_week, start_year, duration_weeks
+    )
+
+    log_audit_event(
+        user_id=str(current_user["id"]),
+        role=str(current_user["role"]),
+        action="PRESENTATION_TRIGGERED",
+        resource_type="PRESENTATION",
+        resource_id=str(test_id),
+        details=f"Presentation for Kiss24 test with ID: {kiss24_id} was started. Service Lane: {service_name}. SNow Asset ID {snow_number}. Start week: {start_week}. Start year: {start_year}"
+    )
+
+    return {
+        "message": "Presentation generation started in the background. You will receive a notification when it's ready!"}
+
+
+# --- Generation PDF ---
+def get_report_type_id(display_order: int) -> int:
+    """Maps the service lane's display_order to the report type expected by osrgt_v3."""
+    if display_order == 1:
+        return 1  # Adversary Simulation
+    elif display_order == 2:
+        return 3  # White Box
+    else:
+        return 2  # Black/Grey Box
+
+
+async def process_report_background(test_id: str, kiss24_id: str, user_id: str, user_email: str, user_role: str,
+                                    test_name: str, drive_folder_id: str, display_order: int,
+                                    start_week: int, start_year: int, duration_weeks: float):
+    """Background task that generates the HTML & PDF reports, uploads them, and handles logging."""
+    try:
+        try:
+            test_start = datetime.fromisocalendar(start_year, start_week, 1)
+            dur_weeks = max(1, int(duration_weeks or 1))
+            test_end = test_start + timedelta(days=(dur_weeks - 1) * 7 + 4)
+            start_date_str = test_start.strftime("%d-%m-%Y")
+            end_date_str = test_end.strftime("%d-%m-%Y")
+        except Exception:
+            start_date_str = end_date_str = None
+
+        # CRITICAL FIX: Ensure the API key is stripped of whitespace/newlines
+        raw_api_key = get_secret(os.environ.get("KISS_24_API_KEY_NAME"))
+        api_key = raw_api_key.strip() if raw_api_key else ""
+
+        report_type = get_report_type_id(display_order)
+
+        # 1. RUN VALIDATION BEFORE GENERATING REPORT
+        vulns = await asyncio.to_thread(fetch_all_kiss24, 'vulnerabilities', api_key, {"tests": [kiss24_id]})
+        vuln_uuids = [v['uuid'] for v in vulns]
+        vuln_fields_map = await asyncio.to_thread(get_vuln_fields_map, vuln_uuids, api_key)
+
+        invalid_findings = await asyncio.to_thread(validate_kiss24_findings, vulns, vuln_fields_map, report_type,
+                                                   api_key)
+
+        if invalid_findings:
+            err_msg = f"Report generation aborted for '{test_name}'. Validation failed:\n"
+            for f in invalid_findings:
+                err_msg += f"\n- Vuln {f['vuln_uuid']}:\n  " + "\n  ".join(f['reasons'])
+            raise ValueError(err_msg)
+
+        # 2. PROCEED WITH GENERATION
+        report_args = {
+            "pentest": kiss24_id,
+            "type": report_type,
+            "api_key": api_key,
+            "action": "generate",
+            "minify": False,
+            "environment": "sec24prd",
+            "loglevel": "info",
+            "devoteam": False,
+            "start": start_date_str,
+            "end": end_date_str,
+            "custom_fields": vuln_fields_map
+        }
+
+        html_content, html_filename = await asyncio.to_thread(osrgt_v3.generate_html_report, report_args)
+        pdf_content, pdf_filename = await asyncio.to_thread(pdf_gen.convert_html_to_pdf, html_content, html_filename)
+
+        drive_manager = DriveManager()
+        await asyncio.to_thread(drive_manager.upload_file, drive_folder_id, html_filename, html_content.encode('utf-8'),
+                                'text/html')
+        pdf_link = await asyncio.to_thread(drive_manager.upload_file, drive_folder_id, pdf_filename, pdf_content,
+                                           'application/pdf')
+
+        # --- SUCCESS HANDLING ---
+        message = f"Report for '{test_name}' is ready!\nPDF Link: {pdf_link}"
+        await manager.broadcast(json.dumps({"action": "REPORT_READY", "email": user_email, "message": message}))
+
+        with db_cursor_context() as cursor:
+            if cursor:
+                cursor.execute(
+                    "INSERT INTO notifications (id, user_id, message, type, created_at) VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)",
+                    (str(uuid.uuid4()), user_id, message, "SUCCESS")
+                )
+
+        await asyncio.to_thread(
+            log_audit_event,
+            user_id=user_id,
+            role=user_role,
+            action="REPORT_GENERATION_SUCCESS",
+            resource_type="REPORTING",
+            resource_id=test_id,
+            details=f"Successfully generated and uploaded PDF report for '{test_name}'."
+        )
+
+    except Exception as e:
+        error_details = str(e)
+
+        # Catch the full python stack trace so we can debug exactly which line failed in BigQuery
+        full_traceback = traceback.format_exc()
+        print(f"Error generating report: {error_details}\n{full_traceback}")
+
+        # Format a clean message for the User
+        if isinstance(e, ValueError) and (
+                "Validation failed" in error_details or "API Error" in error_details or "Invalid JSON" in error_details):
+            user_message = error_details
+        else:
+            user_message = f"Report generation failed for '{test_name}'. Please contact an administrator or check the logs."
+
+        await manager.broadcast(json.dumps({"action": "REPORT_FAILED", "email": user_email, "message": user_message}))
+
+        with db_cursor_context() as cursor:
+            if cursor:
+                cursor.execute(
+                    "INSERT INTO notifications (id, user_id, message, type, created_at) VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)",
+                    (str(uuid.uuid4()), user_id, user_message, "ERROR")
+                )
+
+        # Log the raw technical crash to BigQuery
+        await asyncio.to_thread(
+            log_audit_event,
+            user_id=user_id,
+            role=user_role,
+            action="REPORT_GENERATION_CRASH",
+            resource_type="REPORTING",
+            resource_id=test_id,
+            details=f"Crash during report generation for '{test_name}': {error_details}\nTraceback: {full_traceback}"
+        )
+
+    await manager.broadcast('{"action": "REFRESH_BOARD"}')
+
+@router.post("/{test_id}/report")
+def trigger_report_generation(test_id: str, background_tasks: BackgroundTasks,
+                              current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+    """API Endpoint to trigger the background report generation."""
+
+    if current_user.get('role') == 'read_only':
+        raise HTTPException(status_code=403, detail="Read-only users cannot trigger generation.")
+
+    cursor.execute("""
+        SELECT t.name, t.kiss24, t.drive_folder_id, sl.display_order,
+               t.start_week, t.start_year, t.duration_weeks
+        FROM tests t
+        LEFT JOIN services_lanes sl ON t.service_lane_id = sl.id
+        WHERE t.id = %s LIMIT 1
+    """, (test_id,))
+    row = cursor.fetchone()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Test not found.")
+
+    test_name, kiss24_id, drive_folder_id, display_order, start_week, start_year, duration_weeks = row
+
+    if not kiss24_id:
+        raise HTTPException(status_code=400, detail="Missing kiss24 UUID. Please set it in the test settings first.")
+
+    if not drive_folder_id:
+        raise HTTPException(status_code=400, detail="Missing Drive Workspace. Please provision the workspace first.")
+
+    safe_display_order = display_order if display_order is not None else 99
+
+    # Notice the injection of `str(current_user["role"])` here
+    background_tasks.add_task(
+        process_report_background,
+        test_id, str(kiss24_id), str(current_user["id"]), current_user["email"], str(current_user["role"]),
+        test_name, drive_folder_id, safe_display_order, start_week, start_year, duration_weeks
+    )
+
+    log_audit_event(
+        user_id=str(current_user["id"]),
+        role=str(current_user["role"]),
+        action="REPORT_TRIGGERED",
+        resource_type="REPORTING",
+        resource_id=str(test_id),
+        details=f"Report generation triggered for test {test_name} (Kiss24: {kiss24_id})."
+    )
+
+    return {
+        "message": "Report generation started in the background. You will receive a notification when it's ready!"
+    }

@@ -8,7 +8,6 @@ export interface User {
   name: string;
   role: 'admin' | 'pentester' | 'read_only';
   location_id: string;
-  avatar_url: string | null;
 }
 
 interface AppContextType {
@@ -81,10 +80,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     let reconnectTimer: number;
 
     const connectWebSocket = () => {
+      const backendUrl = new URL(import.meta.env.VITE_API_URL || window.location.origin);
       const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const host = window.location.host;
 
-      ws = new WebSocket(`${wsProtocol}//${host}/ws/board`);
+      ws = new WebSocket(`${wsProtocol}//${backendUrl.host}/api/ws/board`);;
 
       ws.onopen = () => setWsStatus('connected');
 
@@ -99,9 +98,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setWsStatus('disconnected');
         if (event.code === 1008) {
           setCurrentUser(null);
+          clearTimeout(reconnectTimer);
           navigate('/login');
-        } else {
-          reconnectTimer = window.setTimeout(connectWebSocket, 3000);
+        } else if (event.code !== 1000) {
+          reconnectTimer = setTimeout(connectWebSocket, 3000);
         }
       };
 
@@ -116,15 +116,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
   }, [currentUser, navigate]);
 
+
   const handleLogout = async () => {
-    try {
-      await axios.post('/api/auth/logout');
-    } catch (err) {
-      console.error("Logout failed", err);
-    } finally {
-      setCurrentUser(null);
-      navigate('/login');
-    }
+    const response = await api.post('/api/auth/logout');
+    window.location.href = response.data.iap_logout_url;
   };
 
   return (

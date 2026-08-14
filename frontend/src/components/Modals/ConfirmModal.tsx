@@ -26,8 +26,8 @@ export default function ConfirmModal({ isOpen, title, message, onConfirm, onCanc
 
   return (
     <div className="fixed inset-0 bg-slate-900/50 dark:bg-zinc-950/80 backdrop-blur-sm z-[2000] flex items-center justify-center p-4 animate-in fade-in">
-      <div className="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-2xl p-6 w-full max-w-sm shadow-2xl animate-in zoom-in-95">
-        <div className="flex items-start gap-4">
+      <div className="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-2xl p-5 sm:p-6 w-[95%] sm:w-full max-w-sm shadow-2xl animate-in zoom-in-95">
+        <div className="flex flex-col sm:flex-row items-center sm:items-start text-center sm:text-left gap-4">
           <div className={`${iconBg} ${text} p-3 rounded-full shrink-0 border`}>
             <Icon size={24} />
           </div>
@@ -36,12 +36,12 @@ export default function ConfirmModal({ isOpen, title, message, onConfirm, onCanc
             <p className="text-sm text-slate-500 dark:text-zinc-400 mt-1">{message}</p>
           </div>
         </div>
-        <div className="flex justify-end gap-3 mt-6">
-          <button onClick={onCancel} className="px-4 py-2 text-sm font-medium bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-300 rounded-lg transition-colors">
-            {cancelText}
-          </button>
-          <button onClick={onConfirm} className={`px-4 py-2 text-sm font-medium text-white rounded-lg shadow-sm transition-colors ${bg}`}>
+        <div className="flex flex-col sm:flex-row justify-end gap-3 mt-6">
+          <button onClick={onConfirm} className={`w-full sm:w-auto px-4 py-2.5 sm:py-2 text-sm font-medium text-white rounded-lg shadow-sm transition-colors order-1 sm:order-2 flex justify-center items-center ${bg}`}>
             {confirmText}
+          </button>
+          <button onClick={onCancel} className="w-full sm:w-auto px-4 py-2.5 sm:py-2 text-sm font-medium bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-300 rounded-lg transition-colors order-2 sm:order-1 flex justify-center items-center">
+            {cancelText}
           </button>
         </div>
       </div>

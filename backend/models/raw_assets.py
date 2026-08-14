@@ -1,6 +1,6 @@
 import uuid
 from sqlalchemy import Column, String, Boolean, Integer, ForeignKey, Text, DateTime
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 from database import Base
 from utils.timeaware import aware_utcnow
@@ -36,6 +36,8 @@ class RawAssets(Base):
     create_date = Column(DateTime(timezone=True), default=aware_utcnow)
     update_date = Column(DateTime(timezone=True), nullable=True)
     duplicate_allowed = Column(Boolean, default=False)
+    snow_number = Column(String(100), nullable=True)
+    team_note = Column(Text, nullable=True)
 
     # relashionship
     asset_types = relationship("AssetTypes", back_populates="raw_assets")
@@ -44,3 +46,16 @@ class RawAssets(Base):
     service_categories = relationship("ServiceCategories", back_populates="raw_assets")
     assets = relationship("Assets", back_populates="raw_assets")
     asset_history = relationship("AssetHistory", back_populates="raw_assets", cascade="all, delete-orphan")
+    snow_metadata = relationship("RawAssetsSnowMetadata", back_populates="raw_asset", uselist=False,
+                                 cascade="all, delete-orphan")
+
+
+class RawAssetsSnowMetadata(Base):
+    __tablename__ = 'raw_assets_snow_metadata'
+
+    correlation_id = Column(UUID(as_uuid=True), ForeignKey('raw_assets.id', ondelete='CASCADE'), primary_key=True)
+    last_snow_sync = Column(DateTime(timezone=True), default=aware_utcnow, onupdate=aware_utcnow)
+    snow_data = Column(JSONB, nullable=True)
+
+    # relashionship
+    raw_asset = relationship("RawAssets", back_populates="snow_metadata")

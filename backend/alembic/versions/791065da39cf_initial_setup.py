@@ -76,10 +76,8 @@ def upgrade() -> None:
     )
     op.create_table('users',
     sa.Column('id', sa.UUID(), nullable=False),
-    sa.Column('github_id', sa.String(length=255), nullable=True),
     sa.Column('email', sa.String(length=255), nullable=False),
     sa.Column('name', sa.String(length=255), nullable=False),
-    sa.Column('avatar_url', sa.String(length=500), nullable=True),
     sa.Column('role', sa.String(length=50), nullable=False),
     sa.Column('location_id', sa.UUID(), nullable=True),
     sa.Column('base_capacity', sa.Float(), nullable=True),
@@ -89,8 +87,7 @@ def upgrade() -> None:
     sa.Column('end_year', sa.Integer(), nullable=True),
     sa.ForeignKeyConstraint(['location_id'], ['locations.id'], ondelete='SET NULL'),
     sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('email'),
-    sa.UniqueConstraint('github_id')
+    sa.UniqueConstraint('email')
     )
     op.create_table('events',
     sa.Column('id', sa.UUID(), nullable=False),
@@ -209,18 +206,15 @@ def upgrade() -> None:
     users_stages_table = sa.table(
         'users',
         sa.Column('id', sa.dialects.postgresql.UUID(as_uuid=True)),
-        sa.Column('github_id', sa.String),
         sa.Column('email', sa.String),
         sa.Column('name', sa.String),
-        sa.Column('avatar_url', sa.String),
         sa.Column('role', sa.String),
 
     )
     op.bulk_insert(
         users_stages_table,
         [
-            {'id': uuid.uuid4(), 'github_id': '99612766', 'email': 'vitobonetti@gmail.com', 'name': 'Isha',
-             'avatar_url': 'https://avatars.githubusercontent.com/u/99612766?v=4', 'role': 'admin'},
+            {'id': uuid.uuid4(), 'email': 'vito.bonetti@randstadgroep.nl', 'name': 'Vito', 'role': 'admin'},
         ]
     )
 

@@ -5,6 +5,7 @@ from routers.auth import get_current_user, require_admin
 from schema import UserCreate, UserBase
 from websockets_manager import manager
 from datetime import datetime
+from audit_logger import log_audit_event
 
 router = APIRouter(prefix="/api/users", tags=["Users"])
 
@@ -17,10 +18,17 @@ def check_system_status(current_user: dict = Depends(require_admin), cursor=Depe
     return {"setup_required": count == 0}
 
 
+@router.get("/system/time", summary="Get Server Time")
+def get_system_time(current_user: dict = Depends(get_current_user)):
+    now = datetime.now()
+    iso = now.isocalendar()
+    return {"year": iso[0], "week": iso[1]}
+
+
 @router.get("/", summary="[Admin Only]")
 def get_all_users(current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     cursor.execute("""
-        SELECT id, email, name, role, base_capacity, start_week, start_year, end_week, end_year, location_id, avatar_url 
+        SELECT id, email, name, role, base_capacity, start_week, start_year, end_week, end_year, location_id  
         FROM users ORDER BY name
     """)
     users = []
@@ -28,8 +36,7 @@ def get_all_users(current_user: dict = Depends(require_admin), cursor=Depends(ge
         users.append({
             "id": r[0], "email": r[1], "name": r[2], "role": r[3],
             "base_capacity": r[4], "start_week": r[5], "start_year": r[6],
-            "end_week": r[7], "end_year": r[8], "location_id": r[9],
-            "avatar_url": r[10]
+            "end_week": r[7], "end_year": r[8], "location_id": r[9]
         })
     return users
 
@@ -53,6 +60,16 @@ def create_user(u: UserCreate, background_tasks: BackgroundTasks,
     )
 
     cursor.connection.commit()
+
+    log_audit_event(
+        user_id=str(current_user["id"]),
+        role=current_user["role"],
+        action="LOCATION_CREATED",
+        resource_type="USER",
+        resource_id=str(new_user_id),
+        details=f"User with ID: {new_user_id} was created."
+    )
+
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": f"User {u.name} whitelisted in the database."}
 
@@ -87,8 +104,19 @@ def delete_user(user_id: str, background_tasks: BackgroundTasks,
         )
 
         cursor.connection.commit()
+
+        log_audit_event(
+            user_id=str(current_user["id"]),
+            role=current_user["role"],
+            action="LOCATION_DELETED",
+            resource_type="USER",
+            resource_id=str(user_id),
+            details=f"User with ID: {user_id} was deleted."
+        )
+
         background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
         return {"message": "User successfully offboarded."}
+
 
 @router.put("/{user_id}", summary="[Admin Only]")
 def update_user(user_id: str, u: UserBase, background_tasks: BackgroundTasks,
@@ -126,6 +154,16 @@ def update_user(user_id: str, u: UserBase, background_tasks: BackgroundTasks,
         (u.name, u.role.value, loc_id, u.base_capacity, u.start_week, u.start_year, ew, ey, user_id)
     )
     cursor.connection.commit()
+
+    log_audit_event(
+        user_id=str(current_user["id"]),
+        role=current_user["role"],
+        action="LOCATION_UPDATED",
+        resource_type="USER",
+        resource_id=str(user_id),
+        details=f"User with ID: {user_id} was updated."
+    )
+
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "User updated."}
 

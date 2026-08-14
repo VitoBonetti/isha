@@ -1,0 +1,12 @@
+.git/
+node_modules/
+__pycache__/
+*.db
+*.sqlite3
+.env
+dist/
+build/
+.cache/
+.venv/
+README.md
+TODO.md

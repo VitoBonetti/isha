@@ -1,13 +1,15 @@
 import { useState, useEffect, useRef } from "react";
 import axios from "axios";
-import toast from "react-hot-toast";
+import toast, { Toaster } from "react-hot-toast";
 import type { DropResult } from '@hello-pangea/dnd';
+import { useAppContext } from '../context/AppContext';
 import PlannerView from "./PlannerView";
 import ConfirmModal from "../components/Modals/ConfirmModal";
 import EditTestModal from "../components/Modals/EditTestModal";
 import type { BoardData, Test } from "../types/board";
 
 export default function Planner() {
+  const { currentUser } = useAppContext();
   const [boardData, setBoardData] = useState<BoardData | null>(null);
 
   // Time state
@@ -41,8 +43,7 @@ export default function Planner() {
 
     // 1. Establish WebSocket connection automatically
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws/board`;
-
+    const wsUrl = `${protocol}//${window.location.host}/api/ws/board`;
     const socket = new WebSocket(wsUrl);
     ws.current = socket;
 
@@ -53,15 +54,20 @@ export default function Planner() {
     socket.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-
         // 2. Listen for Database Changes
         if (data.action === 'REFRESH_BOARD') {
           fetchBoardData();
-
           // Dispatch a global event so your TopNav knows to re-fetch notifications!
           window.dispatchEvent(new CustomEvent('refresh_notifications'));
         }
-        // 3. Listen for User Presence (Other admins opening the page)
+        // 3: Listen for targeted presentation toasts ---
+        else if ((data.action === 'PRESENTATION_READY' || data.action === 'REPORT_READY') && data.email === currentUser?.email) {
+          toast.success(data.message, { duration: 8000 });
+        }
+        else if ((data.action === 'PRESENTATION_FAILED' || data.action === 'REPORT_FAILED') && data.email === currentUser?.email) {
+          toast.error(data.message, { duration: 8000 });
+        }
+        // 4. Listen for User Presence (Other admins opening the page)
         else if (data.action === 'ONLINE_USERS' && data.users) {
           setOnlineUsers(data.users);
         }
@@ -74,7 +80,15 @@ export default function Planner() {
       console.log("🔴 Disconnected from live board");
     };
 
+    // Send a ping every 10 seconds to bypass the GCP Load Balancer idle timeout
+    const pingInterval = setInterval(() => {
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ action: "ping" }));
+      }
+    }, 10000);
+
     return () => {
+      clearInterval(pingInterval); // Clear the interval on unmount
       socket.close();
     };
   }, [targetYear, targetQuarter]);
@@ -262,6 +276,9 @@ export default function Planner() {
 
   const handleUpdateTest = async (testId: string, updatedData: any) => {
     try {
+      if (updatedData.kiss24 === "") {
+        updatedData.kiss24 = null;
+      }
       await axios.put(`/api/tests/${testId}`, updatedData);
       toast.success("Test settings updated!");
       setEditModalTest(null);
@@ -273,8 +290,50 @@ export default function Planner() {
 
   const handleDuplicateTest = (testId: string) => console.log("Duplicate Triggered:", testId);
 
+  const handleCreateWorkspace = async (testId: string) => {
+    const toastId = toast.loading("Provisioning workspace...");
+    try {
+      await axios.post(`/api/tests/${testId}/workspace`);
+      toast.dismiss(toastId);
+      toast.success("Workspace creation started! The board will refresh shortly.");
+    } catch (error) {
+      toast.dismiss(toastId);
+      toast.error("Failed to create workspace.");
+    }
+  };
+
+  const handleToggleTentative = async (testId: string) => {
+    try {
+      await axios.put(`/api/tests/${testId}/tentative`);
+    } catch (error) {
+      toast.error("Failed to toggle tentative status.");
+    }
+  };
+
+  const handleCreatePresentation = async (test: Test) => {
+
+    const toastId = toast.loading(`Starting presentation generation for ${test.name}...`);
+    try {
+      const res = await axios.post(`/api/tests/${test.id}/presentation`);
+      toast.success(res.data.message, { id: toastId, duration: 5000 });
+    } catch (error: any) {
+      toast.error(error.response?.data?.detail || "Failed to start generation.", { id: toastId })
+    }
+  };
+
+  const handleGenerateReport = async (test: Test) => {
+    const toastId = toast.loading(`Starting report generation for ${test.name}...`);
+    try {
+      const res = await axios.post(`/api/tests/${test.id}/report`);
+      toast.success(res.data.message, { id: toastId, duration: 5000 });
+    } catch (error: any) {
+      toast.error(error.response?.data?.detail || "Failed to start generation.", { id: toastId });
+    }
+  };
+
   return (
     <>
+      <Toaster position="bottom-right" />
       <PlannerView
         onlineUsers={onlineUsers}
         targetYear={targetYear}
@@ -296,6 +355,10 @@ export default function Planner() {
         handleMarkUnable={handleMarkUnable}
         handleRevertComplete={handleRevertComplete}
         handleRevertUnable={handleRevertUnable}
+        handleCreateWorkspace={handleCreateWorkspace}
+        handleToggleTentative={handleToggleTentative}
+        handleCreatePresentation={handleCreatePresentation}
+        handleGenerateReport={handleGenerateReport}
         assignModalTest={assignModalTest}
         setAssignModalTest={setAssignModalTest}
         backlogFilter={backlogFilter}

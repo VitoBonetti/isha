@@ -4,12 +4,14 @@ import pandas as pd
 import io
 import uuid
 import anyio
-from database import get_db_cursor, db_cursor_context
+import sys
+from database import get_db_cursor, db_cursor_context, SessionLocal
 from routers.auth import get_current_user, require_admin
-from schema import RawAssetCreate, AssetBase, PromoteAssetRequest, BulkAssetRequest, AssetTypeBase, BulkServiceUpdateRequest
+from schema import RawAssetCreate, AssetBase, PromoteAssetRequest, BulkAssetRequest, AssetTypeBase, BulkServiceUpdateRequest, SnowSyncRequest
 from starlette import status
 from websockets_manager import manager
 from audit_logger import log_audit_event
+from utils.snow_sync import process_and_sync_snow_data, fetch_raw_snow_data
 
 router = APIRouter(prefix="/api/assets", tags=["Assets"])
 
@@ -64,6 +66,16 @@ def create_asset_type(at: AssetTypeBase, current_user: dict = Depends(require_ad
     try:
         cursor.execute("INSERT INTO asset_types (id, name) VALUES (%s, %s)", (new_id, at.name))
         cursor.connection.commit()
+
+        log_audit_event(
+            user_id=str(current_user["id"]),
+            role=current_user["role"],
+            action="ASSET_TYPE_CREATE",
+            resource_type="ASSETS",
+            resource_id=str(new_id),
+            details=f"Asset Type {at.name} created with ID: {new_id}",
+        )
+
         return {"id": new_id, "message": "Asset Type created."}
     except Exception as e:
         cursor.connection.rollback()
@@ -73,6 +85,16 @@ def create_asset_type(at: AssetTypeBase, current_user: dict = Depends(require_ad
 @router.put("/types/{type_id}", summary="[Admin Only]")
 def update_asset_type(type_id: str, at: AssetTypeBase, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     cursor.execute("UPDATE asset_types SET name=%s WHERE id=%s", (at.name, type_id))
+
+    log_audit_event(
+        user_id=str(current_user["id"]),
+        role=current_user["role"],
+        action="ASSET_TYPE_UPDATE",
+        resource_type="ASSETS",
+        resource_id=str(type_id),
+        details=f"Asset Type {type_id} has been updated as {at.name} ",
+    )
+
     cursor.connection.commit()
     return {"message": "Asset Type updated."}
 
@@ -81,6 +103,16 @@ def update_asset_type(type_id: str, at: AssetTypeBase, current_user: dict = Depe
 def delete_asset_type(type_id: str, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     # Note: Because of CASCADE rules in DB, this will delete all associated Raw Assets.
     cursor.execute("DELETE FROM asset_types WHERE id = %s", (type_id,))
+
+    log_audit_event(
+        user_id=str(current_user["id"]),
+        role=current_user["role"],
+        action="ASSET_TYPE_DELETED",
+        resource_type="ASSETS",
+        resource_id=str(type_id),
+        details=f"Asset Type {type_id} has been Deleted ",
+    )
+
     cursor.connection.commit()
     return {"message": "Asset Type deleted."}
 
@@ -195,6 +227,16 @@ def create_manual_raw_asset(asset: RawAssetCreate, background_tasks: BackgroundT
         asset.confidentiality_rating, asset.integrity_rating, asset.availability_rating,
         c_id, s_id, cat_id, at_id, asset.facing_internet, asset.duplicate_allowed
     ))
+
+    log_audit_event(
+        user_id=str(current_user["id"]),
+        role=current_user["role"],
+        action="RAW_ASSET_CREATED",
+        resource_type="RAW_ASSETS",
+        resource_id=str(new_raw_assets_id),
+        details=f"Asset {asset.name} has been created with ID: {new_raw_assets_id} ",
+    )
+
     new_id = cursor.fetchone()[0]
 
     # Standardized Creation Log
@@ -211,9 +253,11 @@ def get_single_raw_asset(raw_id: str, current_user: dict = Depends(get_current_u
         SELECT r.id, r.name, r.description, r.business_critical, r.confidentiality_rating, 
                r.integrity_rating, r.availability_rating, r.country_id, r.service_forecast_id, 
                r.category_id, r.asset_type_id, r.facing_internet, r.duplicate_allowed, r.create_date, r.update_date,
+               r.snow_number, r.team_note, m.snow_data,
                CASE WHEN a.id IS NOT NULL THEN true ELSE false END as is_promoted
         FROM raw_assets r
         LEFT JOIN assets a ON r.id = a.raw_asset_id
+        LEFT JOIN raw_assets_snow_metadata m ON r.id = m.correlation_id
         WHERE r.id = %s
     """, (raw_id,))
     row = cursor.fetchone()
@@ -256,21 +300,22 @@ def update_raw_asset(raw_id: str, asset: RawAssetCreate, background_tasks: Backg
                      current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     # 1. Fetch the OLD state (including relational names via JOINs)
     cursor.execute("""
-        SELECT r.name, r.facing_internet, r.duplicate_allowed, r.confidentiality_rating, r.integrity_rating, r.availability_rating,
-               c.name as country_name, s.name as service_name, cat.name as category_name, at.name as type_name
-        FROM raw_assets r
-        LEFT JOIN countries c ON r.country_id = c.id
-        LEFT JOIN services_lanes s ON r.service_forecast_id = s.id
-        LEFT JOIN service_categories cat ON r.category_id = cat.id
-        LEFT JOIN asset_types at ON r.asset_type_id = at.id
-        WHERE r.id = %s
-    """, (raw_id,))
+            SELECT r.name, r.facing_internet, r.duplicate_allowed, r.confidentiality_rating, r.integrity_rating, r.availability_rating,
+                   c.name as country_name, s.name as service_name, cat.name as category_name, at.name as type_name,
+                   r.snow_number, r.team_note
+            FROM raw_assets r
+            LEFT JOIN countries c ON r.country_id = c.id
+            LEFT JOIN services_lanes s ON r.service_forecast_id = s.id
+            LEFT JOIN service_categories cat ON r.category_id = cat.id
+            LEFT JOIN asset_types at ON r.asset_type_id = at.id
+            WHERE r.id = %s
+        """, (raw_id,))
     old_state = cursor.fetchone()
     if not old_state:
         raise HTTPException(status_code=404, detail="Asset not found")
 
     # Unpack old state and handle NULLs gracefully
-    old_name, old_internet, old_duplicate_allowed, old_c, old_i, old_a, old_country, old_service, old_category, old_type = old_state
+    old_name, old_internet, old_duplicate_allowed, old_c, old_i, old_a, old_country, old_service, old_category, old_type, old_snow_number, old_team_note = old_state
     old_country = old_country or "None"
     old_service = old_service or "None"
     old_category = old_category or "None"
@@ -307,13 +352,23 @@ def update_raw_asset(raw_id: str, asset: RawAssetCreate, background_tasks: Backg
         SET name=%s, description=%s, business_critical=%s, 
             confidentiality_rating=%s, integrity_rating=%s, availability_rating=%s, 
             country_id=%s, service_forecast_id=%s, category_id=%s, asset_type_id=%s, facing_internet=%s, duplicate_allowed=%s,
-            update_date=CURRENT_TIMESTAMP
+            snow_number=%s, team_note=%s, update_date=CURRENT_TIMESTAMP
         WHERE id=%s
     """, (
         asset.name, asset.description, asset.business_critical,
         asset.confidentiality_rating, asset.integrity_rating, asset.availability_rating,
-        c_id, s_id, cat_id, at_id, asset.facing_internet, asset.duplicate_allowed, raw_id
+        c_id, s_id, cat_id, at_id, asset.facing_internet, asset.duplicate_allowed, asset.snow_number, asset.team_note,
+        raw_id
     ))
+
+    log_audit_event(
+        user_id=str(current_user["id"]),
+        role=current_user["role"],
+        action="RAW_ASSET_UPDATED",
+        resource_type="RAW_ASSETS",
+        resource_id=str(raw_id),
+        details=f"Asset {asset.name} has been updated. ID: {raw_id} ",
+    )
 
     # 4. Supercharged Diff Engine
     changes = []
@@ -330,6 +385,9 @@ def update_raw_asset(raw_id: str, asset: RawAssetCreate, background_tasks: Backg
     if old_i != asset.integrity_rating: changes.append(f"I-Rating: {old_i} ➔ {asset.integrity_rating}")
     if old_a != asset.availability_rating: changes.append(f"A-Rating: {old_a} ➔ {asset.availability_rating}")
 
+    if old_snow_number != asset.snow_number: changes.append(f"SNOW ID: '{old_snow_number}' ➔ '{asset.snow_number}'")
+    if old_team_note != asset.team_note: changes.append(f"Team Note was updated")
+
     details_str = " | ".join(changes) if changes else "Description Updated."
 
     # 5. Standardized Update Log
@@ -345,6 +403,16 @@ def delete_raw_asset(raw_id: str, background_tasks: BackgroundTasks,
                      current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     cursor.execute("DELETE FROM raw_assets WHERE id = %s", (raw_id,))
     cursor.connection.commit()
+
+    log_audit_event(
+        user_id=str(current_user["id"]),
+        role=current_user["role"],
+        action="RAW_ASSET_DELETED",
+        resource_type="RAW_ASSETS",
+        resource_id=str(raw_id),
+        details=f"Asset with ID: {raw_id}  has been deleted.",
+    )
+
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
     return {"message": "Asset permanently deleted"}
 
@@ -354,12 +422,33 @@ def bulk_delete_raw_assets(req: BulkAssetRequest, background_tasks: BackgroundTa
                            current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     for raw_id in req.raw_asset_ids:
         cursor.execute("DELETE FROM raw_assets WHERE id = %s", (str(raw_id),))
+
+        log_audit_event(
+            user_id=str(current_user["id"]),
+            role=current_user["role"],
+            action="RAW_ASSET_BULK_DELETED",
+            resource_type="RAW_ASSETS",
+            resource_id=str(raw_id),
+            details=f"Asset with ID {raw_id} has been deleted in Bulk Action.",
+        )
+
     cursor.connection.commit()
+
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
     return {"message": f"Successfully deleted {len(req.raw_asset_ids)} assets."}
 
 
-# --- SYNCHRONOUS IMPORT IN BACKGROUND THREAD ---
+def is_valid_uuid(val: str):
+    """Helper to ensure provided CSV IDs are valid UUIDs to prevent DB crashes."""
+    try:
+        uuid.UUID(str(val))
+        return True
+    except ValueError:
+        return False
+
+
+
+# --- LEGACY SYNCHRONOUS IMPORT IN BACKGROUND THREAD ---
 def process_excel_import_sync(contents: bytes, filename: str, current_user: dict):
     with db_cursor_context() as cursor:
         if not cursor: return 0, ["Database connection unavailable"]
@@ -387,16 +476,26 @@ def process_excel_import_sync(contents: bytes, filename: str, current_user: dict
             cursor.execute("SELECT LOWER(name), id FROM service_categories")
             categories_map = {row[0]: row[1] for row in cursor.fetchall()}
 
-            cursor.execute("SELECT LOWER(name), country_id, id FROM raw_assets")
-            existing_assets = {(row[0], str(row[1])): str(row[2]) for row in cursor.fetchall()}
+            # UPDATED: Fetch existing IDs to match against the CSV
+            cursor.execute("SELECT id FROM raw_assets")
+            existing_ids = {str(row[0]) for row in cursor.fetchall()}
 
             success_count = 0
             failed_items = []
 
             for _, row in df.iterrows():
+                # Extract and validate ID
+                raw_id_str = str(row.get('ID', '')).strip()
+                asset_id = sanitize_csv_injection(raw_id_str)
+
                 raw_name = str(row.get('Name', '')).strip()
                 if not raw_name: continue
                 name = sanitize_csv_injection(raw_name)
+
+                # Validate UUID format if one was provided in the CSV
+                if asset_id and not is_valid_uuid(asset_id):
+                    failed_items.append(f"{name} (Invalid ID format: Must be a standard UUID)")
+                    continue
 
                 raw_desc = str(row.get('Description', '')).strip()
                 desc = sanitize_csv_injection(raw_desc)
@@ -438,31 +537,38 @@ def process_excel_import_sync(contents: bytes, filename: str, current_user: dict
                     failed_items.append(f"{name} (Unknown Country: '{country_str}')")
                     continue
 
-                # Check if it already exists (UPSERT logic)
-                existing_id = existing_assets.get((name.lower(), str(country_id)))
-
                 try:
-                    if existing_id:
+                    # UPSERT LOGIC VIA ID
+                    if asset_id and asset_id in existing_ids:
+                        # UPDATE: Now updates Name and Country too, since ID is the anchor
                         cursor.execute("""
-                            UPDATE raw_assets SET description=%s, business_critical=%s, 
+                            UPDATE raw_assets SET name=%s, description=%s, business_critical=%s, 
                             confidentiality_rating=%s, integrity_rating=%s, availability_rating=%s, 
-                            service_forecast_id=%s, category_id=%s, asset_type_id=%s, facing_internet=%s
+                            country_id=%s, service_forecast_id=%s, category_id=%s, asset_type_id=%s, facing_internet=%s,
+                            update_date=CURRENT_TIMESTAMP
                             WHERE id=%s
                         """,
-                        (desc, business_critical, c_val, i_val, a_val, service_id, cat_id, type_id, facing_internet, existing_id))
-                        insert_asset_history(cursor, existing_id, str(current_user["id"]), "IMPORTED",
+                                       (name, desc, business_critical, c_val, i_val, a_val, country_id, service_id,
+                                        cat_id, type_id, facing_internet, asset_id))
+                        insert_asset_history(cursor, asset_id, str(current_user["id"]), "IMPORTED",
                                              "Asset metadata updated via bulk Excel import.")
                     else:
-                        new_id = str(uuid.uuid4())
+                        # INSERT: Use provided ID, or generate a new one if blank
+                        new_id = asset_id if asset_id else str(uuid.uuid4())
                         cursor.execute("""
                             INSERT INTO raw_assets (
                                 id, name, description, business_critical, 
                                 confidentiality_rating, integrity_rating, availability_rating, 
                                 country_id, service_forecast_id, category_id, asset_type_id, facing_internet, create_date
                             ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
-                        """, (new_id, name, desc, business_critical, c_val, i_val, a_val, country_id, service_id, cat_id, type_id, facing_internet))
+                        """, (new_id, name, desc, business_critical, c_val, i_val, a_val, country_id, service_id,
+                              cat_id, type_id, facing_internet))
+
                         insert_asset_history(cursor, new_id, str(current_user["id"]), "IMPORTED",
                                              "Asset created via bulk Excel import.")
+
+                        # Add new ID to the tracking set so subsequent rows in this same file don't duplicate
+                        existing_ids.add(new_id)
 
                     success_count += 1
                 except Exception:
@@ -473,8 +579,10 @@ def process_excel_import_sync(contents: bytes, filename: str, current_user: dict
 
             if failed_items:
                 log_audit_event(
-                    user_id=str(current_user["id"]), username=current_user["name"],
-                    action="IMPORT_WARNINGS", resource_type="ASSETS",
+                    user_id=str(current_user["id"]), role=current_user["role"],
+                    action="IMPORT_WARNINGS",
+                    resource_type="ASSETS",
+                    resource_id="N/A",
                     details=f"Failed to import {len(failed_items)} rows: {', '.join(failed_items[:10])}{'...' if len(failed_items) > 10 else ''}"
                 )
 
@@ -484,7 +592,7 @@ def process_excel_import_sync(contents: bytes, filename: str, current_user: dict
             return 0, [f"File formatting error: {str(e)}"]
 
 
-@router.post("/raw/import", summary="[Admin Only]")
+@router.post("/raw/import", summary="[Admin Only]", include_in_schema=False)
 async def import_assets(file: UploadFile = File(...), background_tasks: BackgroundTasks = BackgroundTasks(), current_user: dict = Depends(require_admin)):
     # Mime type validations
     if file.content_type not in ALLOWED_MIME_TYPES:
@@ -514,6 +622,7 @@ async def import_assets(file: UploadFile = File(...), background_tasks: Backgrou
         "failed": failed_items
     }
 
+# --- END LEGACY ---
 
 # --- THE PROMOTION ENGINE ---
 @router.post("/promote", summary="[Admin Only]")
@@ -535,6 +644,15 @@ def promote_raw_assets_to_pool(req: BulkAssetRequest, background_tasks: Backgrou
             INSERT INTO assets (id, raw_asset_id, name, country_id, service_forecast_id, category_id, asset_type_id)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
         """, (new_promote_id, str(raw_id), raw_data[0], raw_data[1], raw_data[2], raw_data[3], raw_data[4]))
+
+        log_audit_event(
+            user_id=str(current_user["id"]),
+            role=current_user["role"],
+            action="RAW_ASSET_PROMOTED",
+            resource_type="RAW_ASSETS",
+            resource_id=str(raw_id),
+            details=f"Asset {raw_data[0]} with ID: {raw_id} has been promoted. Test ID: {new_promote_id} ",
+        )
 
         # Standardized Promotion Log
         insert_asset_history(cursor, str(raw_id), str(current_user["id"]), "PROMOTED",
@@ -574,6 +692,15 @@ def bulk_update_service_lane(req: BulkServiceUpdateRequest, background_tasks: Ba
         # 3. Log it in the Asset's History
         insert_asset_history(cursor, raw_asset_id, str(current_user["id"]), "UPDATED",
                              f"Service Lane bulk updated to '{s_name}'.")
+
+        log_audit_event(
+            user_id=str(current_user["id"]),
+            role=current_user["role"],
+            action="ASSET_UPDATED_SERVICE_LANE_BULK",
+            resource_type="ASSETS",
+            resource_id=str(asset_id),
+            details=f"Service Lane with ID: {service_id} has been set to Asset ID: {asset_id} in a Bulk Action. ",
+        )
 
     cursor.connection.commit()
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
@@ -625,5 +752,84 @@ def remove_from_active_pool(asset_id: str, background_tasks: BackgroundTasks,
                             current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     cursor.execute("DELETE FROM assets WHERE id = %s", (asset_id,))
     cursor.connection.commit()
+
+    log_audit_event(
+        user_id=str(current_user["id"]),
+        role=current_user["role"],
+        action="ASSET_REMOVE_FROM_ACTIVE_POOL",
+        resource_type="ASSETS",
+        resource_id=str(asset_id),
+        details=f"Asset with ID: {asset_id} has been removed from active pool. ",
+    )
+
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
     return {"message": "Asset returned to raw data pool."}
+
+
+# Service Now integrations
+def full_background_sync_wrapper(user_id: str, user_role: str):
+    """Wrapper to run the ENTIRE fetch and sync process in the background."""
+
+    # 1. Force a log to BigQuery so it appears on your frontend terminal instantly
+    log_audit_event(
+        user_id=user_id,
+        role=user_role,
+        action="SERVICE_NOW_SYNC_THREAD_START",
+        resource_type="INTEGRATION",
+        details="Background thread successfully launched. Fetching API data..."
+    )
+
+    try:
+        # Fetch the data in the background
+        snow_records = fetch_raw_snow_data(user_id, user_role)
+
+        if not snow_records:
+            log_audit_event(
+                user_id=user_id, role=user_role,
+                action="SERVICE_NOW_SYNC_CRASH",
+                resource_type="INTEGRATION",
+                details="Fetch returned 0 records or failed. Aborting."
+            )
+            return
+
+        # Process and save to DB
+        db = SessionLocal()
+        try:
+            process_and_sync_snow_data(db, snow_records, user_id, user_role)
+        finally:
+            db.close()
+
+    except Exception as e:
+        # Catch any catastrophic Python crashes and log them to your UI
+        log_audit_event(
+            user_id=user_id,
+            role=user_role,
+            action="SERVICE_NOW_SYNC_CRASH",
+            resource_type="INTEGRATION",
+            details=f"CRITICAL ERROR IN BACKGROUND THREAD: {str(e)}"
+        )
+
+
+@router.post("/servicenow", summary="[Admin Only]")
+def trigger_snow_sync(
+        payload: SnowSyncRequest,
+        background_tasks: BackgroundTasks,
+        current_user: dict = Depends(require_admin)
+):
+    # Hand off ALL heavy lifting to FastAPI's background thread
+    background_tasks.add_task(
+        full_background_sync_wrapper,
+        str(current_user["id"]),
+        str(current_user["role"])
+    )
+
+    # Log that the admin initiated it
+    log_audit_event(
+        user_id=str(current_user["id"]),
+        role=str(current_user["role"]),
+        action="SNOW_SYNC_STARTED",
+        resource_type="INTEGRATION",
+        details="Admin manually triggered the ServiceNow CMDB sync."
+    )
+
+    return {"message": "ServiceNow sync started in the background. This may take a few minutes."}

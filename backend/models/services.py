@@ -17,6 +17,7 @@ class ServiceLanes(Base):
     is_active = Column(Boolean, default=True)
     display_order = Column(Integer, default=99)
     target_goal = Column(Integer, default=0)
+    auto_provision_workspace = Column(Boolean, default=False)
 
     # relationship
     service_categories = relationship('ServiceCategories', back_populates='services_lanes')

@@ -1,0 +1,26 @@
+<!-- Finding numbering and title -->
+<h2>{FINDING_NUM} {FINDING_TITLE}</h2>
+<!-- Finding overview table, shows information such as severity -->
+<table aria-describedby="Overview table for specific finding">
+   <thead>
+      <tr>
+         <th>Severity</th>
+         <th>Status</th>
+         <th>Due Date</th>
+         <th>Reference</th>
+      </tr>
+   </thead>
+   <tbody>
+      <tr>
+         <td>{FINDING_SEVERITY}</td>
+         <td>{FINDING_STATUS}</td>
+         <td>{FINDING_DUE}</td>
+         <td>{FINDING_REF}</td>         
+      </tr>
+   </tbody>
+</table>
+<!-- Finding Description with reproduction steps -->
+<div class="finding_description">
+   {FINDING_DESCRIPTION}
+</div>
+<div class="page-break"></div>
