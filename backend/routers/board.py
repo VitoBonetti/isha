@@ -253,12 +253,22 @@ def get_quarterly_board(year: int, quarter: int, response: Response,
     events = [{"id": str(r[0]), "user_id": str(r[1]) if r[1] else None, "type": r[2],
                "location_id": str(r[3]) if r[3] else None, "start": r[4], "end": r[5]} for r in cursor.fetchall()]
 
+    # 7. Placeholders
+    cursor.execute('''
+        SELECT id, service_lane_id, year, week, credits 
+        FROM service_placeholders 
+        WHERE year = %s
+    ''', (year,))
+
+    ph_columns = [desc[0] for desc in cursor.description]
+    placeholders = [dict(zip(ph_columns, row)) for row in cursor.fetchall()]
+
     return {
         "year": year, "quarter": quarter, "weeks": weeks,
         "services": services, "categories": categories,
         "pentesters": pentesters, "capacities": cap_matrix,
         "backlog": backlog, "scheduled": scheduled,
-        "assignments": assignments, "events": events
+        "assignments": assignments, "events": events, "placeholders": placeholders
     }
 
 # --- 3. UNIVERSAL CATEGORIES ---

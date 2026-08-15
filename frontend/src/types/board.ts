@@ -49,6 +49,14 @@ export interface Assignment {
   allocated_credits: number;
 }
 
+export interface Placeholder {
+  id: string;
+  service_lane_id: string;
+  year: number;
+  week: number;
+  credits: number;
+}
+
 export interface BoardData {
   year: number;
   quarter: number;
@@ -60,4 +68,5 @@ export interface BoardData {
   scheduled: Test[];
   assignments: Assignment[];
   events: any[];
+  placeholders: Placeholder[];
 }

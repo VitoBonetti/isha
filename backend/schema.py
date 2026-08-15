@@ -52,6 +52,18 @@ class ServiceLaneBase(BaseModel):
 class ServiceLaneResponse(ServiceLaneBase):
     id: UUID4
 
+class PlaceholderCreate(BaseModel):
+    service_lane_id: UUID4
+    year: int
+    week: int
+
+class PlaceholderResponse(PlaceholderCreate):
+    id: UUID4
+    credits: int
+
+    class Config:
+        from_attributes = True
+
 # --- USERS ---
 class UserBase(BaseModel):
     name: str

@@ -43,6 +43,8 @@ interface PlannerViewProps {
   backlogFilter: string;
   setBacklogFilter: (filter: string) => void;
   setTargetYear: (year: number) => void;
+  handleAddPlaceholder: (serviceId: string, week: number) => void;
+  handleRemovePlaceholder: (id: string) => void;
 }
 
 const getISOWeek = (date: Date) => {
@@ -64,7 +66,8 @@ export default function PlannerView({
   boardData, setNewTest, setShowTestForm,
   onDragEnd, handleAssignTeam, handleCompleteTest, handleUnscheduleTest, handleUnassignPentester,
   handleDeleteTest, handleDuplicateTest, openEditModal, handleMarkUnable, handleRevertComplete, handleRevertUnable, handleCreateWorkspace, handleToggleTentative,
-  handleCreatePresentation, handleGenerateReport, assignModalTest, setAssignModalTest, backlogFilter, setBacklogFilter, setTargetYear
+  handleCreatePresentation, handleGenerateReport, assignModalTest, setAssignModalTest, backlogFilter, setBacklogFilter, setTargetYear, handleAddPlaceholder,
+  handleRemovePlaceholder
 }: PlannerViewProps) {
 
   const navigate = useNavigate();
@@ -275,12 +278,34 @@ export default function PlannerView({
                               <div
                                 ref={provided.innerRef}
                                 {...provided.droppableProps}
-                                className={`min-h-[120px] w-full h-full rounded-xl p-1.5 transition-all border-2 ${snapshot.isDraggingOver ? 'border-dashed shadow-inner' : 'border-transparent hover:border-slate-200/50 dark:hover:border-zinc-800/50'}`}
+                                className={`relative min-h-[120px] w-full h-full rounded-xl p-1.5 transition-all border-2 ${snapshot.isDraggingOver ? 'border-dashed shadow-inner' : 'border-transparent hover:border-slate-200/50 dark:hover:border-zinc-800/50'}`}
                                 style={snapshot.isDraggingOver ? {
                                   backgroundColor: getTintedBg(service.theme_color),
                                   borderColor: service.theme_color
                                 } : {}}
                               >
+                                {boardData.placeholders
+                                  ?.filter(p => p.service_lane_id === service.id && p.year === targetYear && p.week === week)
+                                  .map(p => (
+                                    <div
+                                      key={`ph-${p.id}`}
+                                      className="relative z-10 p-4 min-h-[96px] mb-2.5 rounded-xl border-2 border-dashed border-amber-400 dark:border-amber-500/60 bg-[repeating-linear-gradient(45deg,rgba(251,191,36,0.05),rgba(251,191,36,0.05)_10px,rgba(251,191,36,0.15)_10px,rgba(251,191,36,0.15)_20px)] group/ph flex flex-col justify-center items-center transition-all shadow-sm cursor-default"
+                                    >
+                                      <span className="text-sm font-black text-amber-600 dark:text-amber-500 uppercase tracking-widest opacity-90 drop-shadow-sm">
+                                         Placeholder
+                                      </span>
+                                      {currentUser?.role === 'admin' && (
+                                        <button
+                                          onClick={(e) => { e.stopPropagation(); handleRemovePlaceholder(p.id); }}
+                                          className="absolute top-2 right-2 text-amber-600/60 hover:text-red-500 hover:bg-white dark:hover:bg-zinc-900 opacity-0 group-hover/ph:opacity-100 transition-all rounded p-1.5 shadow-sm"
+                                          title="Remove Placeholder"
+                                        >
+                                          <Trash2 size={16} />
+                                        </button>
+                                      )}
+                                    </div>
+                                  ))
+                                }
                                 {testsInThisCell.map((test, index) => {
                                   const weekAssignments = boardData.assignments.filter(a => a.test_id === test.id && a.week_number === week);
                                   const totalProvided = weekAssignments.reduce((sum, a) => sum + a.allocated_credits, 0);
@@ -469,6 +494,15 @@ export default function PlannerView({
                                   }
                                 })}
                                 {provided.placeholder}
+                                {currentUser?.role === 'admin' && service.auto_provision_workspace && (
+                                  <button
+                                    onClick={() => handleAddPlaceholder(service.id, week)}
+                                    className="w-full mt-2 py-2.5 rounded-xl border-2 border-dashed border-slate-300 dark:border-zinc-700 text-slate-500 dark:text-zinc-400 flex items-center justify-center gap-1.5 hover:bg-slate-100 dark:hover:bg-zinc-800 hover:text-blue-600 dark:hover:text-blue-400 hover:border-blue-400 dark:hover:border-blue-500 transition-all shadow-sm bg-slate-50/80 dark:bg-zinc-900/80"
+                                    title="Add Placeholder"
+                                  >
+                                    <Plus size={16} /> <span className="text-xs font-bold">Add Placeholder</span>
+                                  </button>
+                                )}
                               </div>
                             )}
                           </Droppable>

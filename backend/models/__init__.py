@@ -1,5 +1,5 @@
 from database import Base
-from .services import ServiceLanes, ServiceCategories
+from .services import ServiceLanes, ServiceCategories, ServicePlaceholders
 from .territories import Locations, Region, Country
 from .users import Users
 from .raw_assets import AssetTypes, RawAssets, RawAssetsSnowMetadata

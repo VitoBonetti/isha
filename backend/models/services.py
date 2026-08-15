@@ -24,6 +24,7 @@ class ServiceLanes(Base):
     raw_assets = relationship("RawAssets", back_populates="services_lanes")
     assets = relationship("Assets", back_populates="services_lanes")
     tests = relationship("Tests", back_populates="services_lanes")
+    services_placeholders = relationship("ServicePlaceholders", back_populates="services_lane")
 
 
 class ServiceCategories(Base):
@@ -39,3 +40,15 @@ class ServiceCategories(Base):
     raw_assets = relationship("RawAssets", back_populates="service_categories")
     assets = relationship("Assets", back_populates="service_categories")
     tests = relationship("Tests", back_populates="service_categories")
+
+
+class ServicePlaceholders(Base):
+    __tablename__ = 'service_placeholders'
+
+    id = Column(UUID, primary_key=True, default=uuid.uuid4)
+    service_lane_id = Column(UUID(as_uuid=True), ForeignKey('services_lanes.id', ondelete='CASCADE'), nullable=False)
+    year = Column(Integer, nullable=False)
+    week = Column(Integer, nullable=False)
+    credits = Column(Integer, default=2)
+
+    services_lane = relationship('ServiceLanes', back_populates='service_placeholders')

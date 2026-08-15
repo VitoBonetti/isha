@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, BackgroundTasks
 from database import get_db_cursor
 from routers.auth import require_admin, get_current_user
-from schema import ServiceLaneBase
+from schema import ServiceLaneBase, PlaceholderResponse, PlaceholderCreate
 from websockets_manager import manager
 import uuid
 from audit_logger import log_audit_event
@@ -108,3 +108,55 @@ def delete_service(service_id: str, background_tasks: BackgroundTasks,
 
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Service lane deleted"}
+
+
+# -- Placeholders endopints ---
+@router.post("/placeholders", response_model=PlaceholderResponse, summary="[Admin Only]")
+def create_placeholder(p: PlaceholderCreate, background_tasks: BackgroundTasks,
+                       current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    new_placeholder_id = str(uuid.uuid4())
+    default_credits = 2
+
+    cursor.execute(
+        '''INSERT INTO service_placeholders 
+            (id, service_lane_id, year, week, credits)
+            VALUES (%s, %s, %s, %s, %s)
+           RETURNING id, service_lane_id, year, week, credits''',
+        (new_placeholder_id, p.service_lane_id, p.year, p.week, default_credits)
+    )
+    row = cursor.fetchone()
+    cursor.connection.commit()
+
+    log_audit_event(
+        user_id=str(current_user["id"]),
+        role=current_user["role"],
+        action="PLACEHOLDER_CREATED",
+        resource_type="SERVICE_PLACEHOLDERS",
+        resource_id=new_placeholder_id,
+        details=f"Placeholder created for service {p.service_lane_id} in week {p.week} of {p.year}."
+    )
+
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+
+    columns = [desc[0] for desc in cursor.description]
+    return dict(zip(columns, row))
+
+
+@router.delete("/placeholders/{placeholder_id}", summary="[Admin Only]")
+def delete_placeholder(placeholder_id: str, background_tasks: BackgroundTasks,
+                       current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+
+    cursor.execute('DELETE FROM service_placeholders WHERE id = %s', (placeholder_id,))
+    cursor.connection.commit()
+
+    log_audit_event(
+        user_id=str(current_user["id"]),
+        role=current_user["role"],
+        action="PLACEHOLDER_DELETED",
+        resource_type="SERVICE_PLACEHOLDERS",
+        resource_id=placeholder_id,
+        details=f"Placeholder {placeholder_id} was deleted."
+    )
+
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+    return {"message": "Placeholder deleted"}

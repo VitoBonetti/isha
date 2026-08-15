@@ -310,6 +310,28 @@ export default function Planner() {
     }
   };
 
+  const handleAddPlaceholder = async (serviceId: string, week: number) => {
+    try {
+      await axios.post('/api/services/placeholders', {
+        service_lane_id: serviceId,
+        year: targetYear,
+        week: week
+      });
+      // The websocket Manager will broadcast REFRESH_BOARD automatically!
+    } catch (error) {
+      toast.error("Failed to add placeholder.");
+    }
+  };
+
+  const handleRemovePlaceholder = async (id: string) => {
+    try {
+      await axios.delete(`/api/services/placeholders/${id}`);
+      // Websocket will refresh
+    } catch (error) {
+      toast.error("Failed to remove placeholder.");
+    }
+  };
+
   const handleCreatePresentation = async (test: Test) => {
 
     const toastId = toast.loading(`Starting presentation generation for ${test.name}...`);
@@ -364,6 +386,8 @@ export default function Planner() {
         backlogFilter={backlogFilter}
         setBacklogFilter={setBacklogFilter}
         setTargetYear={setTargetYear}
+        handleAddPlaceholder={handleAddPlaceholder}
+        handleRemovePlaceholder={handleRemovePlaceholder}
       />
 
       <ConfirmModal
