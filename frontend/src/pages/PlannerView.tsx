@@ -561,6 +561,28 @@ export default function PlannerView({
               <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
                 <Calendar size={14} /> Scheduled Active Tests
               </h4>
+              {boardData.placeholders
+                ?.filter(p => p.service_lane_id === selectedMobileService?.id && p.year === targetYear && p.week === activeMobileWeek)
+                .map(p => (
+                  <div
+                    key={`ph-mob-${p.id}`}
+                    className="relative z-10 p-4 min-h-[96px] mb-2.5 rounded-xl border-2 border-dashed border-amber-400 dark:border-amber-500/60 bg-[repeating-linear-gradient(45deg,rgba(251,191,36,0.05),rgba(251,191,36,0.05)_10px,rgba(251,191,36,0.15)_10px,rgba(251,191,36,0.15)_20px)] flex flex-col justify-center items-center shadow-sm"
+                  >
+                    <span className="text-sm font-black text-amber-600 dark:text-amber-500 uppercase tracking-widest opacity-90 drop-shadow-sm">
+                       Placeholder
+                    </span>
+                    {currentUser?.role === 'admin' && (
+                      <button
+                        onClick={() => handleRemovePlaceholder(p.id)}
+                        className="absolute top-2 right-2 text-amber-600/60 hover:text-red-500 hover:bg-white dark:hover:bg-zinc-900 transition-all rounded p-1.5 shadow-sm"
+                        title="Remove Placeholder"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    )}
+                  </div>
+                ))
+              }
               {boardData.scheduled.filter(t => t.service_lane_id === selectedMobileService?.id && t.startYear === targetYear && activeMobileWeek >= (t.startWeek || 0) && activeMobileWeek < ((t.startWeek || 0) + t.duration)).map(test => {
                   const weekAssignments = boardData.assignments.filter(a => a.test_id === test.id && a.week_number === activeMobileWeek);
                   const totalProvided = weekAssignments.reduce((sum, a) => sum + a.allocated_credits, 0);
@@ -687,6 +709,16 @@ export default function PlannerView({
                   No tests scheduled in this lane for Week {activeMobileWeek}
                 </div>
               )}
+
+              {currentUser?.role === 'admin' && selectedMobileService?.auto_provision_workspace && (
+                <button
+                  onClick={() => handleAddPlaceholder(selectedMobileService.id, activeMobileWeek)}
+                  className="w-full mt-2 py-3 rounded-xl border-2 border-dashed border-slate-300 dark:border-zinc-700 text-slate-500 dark:text-zinc-400 flex items-center justify-center gap-1.5 hover:bg-slate-100 dark:hover:bg-zinc-800 hover:text-blue-600 dark:hover:text-blue-400 hover:border-blue-400 dark:hover:border-blue-500 transition-all shadow-sm bg-slate-50/80 dark:bg-zinc-900/80"
+                >
+                  <Plus size={16} /> <span className="text-xs font-bold">Add Placeholder</span>
+                </button>
+              )}
+
             </div>
           </div>
 
