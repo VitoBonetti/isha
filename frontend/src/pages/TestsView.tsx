@@ -85,6 +85,9 @@ export default function TestsView() {
   // Extract unique services dynamically for the dropdown
   const uniqueServices = Array.from(new Set(tests.map(t => t.service_lane_name).filter(Boolean))).sort();
 
+  // NEW: Extract unique years dynamically, sorted descending (newest first)
+  const uniqueYears = Array.from(new Set(tests.map(t => t.start_year).filter(Boolean))).sort((a, b) => Number(b) - Number(a))
+
   // 1. Filter
   const filteredTests = tests.filter(test => {
     // Text Search
@@ -188,13 +191,11 @@ export default function TestsView() {
 
             <select value={filterYear} onChange={e => setFilterYear(e.target.value)} className={selectStyles}>
               <option value="All">All Years</option>
-              <option value="2025">2025</option>
-              <option value="2026">2026</option>
-              <option value="2027">2027</option>
-              <option value="2028">2028</option>
-              <option value="2029">2029</option>
-              <option value="2030">2030</option>
-              <option value="2031">2031</option>
+              {uniqueYears.map(year => (
+                <option key={year as number} value={String(year)}>
+                  {year as number}
+                </option>
+              ))}
               <option value="null">Unscheduled</option>
             </select>
 
