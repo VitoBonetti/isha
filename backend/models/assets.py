@@ -1,6 +1,6 @@
 import uuid
-from sqlalchemy import Column, String, Boolean, ForeignKey
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import Column, String, Boolean, ForeignKey, Integer
+from sqlalchemy.dialects.postgresql import UUID, ARRAY
 from sqlalchemy.orm import relationship
 from database import Base
 
@@ -16,6 +16,8 @@ class Assets(Base):
     service_forecast_id = Column(UUID(as_uuid=True), ForeignKey('services_lanes.id', ondelete='SET NULL'), nullable=True)
     category_id = Column(UUID(as_uuid=True), ForeignKey('service_categories.id', ondelete='SET NULL'), nullable=True)
     is_assigned = Column(Boolean, default=False)
+    is_archived = Column(Boolean, default=False)
+    archived_years = Column(ARRAY(Integer), default=list, nullable=True)
 
     # relationship
     raw_assets = relationship("RawAssets", back_populates="assets")

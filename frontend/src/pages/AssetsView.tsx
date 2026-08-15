@@ -4,7 +4,7 @@ import axios from "axios";
 import TopNav from "../components/TopNav";
 import ConfirmModal from "../components/Modals/ConfirmModal";
 import toast, { Toaster } from "react-hot-toast";
-import { Search, Filter, ArrowBigRightDash, Server, ChevronDown, Activity, Layers, ChevronsUpDown, ChevronUp } from "lucide-react";
+import { Search, Filter, ArrowBigRightDash, Server, ChevronDown, Activity, Layers, ChevronsUpDown, ChevronUp, RefreshCw } from "lucide-react";
 
 interface PoolAsset {
   id: string;
@@ -16,6 +16,7 @@ interface PoolAsset {
   is_assigned: boolean;
   duplicate_allowed: boolean;
   completed_count: number;
+  is_archived_this_year: boolean;
 }
 
 export default function AssetsView() {
@@ -25,7 +26,7 @@ export default function AssetsView() {
 
   // Filtering States
   const [searchTerm, setSearchTerm] = useState("");
-  const [filterStatus, setFilterStatus] = useState<"all" | "assigned" | "ready_untested" | "ready_tested">("all");
+  const [filterStatus, setFilterStatus] = useState<"all" | "assigned" | "ready_untested" | "ready_tested" | "archived">("all");
   const [filterService, setFilterService] = useState<string>("all");
   const [filterCountry, setFilterCountry] = useState<string>("all");
   const [targetYear, setTargetYear] = useState(new Date().getFullYear());
@@ -136,10 +137,10 @@ export default function AssetsView() {
       }
     } else if (confirmModal.action === 'remove' && confirmModal.targetId) {
       try {
-        await axios.delete(`/api/assets/${confirmModal.targetId}`);
+        await axios.delete(`/api/assets/${confirmModal.targetId}?year=${targetYear}`);
         setAssets(prev => prev.filter(asset => asset.id !== confirmModal.targetId));
         setSelectedAssets(prev => prev.filter(id => id !== confirmModal.targetId));
-        toast.success("Asset returned to Raw Pool");
+        toast.success("Asset successfully processed.");
       } catch (error) {
         toast.error("Failed to remove asset");
       }
@@ -180,6 +181,16 @@ export default function AssetsView() {
     }
   };
 
+  const handleRestore = async (rawAssetId: string) => {
+    try {
+      await axios.put(`/api/assets/raw/${rawAssetId}/restore?year=${targetYear}`);
+      toast.success(`Asset restored for ${targetYear}!`);
+      fetchPoolAssets();
+    } catch (error) {
+      toast.error("Failed to restore asset");
+    }
+  };
+
   const toggleAssetSelection = (assetId: string) => {
     setSelectedAssets(prev => prev.includes(assetId) ? prev.filter(id => id !== assetId) : [...prev, assetId]);
   };
@@ -202,15 +213,20 @@ export default function AssetsView() {
     // 3. Status Check
     const isAvailableForTest = !asset.is_assigned || asset.duplicate_allowed;
     let matchesStatus = true;
+    if (filterStatus === "archived") {
+      matchesStatus = asset.is_archived_this_year;
+    } else {
+      if (asset.is_archived_this_year) return false; // HIDE archived assets from other views
 
-    if (filterStatus === "assigned") {
-      matchesStatus = asset.is_assigned;
-    } else if (filterStatus === "ready_untested") {
-      matchesStatus = isAvailableForTest && asset.completed_count === 0;
-    } else if (filterStatus === "ready_tested") {
-      matchesStatus = isAvailableForTest && asset.completed_count > 0;
+      const isAvailableForTest = !asset.is_assigned || asset.duplicate_allowed;
+      if (filterStatus === "assigned") {
+        matchesStatus = asset.is_assigned;
+      } else if (filterStatus === "ready_untested") {
+        matchesStatus = isAvailableForTest && asset.completed_count === 0;
+      } else if (filterStatus === "ready_tested") {
+        matchesStatus = isAvailableForTest && asset.completed_count > 0;
+      }
     }
-
     return matchesSearch && matchesService && matchesCountry && matchesStatus;
   });
 
@@ -355,6 +371,7 @@ export default function AssetsView() {
                 <option value="assigned">Active Tests Only</option>
                 <option value="ready_untested">Ready (Never Tested)</option>
                 <option value="ready_tested">Ready (Previously Tested)</option>
+                <option value="archived">Archived</option>
               </select>
 
               <select
@@ -549,13 +566,24 @@ export default function AssetsView() {
                                 <Activity className="h-3.5 w-3.5" />
                               </button>
                             )}
-                            <button
-                              onClick={() => handleRemoveFromPool(asset.id, asset.name)}
-                              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 text-slate-500 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors text-sm"
-                              title="Return to Raw Pool"
-                            >
-                              <ArrowBigRightDash className="h-3.5 w-3.5" />
-                            </button>
+                            {asset.is_archived_this_year ? (
+                              <button
+                                onClick={() => handleRestore(asset.raw_asset_id)}
+                                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-emerald-200 text-emerald-600 hover:bg-emerald-50 dark:border-emerald-900/50 dark:text-emerald-400 dark:hover:bg-emerald-900/30 transition-colors text-sm font-bold shadow-sm"
+                              >
+                                <RefreshCw className="h-3.5 w-3.5" /> Restore
+                              </button>
+                            ) : (
+                              <>
+                                <button
+                                  onClick={() => handleRemoveFromPool(asset.id, asset.name)}
+                                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 text-slate-500 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors text-sm"
+                                  title="Return to Raw Pool"
+                                >
+                                  <ArrowBigRightDash className="h-3.5 w-3.5" />
+                                </button>
+                              </>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -641,24 +669,34 @@ export default function AssetsView() {
 
                       {/* Bottom Row: Actions */}
                       <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-zinc-800 mt-2 pl-7">
-                        <button
-                          onClick={() => handleRemoveFromPool(asset.id, asset.name)}
-                          className="flex-1 justify-center inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 text-slate-600 hover:text-red-600 dark:text-zinc-400 dark:hover:text-red-400 bg-slate-50 dark:bg-zinc-800/50 transition-colors text-xs font-bold"
-                        >
-                          <ArrowBigRightDash className="h-3.5 w-3.5" /> Return
-                        </button>
-
-                        <button
-                          onClick={() => isReadyToTest && handleGenerateSingleTest(asset.id)}
-                          disabled={!isReadyToTest}
-                          className={`flex-1 justify-center inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-bold transition-colors ${
-                            isReadyToTest
-                              ? 'border-blue-200 dark:border-blue-900/50 text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20'
-                              : 'border-slate-200 dark:border-zinc-800 text-slate-400 bg-slate-100 dark:bg-zinc-900 opacity-50 cursor-not-allowed'
-                          }`}
-                        >
-                          <Activity className="h-3.5 w-3.5" /> Generate
-                        </button>
+                        {asset.is_archived_this_year ? (
+                          <button
+                            onClick={() => handleRestore(asset.raw_asset_id)}
+                            className="flex-1 justify-center inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-emerald-200 text-emerald-600 hover:bg-emerald-50 dark:border-emerald-900/50 dark:text-emerald-400 dark:hover:bg-emerald-900/30 transition-colors text-xs font-bold shadow-sm"
+                          >
+                            <RefreshCw className="h-3.5 w-3.5" /> Restore
+                          </button>
+                        ) : (
+                          <>
+                            <button
+                              onClick={() => handleRemoveFromPool(asset.id, asset.name)}
+                              className="flex-1 justify-center inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 text-slate-600 hover:text-red-600 dark:text-zinc-400 dark:hover:text-red-400 bg-slate-50 dark:bg-zinc-800/50 transition-colors text-xs font-bold"
+                            >
+                              <ArrowBigRightDash className="h-3.5 w-3.5" /> Return
+                            </button>
+                            <button
+                              onClick={() => isReadyToTest && handleGenerateSingleTest(asset.id)}
+                              disabled={!isReadyToTest}
+                              className={`flex-1 justify-center inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-bold transition-colors ${
+                                isReadyToTest
+                                  ? 'border-blue-200 dark:border-blue-900/50 text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20'
+                                  : 'border-slate-200 dark:border-zinc-800 text-slate-400 bg-slate-100 dark:bg-zinc-900 opacity-50 cursor-not-allowed'
+                              }`}
+                            >
+                              <Activity className="h-3.5 w-3.5" /> Generate
+                            </button>
+                          </>
+                        )}
                       </div>
                     </div>
                   );

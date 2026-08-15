@@ -4,7 +4,7 @@ import axios from "axios";
 import TopNav from "../components/TopNav";
 import ConfirmModal from "../components/Modals/ConfirmModal";
 import toast, { Toaster } from "react-hot-toast";
-import { ChevronLeft, Save, Trash2, ShieldAlert, FileText, Edit2, X, History, ChevronDown, ChevronRight, Clock, CheckCircle, HelpCircle, Database } from "lucide-react";
+import { ChevronLeft, Save, Trash2, ShieldAlert, FileText, Edit2, X, History, ChevronDown, ChevronRight, Clock, CheckCircle, HelpCircle, Database, RefreshCw } from "lucide-react";
 
 export default function AssetDetailView() {
   const { id } = useParams();
@@ -55,6 +55,26 @@ export default function AssetDetailView() {
   // Helper to determine if asset is managed by ServiceNow
   const isSynced = !!asset.snow_number;
 
+  const currentYear = new Date().getFullYear();
+  const maxArchivedYear = asset?.archived_years?.length > 0 ? Math.max(...asset.archived_years) : 0;
+  const isArchivedThisYear = asset?.archived_years?.includes(currentYear) ||
+    (asset?.is_archived && currentYear > maxArchivedYear);
+
+  const handleRestore = async () => {
+    try {
+      await axios.put(`/api/assets/raw/${id}/restore?year=${currentYear}`);
+      toast.success("Asset restored successfully!");
+
+      // Refresh the local data
+      const resAsset = await axios.get(`/api/assets/raw/${id}`);
+      setAsset(resAsset.data);
+      setOriginalAsset(resAsset.data);
+      setIsEditing(false); // Close edit mode if it was open
+    } catch (error) {
+      toast.error("Failed to restore asset");
+    }
+  };
+
   const handleUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
@@ -83,11 +103,27 @@ export default function AssetDetailView() {
 
   const handleDelete = async () => {
     try {
-      await axios.post(`/api/assets/raw/bulk-delete`, { raw_asset_ids: [id] });
-      toast.success("Asset deleted");
-      navigate("/raw");
+      const currentYear = new Date().getFullYear();
+
+      // Use the singular DELETE endpoint we updated in assets.py
+      const res = await axios.delete(`/api/assets/raw/${id}?year=${currentYear}`);
+
+      toast.success(res.data.message || "Asset processed successfully");
+      setDeleteModalOpen(false);
+
+      // Check the backend message to see if it was archived or hard-deleted
+      if (res.data.message && res.data.message.toLowerCase().includes("archived")) {
+        // It was soft-deleted (archived). Refresh the local data to show the Restore button!
+        const resAsset = await axios.get(`/api/assets/raw/${id}`);
+        setAsset(resAsset.data);
+        setOriginalAsset(resAsset.data);
+        setIsEditing(false);
+      } else {
+        // It was hard-deleted. We must leave the page because this URL/ID no longer exists.
+        navigate("/raw");
+      }
     } catch (error) {
-      toast.error("Failed to delete asset");
+      toast.error("Failed to process asset");
     }
   };
 
@@ -128,7 +164,13 @@ export default function AssetDetailView() {
     <div className="min-h-screen text-slate-900 dark:text-zinc-100">
       <TopNav />
       <Toaster position="bottom-right" />
-      <ConfirmModal isOpen={deleteModalOpen} title="Delete Asset" message="Are you sure you want to permanently delete this asset? If it is currently in the active pool, it will be removed." onConfirm={handleDelete} onCancel={() => setDeleteModalOpen(false)} />
+      <ConfirmModal
+        isOpen={deleteModalOpen}
+        title="Delete / Archive Asset"
+        message="Are you sure you want to remove this asset? If it has completed tests, it will be safely archived to preserve history. Otherwise, it will be permanently deleted."
+        onConfirm={handleDelete}
+        onCancel={() => setDeleteModalOpen(false)}
+      />
 
       <div className="pt-28 md:pt-32 pb-12 px-4 md:px-6 max-w-4xl mx-auto overflow-hidden">
 
@@ -163,7 +205,11 @@ export default function AssetDetailView() {
 
             {/* Status Badges */}
             <div className="flex flex-row md:flex-col flex-wrap items-start md:items-end gap-2 w-full md:w-auto">
-              {asset.is_promoted ? (
+              {isArchivedThisYear ? (
+                <span className="px-3 py-1 bg-slate-100 dark:bg-zinc-800 text-slate-500 dark:text-zinc-400 font-bold text-xs rounded-full uppercase tracking-wider border border-slate-200 dark:border-zinc-700 flex items-center gap-1.5">
+                  <RefreshCw size={12} /> Archived
+                </span>
+              ) : asset.is_promoted ? (
                 <span className="px-3 py-1 bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-400 font-bold text-xs rounded-full uppercase tracking-wider">In Active Pool</span>
               ) : (
                 <span className="px-3 py-1 bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400 font-bold text-xs rounded-full uppercase tracking-wider">Raw Status</span>
@@ -275,9 +321,18 @@ export default function AssetDetailView() {
             {/* Form Actions (Stacked on Mobile) */}
             {isEditing && (
               <div className="flex flex-col md:flex-row justify-between items-center gap-4 pt-6 md:pt-8 border-t border-slate-100 dark:border-zinc-800 animate-in fade-in slide-in-from-bottom-2">
-                <button type="button" onClick={() => setDeleteModalOpen(true)} className="w-full md:w-auto flex justify-center items-center gap-2 px-4 py-2.5 text-sm font-bold text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors order-2 md:order-1">
-                  <Trash2 size={16} /> Delete Asset
-                </button>
+
+                {/* NEW CONDITIONAL RESTORE / ARCHIVE BUTTON */}
+                {isArchivedThisYear ? (
+                  <button type="button" onClick={handleRestore} className="w-full md:w-auto flex justify-center items-center gap-2 px-4 py-2.5 text-sm font-bold text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 rounded-lg transition-colors order-2 md:order-1">
+                    <RefreshCw size={16} /> Restore Asset
+                  </button>
+                ) : (
+                  <button type="button" onClick={() => setDeleteModalOpen(true)} className="w-full md:w-auto flex justify-center items-center gap-2 px-4 py-2.5 text-sm font-bold text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors order-2 md:order-1">
+                    <Trash2 size={16} /> Delete / Archive
+                  </button>
+                )}
+
                 <div className="w-full md:w-auto flex flex-col md:flex-row gap-3 order-1 md:order-2">
                   <button type="button" onClick={handleCancel} className="w-full md:w-auto flex justify-center items-center gap-2 px-6 py-2.5 text-sm font-bold bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-300 rounded-lg transition-colors">
                     <X size={16} /> Cancel

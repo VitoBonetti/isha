@@ -114,6 +114,8 @@ class AssetResponse(AssetBase):
     id: UUID4
     raw_asset_id: UUID4
     is_assigned: bool = False
+    is_archived: bool = False
+    archived_years: List[int] = []
 
 class PromoteAssetRequest(BaseModel):
     raw_asset_ids: List[UUID4]

@@ -198,6 +198,7 @@ def get_raw_assets(
 
     return {"items": items, "total_count": total_count}
 
+
 # --- STANDARDIZED ASSET HISTORY LOGGING ---
 def insert_asset_history(cursor, raw_asset_id: str, user_id: str, action: str, details: str):
     """Guarantees a standardized action format and a strict, non-null Database Timestamp."""
@@ -252,10 +253,11 @@ def create_manual_raw_asset(asset: RawAssetCreate, background_tasks: BackgroundT
 def get_single_raw_asset(raw_id: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
     cursor.execute("""
         SELECT r.id, r.name, r.description, r.business_critical, r.confidentiality_rating, 
-               r.integrity_rating, r.availability_rating, r.country_id, r.service_forecast_id, 
-               r.category_id, r.asset_type_id, r.facing_internet, r.duplicate_allowed, r.create_date, r.update_date,
-               r.snow_number, r.team_note, m.snow_data,
-               CASE WHEN a.id IS NOT NULL THEN true ELSE false END as is_promoted
+            r.integrity_rating, r.availability_rating, r.country_id, r.service_forecast_id, 
+            r.category_id, r.asset_type_id, r.facing_internet, r.duplicate_allowed, r.create_date, r.update_date,
+            r.snow_number, r.team_note, m.snow_data,
+            CASE WHEN a.id IS NOT NULL THEN true ELSE false END as is_promoted,
+            a.is_archived, a.archived_years
         FROM raw_assets r
         LEFT JOIN assets a ON r.id = a.raw_asset_id
         LEFT JOIN raw_assets_snow_metadata m ON r.id = m.correlation_id
@@ -400,43 +402,174 @@ def update_raw_asset(raw_id: str, asset: RawAssetCreate, background_tasks: Backg
 
 
 @router.delete("/raw/{raw_id}", summary="[Admin Only]")
-def delete_raw_asset(raw_id: str, background_tasks: BackgroundTasks,
-                     current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
-    cursor.execute("DELETE FROM raw_assets WHERE id = %s", (raw_id,))
-    cursor.connection.commit()
+def delete_raw_asset(
+        raw_id: str,
+        year: int = Query(default_factory=lambda: datetime.now().year),
+        background_tasks: BackgroundTasks = BackgroundTasks(),
+        current_user: dict = Depends(require_admin),
+        cursor=Depends(get_db_cursor)
+):
+    # 1. Check if this raw asset has ANY completed tests via the active pool
+    cursor.execute('''
+        SELECT COUNT(t.id) 
+        FROM test_assets ta
+        JOIN tests t ON ta.test_id = t.id
+        JOIN assets a ON ta.asset_id = a.id
+        WHERE a.raw_asset_id = %s AND t.stages::text = 'COMPLETED'
+    ''', (str(raw_id),))
 
-    log_audit_event(
-        user_id=str(current_user["id"]),
-        role=current_user["role"],
-        action="RAW_ASSET_DELETED",
-        resource_type="RAW_ASSETS",
-        resource_id=str(raw_id),
-        details=f"Asset with ID: {raw_id}  has been deleted.",
-    )
+    count_row = cursor.fetchone()
+    completed_count = count_row[0] if count_row else 0
 
-    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
-    return {"message": "Asset permanently deleted"}
+    if completed_count > 0:
+        # 2A. SOFT DELETE (Archive the pool asset using array logic)
+        cursor.execute("SELECT archived_years FROM assets WHERE raw_asset_id = %s", (str(raw_id),))
+        arr_row = cursor.fetchone()
+        current_years = arr_row[0] if arr_row and arr_row[0] else []
 
+        if year not in current_years:
+            current_years.append(year)
 
-@router.post("/raw/bulk-delete", summary="[Admin Only]")
-def bulk_delete_raw_assets(req: BulkAssetRequest, background_tasks: BackgroundTasks,
-                           current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
-    for raw_id in req.raw_asset_ids:
-        cursor.execute("DELETE FROM raw_assets WHERE id = %s", (str(raw_id),))
+        cursor.execute("UPDATE assets SET archived_years = %s, is_archived = true WHERE raw_asset_id = %s",
+                       (current_years, str(raw_id)))
+
+        insert_asset_history(cursor, str(raw_id), str(current_user["id"]), "ARCHIVED",
+                             f"Asset safely archived in {year} to preserve {completed_count} completed tests.")
+        action_msg = f"Asset safely archived to preserve {completed_count} completed tests."
 
         log_audit_event(
             user_id=str(current_user["id"]),
             role=current_user["role"],
-            action="RAW_ASSET_BULK_DELETED",
+            action="RAW_ASSET_ARCHIVED",
             resource_type="RAW_ASSETS",
             resource_id=str(raw_id),
-            details=f"Asset with ID {raw_id} has been deleted in Bulk Action.",
+            details=f"Asset with ID: {raw_id} has been archived for {year}.",
+        )
+    else:
+        # 2B. HARD DELETE (Safe to destroy)
+        cursor.execute("DELETE FROM raw_assets WHERE id = %s", (str(raw_id),))
+        action_msg = "Asset permanently deleted."
+
+        log_audit_event(
+            user_id=str(current_user["id"]),
+            role=current_user["role"],
+            action="RAW_ASSET_DELETED",
+            resource_type="RAW_ASSETS",
+            resource_id=str(raw_id),
+            details=f"Asset with ID: {raw_id} has been deleted.",
         )
 
     cursor.connection.commit()
-
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
-    return {"message": f"Successfully deleted {len(req.raw_asset_ids)} assets."}
+
+    return {"message": action_msg}
+
+
+@router.put("/raw/{raw_id}/restore", summary="[Admin Only]")
+def restore_raw_asset(
+        raw_id: str,
+        year: int = Query(default_factory=lambda: datetime.now().year),
+        background_tasks: BackgroundTasks = BackgroundTasks(),
+        current_user: dict = Depends(require_admin),
+        cursor=Depends(get_db_cursor)
+):
+    # 1. Fetch current archived years array
+    cursor.execute("SELECT archived_years FROM assets WHERE raw_asset_id = %s", (str(raw_id),))
+    row = cursor.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Active pool asset not found.")
+
+    current_years = row[0] if row[0] else []
+
+    # 2. Remove the requested year from the array
+    if year in current_years:
+        current_years.remove(year)
+
+    # 3. Restore visibility and update array
+    cursor.execute("UPDATE assets SET archived_years = %s, is_archived = false WHERE raw_asset_id = %s",
+                   (current_years, str(raw_id)))
+
+    insert_asset_history(cursor, str(raw_id), str(current_user["id"]), "RESTORED",
+                         f"Asset restored to the active pool for {year}.")
+
+    log_audit_event(
+        user_id=str(current_user["id"]),
+        role=current_user["role"],
+        action="RAW_ASSET_RESTORED",
+        resource_type="RAW_ASSETS",
+        resource_id=str(raw_id),
+        details=f"Asset with ID: {raw_id} has been restored for {year}.",
+    )
+
+    cursor.connection.commit()
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
+
+    return {"message": f"Asset successfully restored for {year}!"}
+
+
+@router.post("/raw/bulk-delete", summary="[Admin Only]")
+def bulk_delete_raw_assets(
+        req: BulkAssetRequest,
+        year: int = Query(default_factory=lambda: datetime.now().year),
+        background_tasks: BackgroundTasks = BackgroundTasks(),
+        current_user: dict = Depends(require_admin),
+        cursor=Depends(get_db_cursor)
+):
+    deleted_count = 0
+    archived_count = 0
+
+    for raw_id in req.raw_asset_ids:
+        cursor.execute('''
+            SELECT COUNT(t.id) FROM test_assets ta
+            JOIN tests t ON ta.test_id = t.id
+            JOIN assets a ON ta.asset_id = a.id
+            WHERE a.raw_asset_id = %s AND t.stages::text = 'COMPLETED'
+        ''', (str(raw_id),))
+
+        count_row = cursor.fetchone()
+        completed_count = count_row[0] if count_row else 0
+
+        if completed_count > 0:
+            # SOFT DELETE
+            cursor.execute("SELECT archived_years FROM assets WHERE raw_asset_id = %s", (str(raw_id),))
+            arr_row = cursor.fetchone()
+            current_years = arr_row[0] if arr_row and arr_row[0] else []
+
+            if year not in current_years:
+                current_years.append(year)
+
+            cursor.execute("UPDATE assets SET archived_years = %s, is_archived = true WHERE raw_asset_id = %s",
+                           (current_years, str(raw_id)))
+            insert_asset_history(cursor, str(raw_id), str(current_user["id"]), "ARCHIVED",
+                                 f"Asset safely archived in {year} to preserve {completed_count} completed tests.")
+            archived_count += 1
+
+            log_audit_event(
+                user_id=str(current_user["id"]),
+                role=current_user["role"],
+                action="RAW_ASSET_BULK_ARCHIVED",
+                resource_type="RAW_ASSETS",
+                resource_id=str(raw_id),
+                details=f"Asset with ID {raw_id} has been archived in Bulk Action.",
+            )
+        else:
+            # 2B. HARD DELETE (Safe to destroy)
+            cursor.execute("DELETE FROM raw_assets WHERE id = %s", (str(raw_id),))
+            deleted_count += 1
+
+            log_audit_event(
+                user_id=str(current_user["id"]),
+                role=current_user["role"],
+                action="RAW_ASSET_BULK_DELETED",
+                resource_type="RAW_ASSETS",
+                resource_id=str(raw_id),
+                details=f"Asset with ID {raw_id} has been permanently deleted in Bulk Action.",
+            )
+
+    cursor.connection.commit()
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
+
+    return {"message": f"Processed successfully: {deleted_count} deleted, {archived_count} archived."}
 
 
 def is_valid_uuid(val: str):
@@ -621,8 +754,8 @@ async def import_assets(file: UploadFile = File(...), background_tasks: Backgrou
         "success": success_count,
         "failed": failed_items
     }
-
 # --- END LEGACY ---
+
 
 # --- THE PROMOTION ENGINE ---
 @router.post("/promote", summary="[Admin Only]")
@@ -740,7 +873,17 @@ def get_active_asset_pool(year: Optional[int] = None, current_user: dict = Depen
                 FROM test_assets ta
                 JOIN tests t ON ta.test_id = t.id
                 WHERE ta.asset_id = a.id AND t.stages::text = 'COMPLETED' AND t.start_year = %s
-            ) as completed_count
+            ) as completed_count,
+            (
+                a.archived_years IS NOT NULL 
+                AND (
+                    %s = ANY(a.archived_years) 
+                    OR (
+                        a.is_archived = true 
+                        AND %s > (SELECT MAX(val) FROM unnest(a.archived_years) as val)
+                    )
+                )
+            ) as is_archived_this_year
         FROM assets a
         JOIN raw_assets r ON a.raw_asset_id = r.id
         LEFT JOIN countries c ON r.country_id = c.id
@@ -748,15 +891,54 @@ def get_active_asset_pool(year: Optional[int] = None, current_user: dict = Depen
         LEFT JOIN service_categories cat ON r.category_id = cat.id
         LEFT JOIN asset_types at ON r.asset_type_id = at.id
         ORDER BY r.name ASC
-    ''', (year, year))
+    ''', (year, year, year, year))
+
     columns = [col[0] for col in cursor.description]
     return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
 
 @router.delete("/{asset_id}", summary="[Admin Only]")
-def remove_from_active_pool(asset_id: str, background_tasks: BackgroundTasks,
+def remove_from_active_pool(asset_id: str, year: int, background_tasks: BackgroundTasks,
                             current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
-    cursor.execute("DELETE FROM assets WHERE id = %s", (asset_id,))
+    cursor.execute("SELECT raw_asset_id, name, archived_years FROM assets WHERE id = %s", (asset_id,))
+    row = cursor.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    raw_asset_id, asset_name, current_years = str(row[0]), row[1], row[2] or []
+
+    cursor.execute('''
+        SELECT COUNT(t.id) FROM test_assets ta
+        JOIN tests t ON ta.test_id = t.id
+        WHERE ta.asset_id = %s AND t.stages::text = 'COMPLETED'
+    ''', (asset_id,))
+    completed_count = cursor.fetchone()[0]
+
+    if completed_count > 0:
+        # SOFT DELETE (Append to array)
+        if year not in current_years:
+            current_years.append(year)
+
+        cursor.execute("UPDATE assets SET archived_years = %s, is_archived = true WHERE id = %s",
+                       (current_years, asset_id))
+        action_msg = f"Archived asset for {year} onwards (Preserving {completed_count} completed tests)."
+        insert_asset_history(cursor, raw_asset_id, str(current_user["id"]), "ARCHIVED",
+                             f"Asset archived from active pool in {year}.")
+
+        log_audit_event(
+            user_id=str(current_user["id"]),
+            role=current_user["role"],
+            action="ASSET_ARCHIVED_FROM_ACTIVE_POOL",
+            resource_type="ASSETS",
+            resource_id=str(asset_id),
+            details=action_msg,
+        )
+    else:
+        # HARD DELETE (Return to Raw Pool safely)
+        cursor.execute("DELETE FROM assets WHERE id = %s", (asset_id,))
+        action_msg = "Asset safely returned to raw data pool."
+        insert_asset_history(cursor, raw_asset_id, str(current_user["id"]), "RETURNED",
+                             "Asset safely returned to Raw Pool (0 tests).")
+
     cursor.connection.commit()
 
     log_audit_event(
@@ -765,11 +947,11 @@ def remove_from_active_pool(asset_id: str, background_tasks: BackgroundTasks,
         action="ASSET_REMOVE_FROM_ACTIVE_POOL",
         resource_type="ASSETS",
         resource_id=str(asset_id),
-        details=f"Asset with ID: {asset_id} has been removed from active pool. ",
+        details=action_msg,
     )
 
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
-    return {"message": "Asset returned to raw data pool."}
+    return {"message": action_msg}
 
 
 # Service Now integrations
