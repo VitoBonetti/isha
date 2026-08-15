@@ -55,6 +55,15 @@ const getISOWeek = (date: Date) => {
   return Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
 };
 
+const getWeeksInYear = (year: number) => {
+  const d = new Date(year, 11, 28);
+  const dUTC = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const dayNum = dUTC.getUTCDay() || 7;
+  dUTC.setUTCDate(dUTC.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(dUTC.getUTCFullYear(), 0, 1));
+  return Math.ceil((((dUTC.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+};
+
 const getTintedBg = (hexColor?: string) => {
   if (!hexColor) return 'transparent';
   if (hexColor.startsWith('#') && hexColor.length === 7) return `${hexColor}10`;
@@ -129,6 +138,25 @@ export default function PlannerView({
 
   const selectedMobileService = boardData.services.find(s => s.id === mobileSelectedServiceId) || boardData.services[0];
   const activeMobileWeek = displayWeeks[mobileActiveWeekIndex] || displayWeeks[0];
+
+  const isTestActiveInCell = (test: any, checkWeek: number, checkYear: number) => {
+    let currentW = test.startWeek || 1;
+    let currentY = test.startYear || checkYear;
+    const duration = test.duration || 1;
+
+    for (let i = 0; i < duration; i++) {
+      if (currentW === checkWeek && currentY === checkYear) return true;
+
+      currentW++;
+      const maxWeeks = getWeeksInYear(currentY);
+
+      if (currentW > maxWeeks) {
+        currentW = 1;
+        currentY++;
+      }
+    }
+    return false;
+  };
 
   return (
     <DragDropContext onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
@@ -258,7 +286,7 @@ export default function PlannerView({
 
                     {displayWeeks.map(week => {
                       const cellId = `${service.id}_${week}`;
-                      const testsInThisCell = boardData.scheduled.filter(t => t.service_lane_id === service.id && t.startYear === targetYear && week >= (t.startWeek || 0) && week < ((t.startWeek || 0) + t.duration));
+                      const testsInThisCell = boardData.scheduled.filter(t => t.service_lane_id === service.id && isTestActiveInCell(t, week, targetYear));
 
                       const maxConcurrent = service.max_concurrent_per_week || 0;
                       const isAtCapacity = maxConcurrent > 0 ? testsInThisCell.length >= maxConcurrent : false;
@@ -346,7 +374,7 @@ export default function PlannerView({
                                     </div>
                                   );
 
-                                  if (test.startWeek === week) {
+                                  if (test.startYear === targetYear && test.startWeek === week) {
                                     return (
                                       <Draggable key={test.id} draggableId={test.id} index={index} isDragDisabled={currentUser?.role === 'pentester' || test.status === 'Completed' || test.status === 'Stopped'}>
                                         {(provided) => (
@@ -583,7 +611,7 @@ export default function PlannerView({
                   </div>
                 ))
               }
-              {boardData.scheduled.filter(t => t.service_lane_id === selectedMobileService?.id && t.startYear === targetYear && activeMobileWeek >= (t.startWeek || 0) && activeMobileWeek < ((t.startWeek || 0) + t.duration)).map(test => {
+              {boardData.scheduled.filter(t => t.service_lane_id === selectedMobileService?.id && isTestActiveInCell(t, activeMobileWeek, targetYear)).map(test => {
                   const weekAssignments = boardData.assignments.filter(a => a.test_id === test.id && a.week_number === activeMobileWeek);
                   const totalProvided = weekAssignments.reduce((sum, a) => sum + a.allocated_credits, 0);
                   const percentage = test.credits > 0 ? (totalProvided / test.credits) * 100 : 0;
@@ -704,7 +732,8 @@ export default function PlannerView({
                   </div>
                 );
               })}
-              {boardData.scheduled.filter(t => t.service_lane_id === selectedMobileService?.id && t.startYear === targetYear && activeMobileWeek >= (t.startWeek || 0) && activeMobileWeek < ((t.startWeek || 0) + t.duration)).length === 0 && (
+              {boardData.scheduled.filter(t => t.service_lane_id === selectedMobileService?.id && isTestActiveInCell(t, activeMobileWeek, targetYear)).length === 0 &&
+                boardData.placeholders?.filter(p => p.service_lane_id === selectedMobileService?.id && p.year === targetYear && p.week === activeMobileWeek).length === 0 && (
                 <div className="text-center py-10 border-2 border-dashed border-slate-200 dark:border-zinc-800 rounded-xl text-xs text-slate-400 font-medium">
                   No tests scheduled in this lane for Week {activeMobileWeek}
                 </div>

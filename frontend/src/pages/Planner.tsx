@@ -193,6 +193,15 @@ export default function Planner() {
     });
   };
 
+  const getWeeksInYear = (year: number) => {
+    const d = new Date(year, 11, 28);
+    const dUTC = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+    const dayNum = dUTC.getUTCDay() || 7;
+    dUTC.setUTCDate(dUTC.getUTCDate() + 4 - dayNum);
+    const yearStart = new Date(Date.UTC(dUTC.getUTCFullYear(), 0, 1));
+    return Math.ceil((((dUTC.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+  };
+
   const handleAssignTeam = async (userId: string) => {
     if (!assignModalTest || !boardData) return;
 
@@ -208,15 +217,15 @@ export default function Planner() {
         let assignWeek = startWk + i;
         let assignYear = startYr;
 
-        if (assignWeek > 52) {
-          assignWeek -= 52;
+        const maxWeeks = getWeeksInYear(assignYear);
+        if (assignWeek > maxWeeks) {
+          assignWeek -= maxWeeks;
           assignYear += 1;
         }
 
-        // --- NEW: Grab the REAL available capacity from the board data ---
+        // --- Grab the REAL available capacity from the board data ---
         const realCapacity = boardData.capacities[userId]?.[assignWeek] || 0;
 
-        // Only assign them to the week if they actually have capacity > 0
         if (realCapacity > 0) {
           totalAssignedCredits += realCapacity;
           assignmentPromises.push(
@@ -225,7 +234,7 @@ export default function Planner() {
               user_id: userId,
               week_number: assignWeek,
               year: assignYear,
-              allocated_credits: realCapacity // <-- Dynamic Assignment!
+              allocated_credits: realCapacity
             })
           );
         }

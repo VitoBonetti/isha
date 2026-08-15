@@ -142,9 +142,9 @@ export default function TopNav() {
 
             {isSettingsOpen && (
               <div className="absolute left-0 top-full mt-2 w-48 bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-xl shadow-xl py-2 animate-in fade-in zoom-in-95 overflow-hidden">
-                <Link to="/countries" onClick={() => setIsSettingsOpen(false)} className="block px-4 py-2 text-sm font-medium text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors">Analytics</Link>
                 <Link to="/raw" onClick={() => setIsSettingsOpen(false)} className="block px-4 py-2 text-sm font-medium text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors">Raw Data Lab</Link>
                 <Link to="/assets" onClick={() => setIsSettingsOpen(false)} className="block px-4 py-2 text-sm font-medium text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors">Active Pool</Link>
+                <Link to="/countries" onClick={() => setIsSettingsOpen(false)} className="block px-4 py-2 text-sm font-medium text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors">Analytics</Link>
                 <Link to="/insights" onClick={() => setIsSettingsOpen(false)} className="block px-4 py-2 text-sm font-medium text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors">Insights</Link>
                 <div className="h-px bg-slate-100 dark:bg-zinc-800 my-1"></div>
                 <Link to="/settings" onClick={() => setIsSettingsOpen(false)} className="block px-4 py-2 text-sm font-bold text-slate-900 dark:text-zinc-100 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors">System Settings</Link>
@@ -275,9 +275,9 @@ export default function TopNav() {
             <>
               <div className="h-px bg-slate-200 dark:bg-zinc-800 my-2"></div>
               <span className="text-[10px] font-extrabold text-slate-400 dark:text-zinc-500 uppercase tracking-wider px-4 mb-1">Admin Settings</span>
-              <Link to="/countries" className={mobileNavClass("/countries")}>Analytics</Link>
               <Link to="/raw" className={mobileNavClass("/raw")}>Raw Data Lab</Link>
               <Link to="/assets" className={mobileNavClass("/assets")}>Active Pool</Link>
+              <Link to="/countries" className={mobileNavClass("/countries")}>Analytics</Link>
               <Link to="/insights" className={mobileNavClass("/insights")}>Insights</Link>
               <Link to="/settings" className={mobileNavClass("/settings")}>System Settings</Link>
             </>

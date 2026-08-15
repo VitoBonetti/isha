@@ -64,11 +64,12 @@ def get_user_provision_internal(cursor, user_id, year, week_number):
     return max(0.0, base_cap - (days_off * 0.2))
 
 
-def get_quarter_weeks(q: int):
+def get_quarter_weeks(q: int, year: int):
     if q == 1: return range(1, 14)
     if q == 2: return range(14, 27)
     if q == 3: return range(27, 40)
-    return range(40, 53)
+    last_week = datetime(year, 12, 28).isocalendar()[1]
+    return range(40, last_week + 1)
 
 
 def calculate_weekly_capacity(cursor, user_id, year, week_number):
@@ -157,7 +158,8 @@ def rebalance_affected_assignments(cursor, start_date, end_date, user_id=None, l
 def get_quarterly_board(year: int, quarter: int, response: Response,
                         current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-    weeks = list(get_quarter_weeks(quarter))
+    weeks = list(get_quarter_weeks(quarter, year))
+    weeks_in_prev_year = datetime(year - 1, 12, 28).isocalendar()[1]
 
     # 1. Services & Categories
     cursor.execute(
@@ -174,7 +176,38 @@ def get_quarterly_board(year: int, quarter: int, response: Response,
     pentesters = [{"id": str(r[0]), "name": r[1], "role": r[2], "email": r[3], "capacity": r[4],
                    "location_id": str(r[5]) if r[5] else None} for r in cursor.fetchall()]
 
-    cap_matrix = {p["id"]: {w: calculate_weekly_capacity(cursor, p["id"], year, w) for w in weeks} for p in pentesters}
+    # We pad the requested weeks to handle tests that spill over quarter/year boundaries in the UI modal
+    extended_week_pairs = []
+
+    # Add current quarter's weeks
+    for w in weeks:
+        extended_week_pairs.append((year, w))
+
+    # Add 4 weeks BEFORE the quarter (handles backward spillover)
+    prev_y, prev_w = year, weeks[0]
+    for _ in range(4):
+        prev_w -= 1
+        if prev_w < 1:
+            prev_y -= 1
+            prev_w = datetime(prev_y, 12, 28).isocalendar()[1]
+        extended_week_pairs.append((prev_y, prev_w))
+
+    # Add 8 weeks AFTER the quarter (handles long forward spillover)
+    next_y, next_w = year, weeks[-1]
+    for _ in range(8):
+        next_w += 1
+        max_w = datetime(next_y, 12, 28).isocalendar()[1]
+        if next_w > max_w:
+            next_y += 1
+            next_w = 1
+        extended_week_pairs.append((next_y, next_w))
+
+    # Build the matrix
+    cap_matrix = {p["id"]: {} for p in pentesters}
+    for p in pentesters:
+        for y, w in extended_week_pairs:
+            # We key it by week number so the frontend modal can find it instantly
+            cap_matrix[p["id"]][w] = calculate_weekly_capacity(cursor, p["id"], y, w)
 
     # Map DB ENUM keys back to Frontend Strings
     enum_map = {
@@ -212,18 +245,20 @@ def get_quarterly_board(year: int, quarter: int, response: Response,
 
     # 4. Tests (Scheduled) - Force stages::text to prevent serialization errors
     cursor.execute('''
-            SELECT t.id, t.name, t.service_lane_id, t.category_id, 
-                   t.credits_per_week, t.duration_weeks, t.start_week, t.start_year, t.stages::text,
-                   (SELECT COUNT(*) FROM test_assets WHERE test_id = t.id),
-                   EXISTS(SELECT 1 FROM secret_notes WHERE test_id = t.id),
-                   t.drive_folder_url,
-                   t.is_tentative, t.kiss24
-            FROM tests t
-            WHERE t.stages::text IN ('SCHEDULED', 'IN_PROGRESS', 'STOPPED', 'COMPLETED') 
-              AND t.start_year = %s 
-              AND (t.start_week + t.duration_weeks - 1) >= %s 
-              AND t.start_week <= %s
-        ''', (year, weeks[0], weeks[-1]))
+        SELECT t.id, t.name, t.service_lane_id, t.category_id, 
+            t.credits_per_week, t.duration_weeks, t.start_week, t.start_year, t.stages::text,
+            (SELECT COUNT(*) FROM test_assets WHERE test_id = t.id),
+            EXISTS(SELECT 1 FROM secret_notes WHERE test_id = t.id),
+            t.drive_folder_url,
+            t.is_tentative, t.kiss24
+        FROM tests t
+        WHERE t.stages::text IN ('SCHEDULED', 'IN_PROGRESS', 'STOPPED', 'COMPLETED') 
+            AND (
+                (t.start_year = %s AND (t.start_week + t.duration_weeks - 1) >= %s AND t.start_week <= %s)
+                OR 
+                (t.start_year = %s - 1 AND (t.start_week + t.duration_weeks - 1) - %s >= %s)
+            )
+    ''', (year, weeks[0], weeks[-1], year, weeks_in_prev_year, weeks[0]))
 
     scheduled = []
     for r in cursor.fetchall():

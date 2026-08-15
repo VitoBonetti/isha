@@ -24,10 +24,24 @@ export default function AssignTeamModal({
   const duration = assignModalTest.duration || 1;
   const testStartVal = safeStartYear * 100 + safeStartWeek;
 
+  const getWeeksInYear = (year: number) => {
+    const d = new Date(year, 11, 28);
+    const dUTC = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+    const dayNum = dUTC.getUTCDay() || 7;
+    dUTC.setUTCDate(dUTC.getUTCDate() + 4 - dayNum);
+    const yearStart = new Date(Date.UTC(dUTC.getUTCFullYear(), 0, 1));
+    return Math.ceil((((dUTC.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+  };
+
   // Generate an array of all the weeks this test spans
   const testWeeks = Array.from({ length: duration }, (_, i) => {
     let w = safeStartWeek + i;
-    return w > 52 ? w - 52 : w;
+    const maxWeeks = getWeeksInYear(safeStartYear);
+
+    if (w > maxWeeks) {
+      w -= maxWeeks;
+    }
+    return w;
   });
 
   // Calculate capacity and Sort by Availability (Highest First), then Name
