@@ -5,6 +5,7 @@ import io
 import uuid
 import anyio
 import sys
+from datetime import datetime
 from database import get_db_cursor, db_cursor_context, SessionLocal
 from routers.auth import get_current_user, require_admin
 from schema import RawAssetCreate, AssetBase, PromoteAssetRequest, BulkAssetRequest, AssetTypeBase, BulkServiceUpdateRequest, SnowSyncRequest
@@ -447,7 +448,6 @@ def is_valid_uuid(val: str):
         return False
 
 
-
 # --- LEGACY SYNCHRONOUS IMPORT IN BACKGROUND THREAD ---
 def process_excel_import_sync(contents: bytes, filename: str, current_user: dict):
     with db_cursor_context() as cursor:
@@ -709,32 +709,38 @@ def bulk_update_service_lane(req: BulkServiceUpdateRequest, background_tasks: Ba
 
 # --- ACTIVE ASSET POOL ---
 @router.get("/")
-def get_active_asset_pool(current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+def get_active_asset_pool(year: Optional[int] = None, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
     if current_user['role'] == 'pentester':
         raise HTTPException(status_code=403, detail="Pentesters cannot view the unassigned asset inventory.")
 
+    if not year:
+        year = datetime.now().year
+
     cursor.execute('''
         SELECT a.id, 
-               a.raw_asset_id, 
-               r.name, 
-               c.name as country, 
-               s.name as service_name, 
-               cat.name as category_name, 
-               at.name as asset_type_name, 
-               r.duplicate_allowed,
-               (
-                   SELECT COUNT(*) > 0 
-                   FROM test_assets ta 
-                   JOIN tests t ON ta.test_id = t.id 
-                   WHERE ta.asset_id = a.id 
-                     AND t.stages::text IN ('NOT_PLANNED', 'SCHEDULED', 'IN_PROGRESS')
-               ) as is_assigned,
-               (
-                   SELECT COUNT(*)
-                   FROM test_assets ta
-                   JOIN tests t ON ta.test_id = t.id
-                   WHERE ta.asset_id = a.id AND t.stages::text = 'COMPLETED'
-               ) as completed_count
+            a.raw_asset_id, 
+            r.name, 
+            c.name as country, 
+            s.name as service_name, 
+            cat.name as category_name, 
+            at.name as asset_type_name, 
+            r.duplicate_allowed,
+            (
+                SELECT COUNT(*) > 0 
+                FROM test_assets ta 
+                JOIN tests t ON ta.test_id = t.id 
+                WHERE ta.asset_id = a.id 
+                    AND (
+                        t.stages::text = 'NOT_PLANNED' 
+                        OR (t.stages::text IN ('SCHEDULED', 'IN_PROGRESS') AND t.start_year = %s)
+                    )
+            ) as is_assigned,
+            (
+                SELECT COUNT(*)
+                FROM test_assets ta
+                JOIN tests t ON ta.test_id = t.id
+                WHERE ta.asset_id = a.id AND t.stages::text = 'COMPLETED' AND t.start_year = %s
+            ) as completed_count
         FROM assets a
         JOIN raw_assets r ON a.raw_asset_id = r.id
         LEFT JOIN countries c ON r.country_id = c.id
@@ -742,7 +748,7 @@ def get_active_asset_pool(current_user: dict = Depends(get_current_user), cursor
         LEFT JOIN service_categories cat ON r.category_id = cat.id
         LEFT JOIN asset_types at ON r.asset_type_id = at.id
         ORDER BY r.name ASC
-    ''')
+    ''', (year, year))
     columns = [col[0] for col in cursor.description]
     return [dict(zip(columns, row)) for row in cursor.fetchall()]
 

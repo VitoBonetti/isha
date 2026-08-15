@@ -28,6 +28,12 @@ export default function AssetsView() {
   const [filterStatus, setFilterStatus] = useState<"all" | "assigned" | "ready_untested" | "ready_tested">("all");
   const [filterService, setFilterService] = useState<string>("all");
   const [filterCountry, setFilterCountry] = useState<string>("all");
+  const [targetYear, setTargetYear] = useState(new Date().getFullYear());
+
+  const availableYears = Array.from(
+    { length: 7 },
+    (_, i) => new Date().getFullYear() - 1 + i
+  );
 
   // Pagination & Sorting
   const [page, setPage] = useState(1);
@@ -82,10 +88,15 @@ export default function AssetsView() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  useEffect(() => {
+    fetchPoolAssets();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targetYear]);
+
   const fetchPoolAssets = async () => {
     try {
       setLoading(true);
-      const res = await axios.get("/api/assets/");
+      const res = await axios.get(`/api/assets/?year=${targetYear}`);
       setAssets(res.data);
     } catch (error) {
       if (axios.isAxiosError(error) && error.response?.status === 403) {
@@ -325,7 +336,16 @@ export default function AssetsView() {
             </div>
 
             {/* Filter Dropdowns Grid on Mobile */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 w-full md:w-auto items-center">
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 w-full md:w-auto items-center">
+              <select
+                value={targetYear}
+                onChange={(e) => setTargetYear(parseInt(e.target.value))}
+                className={selectStyles}
+              >
+                {availableYears.map(y => (
+                  <option key={y} value={y}>{y}</option>
+                ))}
+              </select>
               <select
                 value={filterStatus}
                 onChange={(e) => setFilterStatus(e.target.value as any)}

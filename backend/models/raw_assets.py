@@ -17,7 +17,6 @@ class AssetTypes(Base):
     assets = relationship("Assets", back_populates="asset_types")
 
 
-
 class RawAssets(Base):
     __tablename__ = 'raw_assets'
 
