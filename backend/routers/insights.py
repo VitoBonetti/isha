@@ -96,6 +96,23 @@ def get_yearly_insights(year: Optional[int] = None, current_user: dict = Depends
     unassigned_sched_breakdown = {row[0]: float(row[1]) for row in cursor.fetchall()}
     total_unassigned_sched = sum(unassigned_sched_breakdown.values())
 
+    # Placeholders
+    cursor.execute("""
+            SELECT SUM(sp.credits)
+            FROM service_placeholders sp
+            JOIN services_lanes sl ON sp.service_lane_id = sl.id
+            WHERE sp.year = %s AND sl.is_active = TRUE
+        """, (year,))
+
+    ph_sum = cursor.fetchone()[0]
+    total_placeholders = float(ph_sum or 0.0)
+
+    if total_placeholders > 0:
+        # This adds the line item to the UI card
+        unassigned_sched_breakdown["Placeholders (All Lanes)"] = total_placeholders
+        # This deducts it from your net capacity and bench math
+        total_unassigned_sched += total_placeholders
+
     # Backlog
     cursor.execute("""
         SELECT sl.name, SUM(t.credits_per_week * t.duration_weeks) 
