@@ -1,11 +1,12 @@
 import { useState, useEffect } from "react";
+import { Link } from "react-router-dom";
 import axios from "axios";
 import TopNav from "../components/TopNav";
 import TestHistoryModal from "../components/Modals/TestHistoryModal";
 import SecureNoteModal from "../components/Modals/SecureNoteModal";
 import ConfirmModal from "../components/Modals/ConfirmModal";
 import toast, { Toaster } from "react-hot-toast";
-import { Search, ShieldAlert, Calendar, ChevronsUpDown, ChevronUp, ChevronDown, LockOpen, Lock, FolderOpen, FolderPlus } from "lucide-react";
+import { Search, ShieldAlert, Calendar, ChevronsUpDown, ChevronUp, ChevronDown, LockOpen, Lock, FolderOpen, FolderPlus, History } from "lucide-react";
 import { useAppContext } from "../context/AppContext";
 import type { Test } from "../types/board";
 
@@ -239,12 +240,20 @@ export default function TestsView() {
                   {paginatedTests.map((test) => (
                     <tr key={test.id} className="hover:bg-slate-50 dark:hover:bg-zinc-800/30 transition-colors">
                       <td className="p-4 max-w-[200px]">
-                        <button
-                          onClick={() => setHistoryTest(test)}
-                          className="font-bold text-blue-600 dark:text-blue-400 hover:underline text-left truncate block w-full"
-                        >
-                          {test.name}
-                        </button>
+                        {test.raw_asset_id ? (
+                          <Link
+                            to={`/raw/${test.raw_asset_id}`}
+                            state={{ from: '/tests', label: 'Test Registry' }}
+                            className="font-bold text-blue-600 dark:text-blue-400 hover:underline text-left truncate block w-full"
+                            title={`View Asset: ${test.name}`}
+                          >
+                            {test.name}
+                          </Link>
+                        ) : (
+                          <span className="font-bold text-slate-900 dark:text-zinc-100 text-left truncate block w-full">
+                            {test.name}
+                          </span>
+                        )}
                       </td>
                       <td className="p-4">
                         <span className="font-medium text-slate-700 dark:text-zinc-300 whitespace-nowrap">{test.service_lane_name || 'N/A'}</span>
@@ -267,6 +276,13 @@ export default function TestsView() {
                       </td>
                       <td className="p-4 text-center">
                         <div className="flex items-center justify-end gap-1">
+                          <button
+                            onClick={() => setHistoryTest(test)}
+                            className="p-1.5 text-blue-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded transition-colors flex items-center"
+                            title="View History"
+                          >
+                            <History size={14} />
+                          </button>
                           {test.drive_folder_url ? (
                             <a
                               href={test.drive_folder_url}
@@ -306,73 +322,91 @@ export default function TestsView() {
 
               {/* MOBILE VIEW: Stacked Cards */}
               <div className="flex md:hidden flex-col divide-y divide-slate-100 dark:divide-zinc-800 w-full">
-                {paginatedTests.map((test) => (
-                  <div key={test.id} className="p-4 flex flex-col gap-3">
-                    <div className="flex justify-between items-start gap-2">
-                      <button
-                        onClick={() => setHistoryTest(test)}
+              {paginatedTests.map((test) => (
+                <div key={test.id} className="p-4 flex flex-col gap-3">
+                  <div className="flex justify-between items-start gap-2">
+                    {/* 1. TEST NAME: Now a link to the asset details */}
+                    {test.raw_asset_id ? (
+                      <Link
+                        to={`/raw/${test.raw_asset_id}`}
+                        state={{ from: '/tests', label: 'Test Registry' }}
                         className="font-bold text-sm text-blue-600 dark:text-blue-400 hover:underline text-left break-words"
                       >
                         {test.name}
+                      </Link>
+                    ) : (
+                      <span className="font-bold text-sm text-slate-900 dark:text-zinc-100 text-left break-words">
+                        {test.name}
+                      </span>
+                    )}
+
+                    <div className="flex shrink-0 gap-1">
+                      {/* 2. NEW HISTORY BUTTON */}
+                      <button
+                        onClick={() => setHistoryTest(test)}
+                        className="p-1.5 text-blue-500 bg-blue-50 dark:bg-blue-900/20 rounded transition-colors"
+                        title="View History"
+                      >
+                        <History size={14} />
                       </button>
-                      <div className="flex shrink-0 gap-1">
-                        {test.drive_folder_url ? (
-                          <a
-                            href={test.drive_folder_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="p-1.5 text-blue-500 bg-blue-50 dark:bg-blue-900/20 rounded transition-colors"
-                          >
-                            <FolderOpen size={14} />
-                          </a>
-                        ) : (
-                          currentUser?.role === 'admin' && test.auto_provision_workspace && (
-                            <button
-                              className="p-1.5 text-slate-400 hover:text-emerald-500 bg-slate-100 dark:bg-zinc-800 rounded transition-colors"
-                              onClick={() => handleCreateWorkspace(test.id)}
-                            >
-                              <FolderPlus size={14} />
-                            </button>
-                          )
-                        )}
-                        {currentUser?.role !== 'read_only' && (test.has_secret || test.is_service_active && test.auto_provision_workspace) && (
+
+                      {test.drive_folder_url ? (
+                        <a
+                          href={test.drive_folder_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="p-1.5 text-blue-500 bg-blue-50 dark:bg-blue-900/20 rounded transition-colors"
+                        >
+                          <FolderOpen size={14} />
+                        </a>
+                      ) : (
+                        currentUser?.role === 'admin' && test.auto_provision_workspace && (
                           <button
-                            onClick={() => setSecretConfirmOpen(test)}
-                            className={`p-1.5 rounded transition-colors ${test.has_secret ? 'text-indigo-600 bg-indigo-100 dark:bg-indigo-900/30' : 'text-slate-400 bg-slate-100 dark:bg-zinc-800'}`}
+                            className="p-1.5 text-slate-400 hover:text-emerald-500 bg-slate-100 dark:bg-zinc-800 rounded transition-colors"
+                            onClick={() => handleCreateWorkspace(test.id)}
                           >
-                            {test.has_secret ? <Lock size={14} /> : <LockOpen size={14} />}
+                            <FolderPlus size={14} />
                           </button>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2 mt-1">
-                      <div className="flex flex-col gap-0.5">
-                        <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Service Lane</span>
-                        <span className="text-xs font-medium text-slate-700 dark:text-zinc-300 truncate">{test.service_lane_name || 'N/A'}</span>
-                      </div>
-                      <div className="flex flex-col gap-0.5 items-end">
-                        <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Status</span>
-                        {getStatusPill(test.status)}
-                      </div>
-                    </div>
-
-                    <div className="flex flex-col gap-2 mt-1 bg-slate-50 dark:bg-zinc-950/50 p-2.5 rounded-lg border border-slate-100 dark:border-zinc-800">
-                       <div className="flex items-center gap-1.5 text-xs text-slate-700 dark:text-zinc-300 font-medium">
-                          <Calendar size={12} className="text-slate-400"/>
-                          {test.start_week ? (
-                            <span>Wk {test.start_week}, {test.start_year} {test.duration_weeks > 1 && <span className="text-slate-500 ml-1">({test.duration_weeks} wks)</span>}</span>
-                          ) : (
-                            <span className="text-slate-400 italic">Unscheduled</span>
-                          )}
-                        </div>
-                        <div className="text-xs text-slate-600 dark:text-zinc-400">
-                          <span className="font-bold text-slate-400 mr-1">Team:</span>
-                          {test.assigned_pentesters || <span className="italic">Unassigned</span>}
-                        </div>
+                        )
+                      )}
+                      {currentUser?.role !== 'read_only' && (test.has_secret || test.is_service_active && test.auto_provision_workspace) && (
+                        <button
+                          onClick={() => setSecretConfirmOpen(test)}
+                          className={`p-1.5 rounded transition-colors ${test.has_secret ? 'text-indigo-600 bg-indigo-100 dark:bg-indigo-900/30' : 'text-slate-400 bg-slate-100 dark:bg-zinc-800'}`}
+                        >
+                          {test.has_secret ? <Lock size={14} /> : <LockOpen size={14} />}
+                        </button>
+                      )}
                     </div>
                   </div>
-                ))}
+
+                  <div className="grid grid-cols-2 gap-2 mt-1">
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Service Lane</span>
+                      <span className="text-xs font-medium text-slate-700 dark:text-zinc-300 truncate">{test.service_lane_name || 'N/A'}</span>
+                    </div>
+                    <div className="flex flex-col gap-0.5 items-end">
+                      <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Status</span>
+                      {getStatusPill(test.status)}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-2 mt-1 bg-slate-50 dark:bg-zinc-950/50 p-2.5 rounded-lg border border-slate-100 dark:border-zinc-800">
+                     <div className="flex items-center gap-1.5 text-xs text-slate-700 dark:text-zinc-300 font-medium">
+                        <Calendar size={12} className="text-slate-400"/>
+                        {test.start_week ? (
+                          <span>Wk {test.start_week}, {test.start_year} {test.duration_weeks > 1 && <span className="text-slate-500 ml-1">({test.duration_weeks} wks)</span>}</span>
+                        ) : (
+                          <span className="text-slate-400 italic">Unscheduled</span>
+                        )}
+                      </div>
+                      <div className="text-xs text-slate-600 dark:text-zinc-400">
+                        <span className="font-bold text-slate-400 mr-1">Team:</span>
+                        {test.assigned_pentesters || <span className="italic">Unassigned</span>}
+                      </div>
+                  </div>
+                </div>
+              ))}
               </div>
             </>
           )}

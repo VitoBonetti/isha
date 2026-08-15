@@ -245,7 +245,8 @@ def get_all_tests(current_user: dict = Depends(get_current_user), cursor=Depends
             COALESCE((SELECT string_agg(DISTINCT u.name, ', ') FROM assignments a JOIN users u ON a.user_id = u.id WHERE a.test_id = t.id), 'Unassigned') as assigned_pentesters,
             EXISTS(SELECT 1 FROM secret_notes WHERE test_id = t.id) as has_secret,
             t.drive_folder_url,
-            t.kiss24 
+            t.kiss24,
+            (SELECT a.raw_asset_id FROM test_assets ta JOIN assets a ON ta.asset_id = a.id WHERE ta.test_id = t.id LIMIT 1) as raw_asset_id
         FROM tests t LEFT JOIN services_lanes s ON t.service_lane_id = s.id
         ORDER BY t.start_year DESC NULLS LAST, t.start_week DESC NULLS LAST, t.name ASC
     ''')
