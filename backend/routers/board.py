@@ -1,5 +1,6 @@
-from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, Response, status
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, Response, status, Query
 from pydantic import UUID4
+from typing import Optional
 import uuid
 from datetime import datetime, timedelta
 from database import get_db_cursor, db_cursor_context
@@ -162,12 +163,19 @@ def get_quarterly_board(year: int, quarter: int, response: Response,
     weeks_in_prev_year = datetime(year - 1, 12, 28).isocalendar()[1]
 
     # 1. Services & Categories
-    cursor.execute(
-        'SELECT id, name, theme_color, display_order, max_concurrent_per_week, is_active, auto_provision_workspace FROM services_lanes ORDER BY display_order ASC')
+    cursor.execute('''
+            SELECT sl.id, sl.name, sl.theme_color, sl.display_order, sl.max_concurrent_per_week, sl.is_active, sl.auto_provision_workspace 
+            FROM services_lanes sl ORDER BY sl.display_order ASC
+        ''')
     services = [{"id": str(r[0]), "name": r[1], "theme_color": r[2], "max_concurrent_per_week": r[4], "is_active": r[5],
                  "auto_provision_workspace": r[6]} for r in cursor.fetchall()]
 
-    cursor.execute('SELECT id, name, target_goal, service_lane_id FROM service_categories ORDER BY name ASC')
+    cursor.execute('''
+            SELECT c.id, c.name, COALESCE(cg.target_goal, 0) as target_goal, c.service_lane_id 
+            FROM service_categories c
+            LEFT JOIN service_category_goals cg ON c.id = cg.category_id AND cg.year = %s
+            ORDER BY c.name ASC
+        ''', (year,))
     categories = [{"id": str(r[0]), "name": r[1], "target_goal": r[2], "service_lane_id": str(r[3]) if r[3] else None}
                   for r in cursor.fetchall()]
 
@@ -306,54 +314,90 @@ def get_quarterly_board(year: int, quarter: int, response: Response,
         "assignments": assignments, "events": events, "placeholders": placeholders
     }
 
+
 # --- 3. UNIVERSAL CATEGORIES ---
 @router.get("/categories/")
-def get_categories(current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
-    """Fetches all service categories for the settings page."""
-    cursor.execute('''
-        SELECT c.id, c.name, c.target_goal, c.service_lane_id, s.name as service_lane_name 
+def get_categories(year: Optional[str] = None, current_user: dict = Depends(get_current_user),
+                   cursor=Depends(get_db_cursor)):
+    """Fetches categories, cross-joined with their yearly goals."""
+    query = '''
+        SELECT c.id, c.name, COALESCE(cg.target_goal, 0) as target_goal, 
+               cg.year as goal_year, c.service_lane_id, s.name as service_lane_name 
         FROM service_categories c
+        LEFT JOIN service_category_goals cg ON c.id = cg.category_id
         LEFT JOIN services_lanes s ON c.service_lane_id = s.id
-        ORDER BY c.name ASC
-    ''')
+        WHERE 1=1
+    '''
+    params = []
+
+    # Apply filter if a specific year is provided
+    if year and year != 'All':
+        query += " AND cg.year = %s"
+        params.append(int(year))
+
+    query += " ORDER BY cg.year DESC NULLS LAST, c.name ASC"
+
+    cursor.execute(query, tuple(params))
     columns = [desc[0] for desc in cursor.description]
     return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
 
 @router.post("/categories/", summary="[Admin Only]")
-def create_category(cat: ServiceCategoryCreate, current_user: dict = Depends(require_admin),
+def create_category(cat: ServiceCategoryCreate, year: int = Query(...), current_user: dict = Depends(require_admin),
                     cursor=Depends(get_db_cursor)):
-    # Safely convert UUID to string for psycopg2
     lane_id = str(cat.service_lane_id) if cat.service_lane_id else None
 
-    new_category_id= str(uuid.uuid4())
+    # 1. Ensure the Category Exists (or Create it)
+    cursor.execute("SELECT id FROM service_categories WHERE name = %s LIMIT 1", (cat.name,))
+    row = cursor.fetchone()
 
-    cursor.execute(
-        'INSERT INTO service_categories (id, service_lane_id, name, target_goal) VALUES (%s, %s, %s, %s) RETURNING id',
-        (new_category_id, lane_id, cat.name, cat.target_goal)
-    )
+    if row:
+        cat_id = row[0]
+        # Update its service lane mapping just in case
+        cursor.execute("UPDATE service_categories SET service_lane_id = %s WHERE id = %s", (lane_id, cat_id))
+    else:
+        cat_id = str(uuid.uuid4())
+        cursor.execute('INSERT INTO service_categories (id, service_lane_id, name) VALUES (%s, %s, %s)',
+                       (cat_id, lane_id, cat.name))
+
+    # 2. Upsert the Goal for the explicitly requested Year
+    cursor.execute('''
+        INSERT INTO service_category_goals (id, category_id, year, target_goal) VALUES (%s, %s, %s, %s)
+        ON CONFLICT (category_id, year) DO UPDATE SET target_goal = EXCLUDED.target_goal
+    ''', (str(uuid.uuid4()), cat_id, year, cat.target_goal))
 
     log_audit_event(
         user_id=str(current_user["id"]),
         role=current_user["role"],
         action="CATEGORY_CREATE",
         resource_type="CATEGORY",
-        resource_id=str(new_category_id),
+        resource_id=str(cat_id),
         details=f"Category {cat.name} created with target goal {cat.target_goal}. Service line ID: {lane_id}",
     )
 
-    new_id = cursor.fetchone()[0]
     cursor.connection.commit()
-    return {"id": new_id}
+    return {"id": cat_id, "message": f"Category goal for {year} saved."}
 
 
 @router.put("/categories/{cat_id}", summary="[Admin Only]")
-def update_category(cat_id: str, cat: ServiceCategoryBase, background_tasks: BackgroundTasks,
-                    current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
-    cursor.execute(
-        'UPDATE service_categories SET service_lane_id=%s, name=%s, target_goal=%s WHERE id=%s',
-        (cat.service_lane_id, cat.name, cat.target_goal, cat_id)
-    )
+def update_category(cat_id: str, cat: ServiceCategoryBase,
+                    year: int = Query(...),
+                    background_tasks: BackgroundTasks = BackgroundTasks(),
+                    current_user: dict = Depends(require_admin),
+                    cursor=Depends(get_db_cursor)):
+    # Safely convert UUID to string for psycopg2
+    lane_id = str(cat.service_lane_id) if cat.service_lane_id else None
+
+    # 1. Update the core Category details (Name & Service Lane mapping)
+    cursor.execute('UPDATE service_categories SET service_lane_id=%s, name=%s WHERE id=%s',
+                   (lane_id, cat.name, cat_id))
+
+    # 2. Upsert the Target Goal for the explicitly requested Year
+    cursor.execute('''
+        INSERT INTO service_category_goals (id, category_id, year, target_goal) VALUES (%s, %s, %s, %s)
+        ON CONFLICT (category_id, year) DO UPDATE SET target_goal = EXCLUDED.target_goal
+    ''', (str(uuid.uuid4()), cat_id, year, cat.target_goal))
+
     cursor.connection.commit()
 
     log_audit_event(
@@ -362,11 +406,11 @@ def update_category(cat_id: str, cat: ServiceCategoryBase, background_tasks: Bac
         action="CATEGORY_UPDATE",
         resource_type="CATEGORY",
         resource_id=str(cat_id),
-        details=f"Category {cat.name} updated. ID: {cat.service_lane_id}",
+        details=f"Category {cat.name} updated for year {year}. Target Goal: {cat.target_goal}. Lane ID: {lane_id}",
     )
 
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
-    return {"message": "Category updated"}
+    return {"message": f"Category updated for year {year}"}
 
 
 @router.delete("/categories/{cat_id}", summary="[Admin Only]")

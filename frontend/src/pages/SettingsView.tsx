@@ -38,6 +38,40 @@ export default function SettingsView() {
       .catch(console.error);
   }, []);
 
+  const [targetYear, setTargetYear] = useState(new Date().getFullYear());
+  const currentYear = new Date().getFullYear();
+  const availableYears = Array.from(
+    { length: 7 },
+    (_, i) => new Date().getFullYear() - 1 + i
+  );
+  const [localServices, setLocalServices] = useState<any[]>([]);
+  const [localCategories, setLocalCategories] = useState<any[]>([]);
+
+  // Category Filters
+  const [filterCatYear, setFilterCatYear] = useState<string>(currentYear.toString());
+  const [filterCatLane, setFilterCatLane] = useState<string>("All");
+
+  // Service Ledger State
+  const [goalLedgerService, setGoalLedgerService] = useState<{id: string, name: string} | null>(null);
+  const [ledgerGoals, setLedgerGoals] = useState<{year: number, target_goal: number}[]>([]);
+  const [newLedgerYear, setNewLedgerYear] = useState(currentYear);
+  const [newLedgerGoal, setNewLedgerGoal] = useState(0);
+
+  // Update Category Fetching to use the new Filters
+  useEffect(() => {
+    if (activeTab === 'categories') {
+      axios.get(`/api/board/categories/?year=${filterCatYear}`).then(res => setLocalCategories(res.data));
+    }
+  }, [filterCatYear, activeTab]);
+
+  // Fetch data specifically for the selected year
+  useEffect(() => {
+    if (activeTab === 'services' || activeTab === 'categories') {
+      axios.get(`/api/services/?year=${targetYear}`).then(res => setLocalServices(res.data));
+      axios.get(`/api/board/categories/?year=${targetYear}`).then(res => setLocalCategories(res.data));
+    }
+  }, [targetYear, activeTab]);
+
   // ServiceNow Sync State
   const [isSyncing, setIsSyncing] = useState(false);
 
@@ -174,7 +208,7 @@ export default function SettingsView() {
   const [serviceForm, setServiceForm] = useState(defaultServiceForm);
   const [editServiceId, setEditServiceId] = useState<string | null>(null);
 
-  const defaultCatForm = { name: '', target_goal: 0, service_lane_id: '' };
+  const defaultCatForm = { name: '', target_goal: 0, service_lane_id: '', year: new Date().getFullYear() };
   const [catForm, setCatForm] = useState(defaultCatForm);
   const [editCatId, setEditCatId] = useState<string | null>(null);
 
@@ -200,13 +234,38 @@ export default function SettingsView() {
   const submitLocation = async (e: React.FormEvent) => { e.preventDefault(); if (await handleSave('/api/locations/', locForm, !!editLocId, editLocId)) { setShowForm(null); setEditLocId(null); setLocForm(defaultLocForm); }};
   const submitService = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (await handleSave('/api/services/', serviceForm, !!editServiceId, editServiceId)) {
-      setShowForm(null);
-      setEditServiceId(null);
-      setServiceForm(defaultServiceForm);
+    try {
+      if (editServiceId) {
+        await axios.put(`/api/services/${editServiceId}?year=${currentYear}`, serviceForm);
+        toast.success("Service lane updated");
+      } else {
+        await axios.post(`/api/services/?year=${currentYear}`, serviceForm);
+        toast.success("Service lane created");
+      }
+      setShowForm(null); setEditServiceId(null); setServiceForm(defaultServiceForm);
+      axios.get(`/api/services/?year=${currentYear}`).then(res => setLocalServices(res.data));
+    } catch (err) {
+      toast.error("Failed to save service lane");
     }
   };
-  const submitCategory = async (e: React.FormEvent) => { e.preventDefault(); const payload = { ...catForm, service_lane_id: catForm.service_lane_id === '' ? null : catForm.service_lane_id }; if (await handleSave('/api/board/categories/', payload, !!editCatId, editCatId)) { setShowForm(null); setEditCatId(null); setCatForm(defaultCatForm); }};
+
+  const submitCategory = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const payload = { name: catForm.name, target_goal: catForm.target_goal, service_lane_id: catForm.service_lane_id === '' ? null : catForm.service_lane_id };
+    try {
+      if (editCatId) {
+        await axios.put(`/api/board/categories/${editCatId}?year=${catForm.year}`, payload);
+        toast.success("Category updated");
+      } else {
+        await axios.post(`/api/board/categories/?year=${catForm.year}`, payload);
+        toast.success("Category created");
+      }
+      setShowForm(null); setEditCatId(null); setCatForm(defaultCatForm);
+      axios.get(`/api/board/categories/?year=${filterCatYear}`).then(res => setLocalCategories(res.data));
+    } catch (err) {
+      toast.error("Failed to save category");
+    }
+  };
   const submitRegion = async (e: React.FormEvent) => { e.preventDefault(); if (await handleSave('/api/regions/', regionForm, !!editRegionId, editRegionId)) { setShowForm(null); setEditRegionId(null); setRegionForm(defaultRegionForm); }};
   const submitCountry = async (e: React.FormEvent) => { e.preventDefault(); const payload = { ...countryForm, region_id: countryForm.region_id === '' ? null : countryForm.region_id }; if (await handleSave('/api/countries/', payload, !!editCountryId, editCountryId)) { setShowForm(null); setEditCountryId(null); setCountryForm(defaultCountryForm); }};
 
@@ -250,7 +309,7 @@ export default function SettingsView() {
     return sortDir === 'asc' ? res : -res;
   });
 
-  const sortedCategories = [...(categories || [])].sort((a, b) => {
+  const sortedCategories = [...(localCategories || [])].sort((a, b) => {
     let res = 0;
     if (sortBy === 'name') res = a.name.localeCompare(b.name);
     else if (sortBy === 'target_goal') res = a.target_goal - b.target_goal;
@@ -306,6 +365,57 @@ export default function SettingsView() {
             <div className="flex flex-col sm:flex-row justify-end gap-3 mt-6">
               <button onClick={() => {setNukeModalOpen(false); setNukeText("");}} className="w-full sm:w-auto px-4 py-2.5 sm:py-2 text-sm font-medium bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-300 rounded-lg transition-colors order-2 sm:order-1 flex justify-center items-center">Cancel</button>
               <button onClick={() => { if(nukeText === 'NUKE') { handleWipeSystem(); setNukeModalOpen(false); setNukeText(""); } }} disabled={nukeText !== 'NUKE'} className="w-full sm:w-auto px-4 py-2.5 sm:py-2 text-sm font-medium bg-red-600 hover:bg-red-700 disabled:bg-slate-300 dark:disabled:bg-zinc-800 text-white rounded-lg shadow-sm transition-colors order-1 sm:order-2 flex justify-center items-center">Execute Reset</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SERVICE LANE GOAL LEDGER MODAL */}
+      {goalLedgerService && (
+        <div className="fixed inset-0 bg-slate-900/50 dark:bg-zinc-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-2xl p-6 w-full max-w-md shadow-2xl">
+            <h3 className="text-lg font-bold text-slate-900 dark:text-zinc-100 flex items-center gap-2 mb-1">
+              <Activity size={20} className="text-blue-500" /> Goal Ledger
+            </h3>
+            <p className="text-sm text-slate-500 mb-4">Manage yearly targets for <strong>{goalLedgerService.name}</strong>.</p>
+
+            {/* Ledger List */}
+            <div className="space-y-2 mb-6 max-h-60 overflow-y-auto">
+              {ledgerGoals.length === 0 ? (
+                <div className="text-sm text-slate-500 italic">No goals set yet.</div>
+              ) : (
+                ledgerGoals.map(g => (
+                  <div key={g.year} className="flex justify-between items-center bg-slate-50 dark:bg-zinc-800/50 p-3 rounded-lg border border-slate-100 dark:border-zinc-800">
+                    <span className="font-bold text-slate-700 dark:text-zinc-300">Year {g.year}</span>
+                    <span className="font-black text-blue-600 dark:text-blue-400">{g.target_goal} <span className="text-xs text-slate-500 font-medium">target</span></span>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* Add/Edit Form */}
+            <div className="flex gap-2 mb-6 border-t border-slate-100 dark:border-zinc-800 pt-4">
+              <div className="flex-1">
+                <label className="text-[10px] font-bold text-slate-500 uppercase">Year</label>
+                <input type="number" className={inputClasses} value={newLedgerYear} onChange={e => setNewLedgerYear(parseInt(e.target.value))} />
+              </div>
+              <div className="flex-1">
+                <label className="text-[10px] font-bold text-slate-500 uppercase">Target Goal</label>
+                <input type="number" className={inputClasses} value={newLedgerGoal} onChange={e => setNewLedgerGoal(parseInt(e.target.value))} />
+              </div>
+              <button
+                className="mt-5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold transition-colors"
+                onClick={async () => {
+                  await axios.post(`/api/services/${goalLedgerService.id}/goals?year=${newLedgerYear}&target_goal=${newLedgerGoal}`);
+                  const res = await axios.get(`/api/services/${goalLedgerService.id}/goals`);
+                  setLedgerGoals(res.data);
+                  toast.success("Goal saved!");
+                }}
+              >Save</button>
+            </div>
+
+            <div className="flex justify-end">
+              <button onClick={() => setGoalLedgerService(null)} className="px-5 py-2 text-sm font-medium bg-slate-200 hover:bg-slate-300 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 rounded-lg">Close</button>
             </div>
           </div>
         </div>
@@ -648,7 +758,7 @@ export default function SettingsView() {
               )}
 
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {services?.map((item: any) => (
+                {localServices?.map((item: any) => (
                   <div key={item.id} className={`border p-4 md:p-5 rounded-2xl flex flex-col sm:flex-row sm:justify-between items-start transition-colors bg-white dark:bg-zinc-900 shadow-sm hover:shadow-md gap-4 sm:gap-0 ${item.is_active ? 'border-slate-200 dark:border-zinc-800 hover:border-blue-500 dark:hover:border-blue-500' : 'border-slate-200 dark:border-zinc-800 opacity-60 grayscale'}`}>
                     <div className="w-full">
                       <div className="font-bold text-base md:text-lg text-slate-900 dark:text-zinc-100 flex items-center gap-2">
@@ -659,7 +769,19 @@ export default function SettingsView() {
                         <div>Credits: <span className="text-slate-900 dark:text-zinc-200">{item.default_credits}cr</span></div>
                         <div>Duration: <span className="text-slate-900 dark:text-zinc-200">{item.default_duration_weeks}w</span></div>
                         <div>Max: <span className="text-slate-900 dark:text-zinc-200">{item.max_concurrent_per_week || '∞'}</span></div>
-                        <div>Goal: <span className="text-slate-900 dark:text-zinc-200">{item.target_goal || 0}</span></div>
+                        <div className="flex items-center gap-1 mt-1 pt-1 border-t border-slate-100 dark:border-zinc-800">
+                          Goal Ledger:
+                          <button
+                            onClick={async () => {
+                              setGoalLedgerService({id: item.id, name: item.name});
+                              const res = await axios.get(`/api/services/${item.id}/goals`);
+                              setLedgerGoals(res.data);
+                            }}
+                            className="text-blue-600 dark:text-blue-400 font-bold hover:underline px-1.5 py-0.5 rounded hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
+                          >
+                            Manage Years
+                          </button>
+                        </div>
                       </div>
                       <div className={`mt-3 md:mt-4 px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-wider w-fit shadow-sm border ${item.is_active ? 'bg-emerald-100 dark:bg-emerald-500/10 border-emerald-200 dark:border-emerald-500/20 text-emerald-800 dark:text-emerald-400' : 'bg-slate-100 dark:bg-zinc-800 border-slate-200 dark:border-zinc-700 text-slate-500 dark:text-zinc-400'}`}>
                         {item.is_active ? 'Active' : 'Inactive'}
@@ -914,9 +1036,23 @@ export default function SettingsView() {
                   <h2 className="text-lg md:text-xl font-bold text-slate-900 dark:text-zinc-100 flex items-center gap-2"><Tags size={20} className="text-blue-500"/> Service Forecasts</h2>
                   <p className="text-xs md:text-sm text-slate-500 dark:text-zinc-400 mt-1">Specific target goals mapped to service lanes.</p>
                 </div>
-                <button onClick={() => { setEditCatId(null); setCatForm(defaultCatForm); setShowForm('categories'); }} className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 sm:py-2 rounded-lg text-sm font-medium flex justify-center items-center gap-2 transition-colors">
-                  <Plus size={16} /> Add Category
-                </button>
+                <div className="flex gap-2 w-full sm:w-auto">
+                  {/* Service Lane Filter */}
+                  <select className="bg-slate-100 dark:bg-zinc-800 text-sm px-3 py-2 rounded-lg outline-none cursor-pointer text-slate-700 dark:text-zinc-300" value={filterCatLane} onChange={e => setFilterCatLane(e.target.value)}>
+                    <option value="All">All Services</option>
+                    {localServices.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+
+                  {/* Year Filter */}
+                  <select className="bg-slate-100 dark:bg-zinc-800 font-black text-blue-600 text-sm px-3 py-2 rounded-lg outline-none cursor-pointer" value={filterCatYear} onChange={e => setFilterCatYear(e.target.value)}>
+                    <option value="All">All Years</option>
+                    {availableYears.map(y => <option key={y} value={y}>{y}</option>)}
+                  </select>
+
+                  <button onClick={() => { setEditCatId(null); setCatForm({...defaultCatForm, year: currentYear}); setShowForm('categories'); }} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2">
+                    <Plus size={16} /> Add Category
+                  </button>
+                </div>
               </div>
 
               {showForm === 'categories' && (
@@ -924,6 +1060,7 @@ export default function SettingsView() {
                   <h3 className="font-bold text-lg text-slate-900 dark:text-zinc-100 mb-2">{editCatId ? 'Edit Category' : 'Add Category'}</h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-5">
                     <label className="text-sm font-bold text-slate-700 dark:text-zinc-300 col-span-1 md:col-span-2">Name <input className={inputClasses} value={catForm.name} onChange={e => setCatForm({...catForm, name: e.target.value})} required /></label>
+                    <label className="text-sm font-bold text-slate-700 dark:text-zinc-300">Target Year <input type="number" className={inputClasses} value={catForm.year} onChange={e => setCatForm({...catForm, year: parseInt(e.target.value)})} required /></label>
                     <label className="text-sm font-bold text-slate-700 dark:text-zinc-300">Target Goal <input type="number" className={inputClasses} value={catForm.target_goal} onChange={e => setCatForm({...catForm, target_goal: parseInt(e.target.value)})} required /></label>
                     <label className="text-sm font-bold text-slate-700 dark:text-zinc-300">Link to Service Lane
                       <select className={inputClasses} value={catForm.service_lane_id} onChange={e => setCatForm({...catForm, service_lane_id: e.target.value})}>
@@ -950,6 +1087,9 @@ export default function SettingsView() {
                       <th className="p-4 font-bold text-slate-600 dark:text-zinc-400 cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort('target_goal')}>
                         <div className="flex items-center gap-2">Target Goal <SortIcon column="target_goal" /></div>
                       </th>
+                      <th className="p-4 font-bold text-slate-600 dark:text-zinc-400 cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort('goal_year')}>
+                        <div className="flex items-center gap-2">Target Year <SortIcon column="goal_year" /></div>
+                      </th>
                       <th className="p-4 font-bold text-slate-600 dark:text-zinc-400 cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort('service_lane')}>
                         <div className="flex items-center gap-2">Service Lane <SortIcon column="service_lane" /></div>
                       </th>
@@ -961,6 +1101,7 @@ export default function SettingsView() {
                       <tr key={c.id} className="hover:bg-slate-50 dark:hover:bg-zinc-800/50 transition-colors">
                         <td className="p-4 font-bold text-slate-900 dark:text-zinc-100">{c.name}</td>
                         <td className="p-4 text-slate-700 dark:text-zinc-300 font-medium">{c.target_goal}</td>
+                        <td className="p-4 font-bold text-slate-500">{c.goal_year || 'Not Set'}</td>
                         <td className="p-4">
                           <span className="px-2.5 py-1 rounded-full bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/20 text-blue-700 dark:text-blue-400 text-xs font-bold shadow-sm">
                             {c.service_lane_name || 'Unlinked'}
@@ -970,7 +1111,7 @@ export default function SettingsView() {
                           <div className="flex justify-end gap-2">
                             <button onClick={() => {
                               setEditCatId(c.id);
-                              setCatForm({ name: c.name, target_goal: c.target_goal, service_lane_id: c.service_lane_id || '' });
+                              setCatForm({ name: c.name, target_goal: c.target_goal, service_lane_id: c.service_lane_id || '', year: c.goal_year || currentYear });
                               setShowForm('categories');
                             }} className="text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-500/10 p-2 rounded-lg transition-colors"><Edit2 size={18} /></button>
                             <button onClick={() => confirmDelete('/api/board/categories/', c.id, c.name)} className="text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 p-2 rounded-lg transition-colors"><Trash2 size={18} /></button>
@@ -987,7 +1128,10 @@ export default function SettingsView() {
                     <div key={c.id} className="p-4 flex flex-col gap-3">
                       <div className="flex justify-between items-start gap-4">
                         <span className="font-bold text-base text-slate-900 dark:text-zinc-100 leading-tight">{c.name}</span>
-                        <span className="text-xs font-bold text-slate-500 dark:text-zinc-400 bg-slate-100 dark:bg-zinc-800 px-2 py-1 rounded shrink-0">Goal: {c.target_goal}</span>
+                        <div className="flex flex-col items-end shrink-0 gap-1">
+                          <span className="text-xs font-bold text-slate-500 dark:text-zinc-400 bg-slate-100 dark:bg-zinc-800 px-2 py-1 rounded">Goal: {c.target_goal}</span>
+                          <span className="text-[10px] font-bold text-slate-400 px-1">Year: {c.goal_year || 'Not Set'}</span>
+                        </div>
                       </div>
                       <div className="flex justify-between items-end mt-1">
                         <span className="px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/20 text-blue-700 dark:text-blue-400 text-[10px] font-bold shadow-sm max-w-[60%] truncate">
@@ -996,7 +1140,7 @@ export default function SettingsView() {
                         <div className="flex gap-2 shrink-0">
                           <button onClick={() => {
                             setEditCatId(c.id);
-                            setCatForm({ name: c.name, target_goal: c.target_goal, service_lane_id: c.service_lane_id || '' });
+                            setCatForm({ name: c.name, target_goal: c.target_goal, service_lane_id: c.service_lane_id || '', year: c.goal_year || currentYear });
                             setShowForm('categories');
                           }} className="text-slate-500 bg-slate-100 dark:bg-zinc-800 p-2 rounded-lg"><Edit2 size={16} /></button>
                           <button onClick={() => confirmDelete('/api/board/categories/', c.id, c.name)} className="text-red-500 bg-red-50 dark:bg-red-900/20 p-2 rounded-lg"><Trash2 size={16} /></button>

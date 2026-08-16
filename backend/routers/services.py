@@ -1,23 +1,26 @@
-from fastapi import APIRouter, Depends, BackgroundTasks
+from fastapi import APIRouter, Depends, BackgroundTasks, Query
 from database import get_db_cursor
 from routers.auth import require_admin, get_current_user
 from schema import ServiceLaneBase, PlaceholderResponse, PlaceholderCreate
 from websockets_manager import manager
 import uuid
+from datetime import datetime
 from audit_logger import log_audit_event
 
 router = APIRouter(prefix="/api/services", tags=["Services"])
 
 
 @router.get("/")
-def get_services(current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+def get_services(year: int = Query(default_factory=lambda: datetime.now().year), current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
     cursor.execute('''
-        SELECT id, name, max_concurrent_per_week, theme_color, 
-                default_credits, default_duration_weeks, target_goal, display_order, is_active,
-                auto_provision_workspace 
-        FROM services_lanes 
-         ORDER BY display_order ASC, name ASC
-    ''')
+        SELECT sl.id, sl.name, sl.max_concurrent_per_week, sl.theme_color, 
+                sl.default_credits, sl.default_duration_weeks, sl.display_order, sl.is_active,
+                sl.auto_provision_workspace, 
+                COALESCE(slg.target_goal, 0) as target_goal
+        FROM services_lanes sl
+        LEFT JOIN service_lane_goals slg ON sl.id = slg.service_lane_id AND slg.year = %s
+        ORDER BY sl.display_order ASC, sl.name ASC
+    ''', (year,))
 
     columns = [desc[0] for desc in cursor.description]
     services = [dict(zip(columns, row)) for row in cursor.fetchall()]
@@ -30,26 +33,33 @@ def get_services(current_user: dict = Depends(get_current_user), cursor=Depends(
     return services
 
 @router.post("/", summary="[Admin Only]")
-def create_service(s: ServiceLaneBase, background_tasks: BackgroundTasks,
+def create_service(s: ServiceLaneBase, year: int = Query(default_factory=lambda: datetime.now().year), background_tasks: BackgroundTasks = BackgroundTasks(),
                    current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     new_service_id = str(uuid.uuid4())
     cursor.execute(
         '''INSERT INTO services_lanes 
-            (id, name, max_concurrent_per_week, theme_color, default_credits, default_duration_weeks, target_goal, display_order, is_active, auto_provision_workspace)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            (id, name, max_concurrent_per_week, theme_color, default_credits, default_duration_weeks, display_order, is_active, auto_provision_workspace)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
            ON CONFLICT (name) DO UPDATE 
             SET is_active = EXCLUDED.is_active,
                max_concurrent_per_week = EXCLUDED.max_concurrent_per_week,
                theme_color = EXCLUDED.theme_color,
                default_credits = EXCLUDED.default_credits,
                default_duration_weeks = EXCLUDED.default_duration_weeks,
-               target_goal = EXCLUDED.target_goal,
                display_order = EXCLUDED.display_order,
                auto_provision_workspace = EXCLUDED.auto_provision_workspace 
            RETURNING id''',
         (new_service_id, s.name, s.max_concurrent_per_week, s.theme_color, s.default_credits,
-         s.default_duration_weeks, s.target_goal, s.display_order, s.is_active, s.auto_provision_workspace)
+         s.default_duration_weeks, s.display_order, s.is_active, s.auto_provision_workspace)
     )
+    returned_id = cursor.fetchone()[0]
+
+    cursor.execute('''
+            INSERT INTO service_lane_goals (id, service_lane_id, year, target_goal)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (service_lane_id, year) DO UPDATE SET target_goal = EXCLUDED.target_goal
+        ''', (str(uuid.uuid4()), returned_id, year, s.target_goal))
+
     cursor.connection.commit()
 
     log_audit_event(
@@ -64,18 +74,28 @@ def create_service(s: ServiceLaneBase, background_tasks: BackgroundTasks,
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Service lane created or restored", "id": new_service_id}
 
+
 @router.put("/{service_id}", summary="[Admin Only]")
-def update_service(service_id: str, s: ServiceLaneBase, background_tasks: BackgroundTasks,
+def update_service(service_id: str, s: ServiceLaneBase, year: int = Query(default_factory=lambda: datetime.now().year),
+                   background_tasks: BackgroundTasks = BackgroundTasks(),
                    current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     cursor.execute(
         '''UPDATE services_lanes 
             SET name=%s, max_concurrent_per_week=%s, theme_color=%s,
-                default_credits=%s, default_duration_weeks=%s, target_goal=%s, display_order=%s, is_active=%s,
+                default_credits=%s, default_duration_weeks=%s, display_order=%s, is_active=%s,
                 auto_provision_workspace=%s 
             WHERE id=%s''',
         (s.name, s.max_concurrent_per_week, s.theme_color, s.default_credits,
-         s.default_duration_weeks, s.target_goal, s.display_order, s.is_active, s.auto_provision_workspace, service_id)
+         s.default_duration_weeks, s.display_order, s.is_active, s.auto_provision_workspace, service_id)
     )
+
+    # UPSERT THE GOAL FOR THE YEAR
+    cursor.execute('''
+        INSERT INTO service_lane_goals (id, service_lane_id, year, target_goal)
+        VALUES (%s, %s, %s, %s)
+        ON CONFLICT (service_lane_id, year) DO UPDATE SET target_goal = EXCLUDED.target_goal
+    ''', (str(uuid.uuid4()), service_id, year, s.target_goal))
+
     cursor.connection.commit()
 
     log_audit_event(
@@ -89,6 +109,7 @@ def update_service(service_id: str, s: ServiceLaneBase, background_tasks: Backgr
 
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Service lane updated"}
+
 
 @router.delete("/{service_id}", summary="[Admin Only]")
 def delete_service(service_id: str, background_tasks: BackgroundTasks,
@@ -108,6 +129,34 @@ def delete_service(service_id: str, background_tasks: BackgroundTasks,
 
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Service lane deleted"}
+
+
+@router.get("/{service_id}/goals")
+def get_service_goals(service_id: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+    """Fetches the complete ledger of yearly goals for a single Service Lane."""
+    cursor.execute("""
+        SELECT year, target_goal 
+        FROM service_lane_goals 
+        WHERE service_lane_id = %s 
+        ORDER BY year DESC
+    """, (service_id,))
+    return [{"year": r[0], "target_goal": r[1]} for r in cursor.fetchall()]
+
+
+@router.post("/{service_id}/goals", summary="[Admin Only]")
+def set_service_goal(service_id: str, year: int = Query(...), target_goal: int = Query(...),
+                     background_tasks: BackgroundTasks = BackgroundTasks(),
+                     current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    """Upserts a specific year's goal into the ledger."""
+    cursor.execute('''
+        INSERT INTO service_lane_goals (id, service_lane_id, year, target_goal) 
+        VALUES (%s, %s, %s, %s)
+        ON CONFLICT (service_lane_id, year) DO UPDATE SET target_goal = EXCLUDED.target_goal
+    ''', (str(uuid.uuid4()), service_id, year, target_goal))
+
+    cursor.connection.commit()
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+    return {"message": f"Goal for {year} saved successfully."}
 
 
 # -- Placeholders endopints ---

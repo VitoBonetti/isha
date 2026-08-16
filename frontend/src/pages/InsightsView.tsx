@@ -65,6 +65,7 @@ const ForecastCard = ({ title, total, breakdown, isOpen, toggleOpen }: any) => (
 export default function InsightsView() {
   const [data, setData] = useState<any>(null);
   const [targetYear, setTargetYear] = useState(new Date().getFullYear());
+  const [availableYears, setAvailableYears] = useState<number[]>([new Date().getFullYear()]);
 
   // Breakdown Toggles
   const [showSched, setShowSched] = useState(false);
@@ -78,6 +79,11 @@ export default function InsightsView() {
   const toggleService = (id: string) => setOpenServices(prev => ({ ...prev, [id]: !prev[id] }));
 
   useEffect(() => {
+    axios.get('/api/insights/available-years').then(res => setAvailableYears(res.data)).catch(console.error);
+  }, []);
+
+  useEffect(() => {
+    setData(null);
     axios.get(`/api/insights/?year=${targetYear}`).then(res => setData(res.data));
   }, [targetYear]);
 
@@ -100,7 +106,7 @@ export default function InsightsView() {
             className="w-full md:w-auto px-4 py-2.5 sm:py-2 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-xl font-black text-blue-600 outline-none shadow-sm text-center appearance-none"
             value={targetYear} onChange={e => setTargetYear(parseInt(e.target.value))}
           >
-            {[2024, 2025, 2026, 2027].map(y => <option key={y} value={y}>{y}</option>)}
+            {availableYears.map(y => <option key={y} value={y}>{y}</option>)}
           </select>
         </div>
 

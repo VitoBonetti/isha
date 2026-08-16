@@ -7,6 +7,20 @@ from routers.auth import require_admin
 router = APIRouter(prefix="/api/insights", tags=["Insights"])
 
 
+@router.get("/available-years", summary="[Admin Only]")
+def get_available_years(current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    cursor.execute("""
+        SELECT DISTINCT start_year 
+        FROM tests 
+        WHERE start_year IS NOT NULL 
+        ORDER BY start_year DESC
+    """)
+    years = [r[0] for r in cursor.fetchall()]
+    if not years:
+        years = [datetime.now().year]
+    return years
+
+
 @router.get("/", summary="[Admin Only]")
 def get_yearly_insights(year: Optional[int] = None, current_user: dict = Depends(require_admin),
                         cursor=Depends(get_db_cursor)):
@@ -126,9 +140,11 @@ def get_yearly_insights(year: Optional[int] = None, current_user: dict = Depends
 
     # ---  TARGET VS ACTUAL (ALL SERVICES & CATEGORIES) ---
     cursor.execute("""
-        SELECT id, name, target_goal, theme_color, is_active
-        FROM services_lanes ORDER BY display_order ASC, name ASC
-    """)
+            SELECT sl.id, sl.name, COALESCE(slg.target_goal, 0) as target_goal, sl.theme_color, sl.is_active
+            FROM services_lanes sl
+            LEFT JOIN service_lane_goals slg ON sl.id = slg.service_lane_id AND slg.year = %s
+            ORDER BY sl.display_order ASC, sl.name ASC
+        """, (year,))
     services_data = []
 
     for s_id, s_name, s_goal, s_color, s_active in cursor.fetchall():
@@ -149,7 +165,12 @@ def get_yearly_insights(year: Optional[int] = None, current_user: dict = Depends
         s_dict.update({"unplanned": counts[0], "planned": counts[1], "completed": counts[2]})
 
         # Categories
-        cursor.execute("SELECT id, name, target_goal FROM service_categories WHERE service_lane_id = %s", (str(s_id),))
+        cursor.execute("""
+                    SELECT c.id, c.name, COALESCE(cg.target_goal, 0) as target_goal 
+                    FROM service_categories c
+                    LEFT JOIN service_category_goals cg ON c.id = cg.category_id AND cg.year = %s
+                    WHERE c.service_lane_id = %s
+                """, (year, str(s_id)))
         cats = cursor.fetchall()
         cat_sum_goals = 0
 
