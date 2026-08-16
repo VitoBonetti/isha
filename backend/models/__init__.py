@@ -9,3 +9,4 @@ from .events import Events
 from .notifications import Notifications
 from .histories import AssetHistory, TestHistory
 from .secret_notes import SecretNotes
+from .contacts import Contacts, CountryContacts, RawAssetContacts

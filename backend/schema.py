@@ -209,3 +209,16 @@ class ServiceCategoryCreate(ServiceCategoryBase):
 
 class ServiceCategoryResponse(ServiceCategoryBase):
     id: UUID4
+
+# --- Contact mapping ---
+class ContactMappingItem(BaseModel):
+    id: str # country_id or raw_asset_id
+    is_stakeholder: bool
+    is_developer: bool
+
+class ContactSyncPayload(BaseModel):
+    contact_id: Optional[str] = None
+    email: EmailStr
+    full_name: Optional[str] = None
+    countries: List[ContactMappingItem] = []
+    assets: List[ContactMappingItem] = []

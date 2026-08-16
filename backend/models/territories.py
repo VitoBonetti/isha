@@ -41,3 +41,4 @@ class Country(Base):
     regions = relationship("Region", back_populates="countries")
     raw_assets = relationship("RawAssets", back_populates="countries")
     assets = relationship("Assets", back_populates="countries")
+    contacts = relationship("CountryContacts", back_populates="country", cascade="all, delete-orphan")

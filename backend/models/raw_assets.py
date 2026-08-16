@@ -47,6 +47,7 @@ class RawAssets(Base):
     asset_history = relationship("AssetHistory", back_populates="raw_assets", cascade="all, delete-orphan")
     snow_metadata = relationship("RawAssetsSnowMetadata", back_populates="raw_asset", uselist=False,
                                  cascade="all, delete-orphan")
+    contacts = relationship("RawAssetContacts", back_populates="raw_asset", cascade="all, delete-orphan")
 
 
 class RawAssetsSnowMetadata(Base):

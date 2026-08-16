@@ -853,6 +853,7 @@ def get_active_asset_pool(year: Optional[int] = None, current_user: dict = Depen
         SELECT a.id, 
             a.raw_asset_id, 
             r.name, 
+            r.country_id,
             c.name as country, 
             s.name as service_name, 
             cat.name as category_name, 

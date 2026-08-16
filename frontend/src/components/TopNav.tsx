@@ -135,7 +135,7 @@ export default function TopNav() {
           <div className="relative" ref={settingsRef}>
             <button
               onClick={() => setIsSettingsOpen(!isSettingsOpen)}
-              className={`flex items-center gap-1.5 ${['/settings', '/raw', '/assets', '/countries', '/insights'].some(p => currentPath.startsWith(p)) ? "text-slate-900 dark:text-zinc-100 px-4 py-1.5 rounded-full bg-slate-200/50 dark:bg-zinc-800/50 border border-slate-300/50 dark:border-zinc-700/50" : "text-slate-500 dark:text-zinc-400 px-4 py-1.5 rounded-full border border-transparent hover:text-slate-900 dark:hover:text-zinc-100 transition-colors"}`}
+              className={`flex items-center gap-1.5 ${['/settings', '/raw', '/assets', '/countries', '/insights', '/contacts'].some(p => currentPath.startsWith(p)) ? "text-slate-900 dark:text-zinc-100 px-4 py-1.5 rounded-full bg-slate-200/50 dark:bg-zinc-800/50 border border-slate-300/50 dark:border-zinc-700/50" : "text-slate-500 dark:text-zinc-400 px-4 py-1.5 rounded-full border border-transparent hover:text-slate-900 dark:hover:text-zinc-100 transition-colors"}`}
             >
               Settings <ChevronDown size={14} className={`transition-transform ${isSettingsOpen ? 'rotate-180' : ''}`} />
             </button>
@@ -144,6 +144,7 @@ export default function TopNav() {
               <div className="absolute left-0 top-full mt-2 w-48 bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-xl shadow-xl py-2 animate-in fade-in zoom-in-95 overflow-hidden">
                 <Link to="/raw" onClick={() => setIsSettingsOpen(false)} className="block px-4 py-2 text-sm font-medium text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors">Raw Data Lab</Link>
                 <Link to="/assets" onClick={() => setIsSettingsOpen(false)} className="block px-4 py-2 text-sm font-medium text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors">Active Pool</Link>
+                <Link to="/contacts" onClick={() => setIsSettingsOpen(false)} className="block px-4 py-2 text-sm font-medium text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors">Contacts</Link>
                 <Link to="/countries" onClick={() => setIsSettingsOpen(false)} className="block px-4 py-2 text-sm font-medium text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors">Analytics</Link>
                 <Link to="/insights" onClick={() => setIsSettingsOpen(false)} className="block px-4 py-2 text-sm font-medium text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors">Insights</Link>
                 <div className="h-px bg-slate-100 dark:bg-zinc-800 my-1"></div>
@@ -277,6 +278,7 @@ export default function TopNav() {
               <span className="text-[10px] font-extrabold text-slate-400 dark:text-zinc-500 uppercase tracking-wider px-4 mb-1">Admin Settings</span>
               <Link to="/raw" className={mobileNavClass("/raw")}>Raw Data Lab</Link>
               <Link to="/assets" className={mobileNavClass("/assets")}>Active Pool</Link>
+              <Link to="/contacts" className={mobileNavClass("/contacts")}>Contacts</Link>
               <Link to="/countries" className={mobileNavClass("/countries")}>Analytics</Link>
               <Link to="/insights" className={mobileNavClass("/insights")}>Insights</Link>
               <Link to="/settings" className={mobileNavClass("/settings")}>System Settings</Link>

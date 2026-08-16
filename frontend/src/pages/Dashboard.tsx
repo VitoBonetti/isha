@@ -4,7 +4,7 @@ import { useAppContext } from '../context/AppContext';
 import TopNav from '../components/TopNav';
 import {
   CalendarDays, Palmtree, ChartNoAxesCombined, Database,
-  Server, ShieldAlert, LineChart, Settings, ChevronRight
+  Server, ShieldAlert, LineChart, Settings, ChevronRight, Users
 } from 'lucide-react';
 
 interface Feature {
@@ -45,6 +45,7 @@ export default function Dashboard() {
       features: [
         { title: 'Raw Data Lab', desc: 'Data staging, sheet importation, and asset promotion pipeline.', icon: <Database size={24} />, view: 'raw', color: 'text-slate-600 dark:text-slate-400', allowedRoles: ['admin'] },
         { title: 'Active Pool', desc: 'Centralized inventory of applications prioritized for testing.', icon: <Server size={24} />, view: 'assets', color: 'text-emerald-500', allowedRoles: ['admin', 'read_only'] },
+        { title: 'Contacts', desc: 'Manage stakeholders and developers across all countries and assets.', icon: <Users size={24} />, view: 'contacts', color: 'text-blue-500', allowedRoles: ['admin'] }
       ]
     },
     {
