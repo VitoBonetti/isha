@@ -122,3 +122,31 @@ def delete_global_contact(contact_id: str, background_tasks: BackgroundTasks = B
 
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
     return {"message": "Global contact completely purged."}
+
+
+@router.get("/raw-asset/{raw_asset_id}", summary="[Admin Only] Get Asset Contacts")
+def get_asset_contacts(raw_asset_id: str, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    cursor.execute("""
+        SELECT c.id as contact_id, rac.id as mapping_id, c.email, c.full_name, 
+               rac.is_stakeholder, rac.is_developer
+        FROM raw_asset_contacts rac
+        JOIN contacts c ON rac.contact_id = c.id
+        WHERE rac.raw_asset_id = %s
+        ORDER BY c.email ASC
+    """, (raw_asset_id,))
+    columns = [desc[0] for desc in cursor.description]
+    return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+
+@router.get("/country/{country_id}", summary="[Admin Only] Get Country Contacts")
+def get_country_contacts(country_id: str, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    cursor.execute("""
+        SELECT c.id as contact_id, cc.id as mapping_id, c.email, c.full_name, 
+               cc.is_stakeholder, cc.is_developer
+        FROM country_contacts cc
+        JOIN contacts c ON cc.contact_id = c.id
+        WHERE cc.country_id = %s
+        ORDER BY c.email ASC
+    """, (country_id,))
+    columns = [desc[0] for desc in cursor.description]
+    return [dict(zip(columns, row)) for row in cursor.fetchall()]

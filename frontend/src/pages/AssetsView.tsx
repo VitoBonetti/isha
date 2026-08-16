@@ -14,6 +14,7 @@ interface PoolAsset {
   country?: string;
   service_name?: string;
   is_assigned: boolean;
+  in_backlog: boolean;
   duplicate_allowed: boolean;
   completed_count: number;
   is_archived_this_year: boolean;
@@ -238,8 +239,12 @@ export default function AssetsView() {
     else if (sortBy === "country") { aVal = a.country || ""; bVal = b.country || ""; }
     else if (sortBy === "service") { aVal = a.service_name || ""; bVal = b.service_name || ""; }
     else if (sortBy === "status") {
-      aVal = a.is_assigned ? (a.duplicate_allowed ? "active (multi)" : "active test") : "ready";
-      bVal = b.is_assigned ? (b.duplicate_allowed ? "active (multi)" : "active test") : "ready";
+      if (!a.is_assigned) aVal = "ready";
+      else if (a.in_backlog) aVal = "backlog";
+      else aVal = a.duplicate_allowed ? "active (multi)" : "active test";
+      if (!b.is_assigned) bVal = "ready";
+      else if (b.in_backlog) bVal = "backlog";
+      else bVal = b.duplicate_allowed ? "active (multi)" : "active test";
     }
 
     if (aVal.toLowerCase() < bVal.toLowerCase()) return sortDir === "asc" ? -1 : 1;
@@ -252,8 +257,8 @@ export default function AssetsView() {
 
   const stats = {
     total: assets.length,
-    assigned: assets.filter(a => a.is_assigned).length,
-    unassigned: assets.filter(a => !a.is_assigned || a.duplicate_allowed).length,
+    assigned: assets.filter(a => a.is_assigned && !a.in_backlog).length,
+    unassigned: assets.filter(a => !a.is_assigned || a.in_backlog || a.duplicate_allowed).length,
     completed: assets.filter(a => a.completed_count > 0).length
   };
 
@@ -533,13 +538,17 @@ export default function AssetsView() {
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="flex flex-col gap-1.5 items-start">
                             {asset.is_assigned ? (
-                              asset.duplicate_allowed ? (
-                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-200">
-                                  <div className="w-1.5 h-1.5 rounded-full bg-purple-500 animate-pulse"></div> Active (Multi)
+                              asset.in_backlog ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-200 w-fit">
+                                  Backlog
+                                </span>
+                              ) : asset.duplicate_allowed ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-200 w-fit">
+                                  <div className="w-1.5 h-1.5 rounded-full bg-purple-500 animate-pulse"></div> Multi
                                 </span>
                               ) : (
-                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200">
-                                  <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></div> Active Test
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 w-fit">
+                                  <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></div> Active
                                 </span>
                               )
                             ) : (

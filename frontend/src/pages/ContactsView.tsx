@@ -388,11 +388,11 @@ export default function ContactsView() {
           )}
 
           {filteredContacts.length > 0 && (
-            <div className="px-4 py-3 border-t border-slate-200 flex justify-between items-center bg-slate-50 mt-auto">
-              <span className="text-xs md:text-sm text-slate-500">Page {currentPage} of {totalPages}</span>
+            <div className="px-4 py-3 border-t border-slate-200 dark:border-zinc-800 flex justify-between items-center bg-slate-50 dark:bg-zinc-950/50 mt-auto">
+              <span className="text-xs md:text-sm text-slate-500 dark:text-zinc-400">Page {currentPage} of {totalPages}</span>
               <div className="flex gap-2">
-                <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="px-3 py-1.5 border border-slate-300 rounded-lg disabled:opacity-50 hover:bg-white text-sm font-medium"><ChevronLeft size={16}/></button>
-                <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages} className="px-3 py-1.5 border border-slate-300 rounded-lg disabled:opacity-50 hover:bg-white text-sm font-medium"><ChevronRight size={16}/></button>
+                <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="px-3 py-1.5 border border-slate-300 dark:border-zinc-700 rounded-lg disabled:opacity-50 hover:bg-white dark:hover:bg-zinc-800 transition-colors text-sm font-medium text-slate-700 dark:text-zinc-300"><ChevronLeft size={16}/></button>
+                <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages} className="px-3 py-1.5 border border-slate-300 dark:border-zinc-700 rounded-lg disabled:opacity-50 hover:bg-white dark:hover:bg-zinc-800 transition-colors text-sm font-medium text-slate-700 dark:text-zinc-300"><ChevronRight size={16}/></button>
               </div>
             </div>
           )}

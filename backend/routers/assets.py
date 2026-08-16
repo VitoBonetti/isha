@@ -870,6 +870,12 @@ def get_active_asset_pool(year: Optional[int] = None, current_user: dict = Depen
                     )
             ) as is_assigned,
             (
+                SELECT COUNT(*) > 0 
+                FROM test_assets ta 
+                JOIN tests t ON ta.test_id = t.id 
+                WHERE ta.asset_id = a.id AND t.stages::text = 'NOT_PLANNED'
+            ) as in_backlog,
+            (
                 SELECT COUNT(*)
                 FROM test_assets ta
                 JOIN tests t ON ta.test_id = t.id

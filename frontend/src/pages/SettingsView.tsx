@@ -301,7 +301,7 @@ export default function SettingsView() {
     return sortDir === 'asc' ? res : -res;
   });
 
-  const sortedCountries = [...(countries || [])].sort((a, b) => {
+  const sortedCountries = [...(displayCountries || [])].sort((a, b) => {
      let res = 0;
      if (sortBy === 'code') res = (a.code || '').localeCompare(b.code || '');
      else if (sortBy === 'name') res = (a.name || '').localeCompare(b.name || '');
