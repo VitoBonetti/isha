@@ -30,11 +30,14 @@ export default function AnalyticsDashboard() {
   // Dropdown Data
   const [countries, setCountries] = useState<any[]>([]);
   const [regions, setRegions] = useState<any[]>([]);
+  const [services, setServices] = useState<any[]>([]);
+  const [availableYears, setAvailableYears] = useState<number[]>([new Date().getFullYear()]);
 
   // Filter States
   const [targetYear, setTargetYear] = useState(new Date().getFullYear());
   const [selectedRegion, setSelectedRegion] = useState("");
   const [selectedCountry, setSelectedCountry] = useState("");
+  const [selectedService, setSelectedService] = useState("");
 
   // Chart Interaction State
   const [fillArea, setFillArea] = useState(false);
@@ -42,6 +45,8 @@ export default function AnalyticsDashboard() {
   useEffect(() => {
     axios.get('/api/countries/').then(res => setCountries(res.data)).catch(console.error);
     axios.get('/api/regions/').then(res => setRegions(res.data)).catch(console.error);
+    axios.get('/api/services/').then(res => setServices(res.data)).catch(console.error);
+    axios.get('/api/countries/available-years').then(res => setAvailableYears(res.data)).catch(console.error);
   }, []);
 
   useEffect(() => {
@@ -51,6 +56,7 @@ export default function AnalyticsDashboard() {
         const params = new URLSearchParams({ year: targetYear.toString() });
         if (selectedCountry) params.set("country_id", selectedCountry);
         if (selectedRegion) params.set("region_id", selectedRegion);
+        if (selectedService) params.set("service_lane_id", selectedService); // NEW
 
         const res = await axios.get(`/api/countries/dashboard?${params.toString()}`);
         setData(res.data);
@@ -61,7 +67,7 @@ export default function AnalyticsDashboard() {
       }
     };
     fetchAnalytics();
-  }, [targetYear, selectedRegion, selectedCountry]);
+  }, [targetYear, selectedRegion, selectedCountry, selectedService]);;
 
   // Dynamic Title Logic
   const countryName = countries.find(c => c.id === selectedCountry)?.name;
@@ -99,8 +105,21 @@ export default function AnalyticsDashboard() {
             <p className="text-sm md:text-base text-slate-500 dark:text-zinc-400 mt-1 md:mt-2 font-medium">Aggregated asset volume and pentest coverage.</p>
           </div>
 
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 p-2 rounded-xl shadow-sm w-full md:w-auto">
-            <div className="flex items-center gap-2 border-b sm:border-b-0 sm:border-r border-slate-100 dark:border-zinc-800 pb-2 sm:pb-0 pr-0 sm:pr-3">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 p-2 rounded-xl shadow-sm w-full md:w-auto overflow-x-auto">
+
+            <div className="flex items-center gap-2 border-b sm:border-b-0 sm:border-r border-slate-100 dark:border-zinc-800 pb-2 sm:pb-0 pr-0 sm:pr-3 shrink-0">
+              <Layers size={16} className="text-slate-400 ml-2 shrink-0" />
+              <select
+                className="bg-transparent text-sm font-bold text-slate-700 dark:text-zinc-300 outline-none cursor-pointer w-full sm:w-auto appearance-none"
+                value={selectedService}
+                onChange={(e) => setSelectedService(e.target.value)}
+              >
+                <option value="">All Services</option>
+                {services.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </div>
+
+            <div className="flex items-center gap-2 border-b sm:border-b-0 sm:border-r border-slate-100 dark:border-zinc-800 pb-2 sm:pb-0 pr-0 sm:pr-3 shrink-0">
               <Map size={16} className="text-slate-400 ml-2 shrink-0" />
               <select
                 className="bg-transparent text-sm font-bold text-slate-700 dark:text-zinc-300 outline-none cursor-pointer w-full sm:w-auto appearance-none"
@@ -112,7 +131,7 @@ export default function AnalyticsDashboard() {
               </select>
             </div>
 
-            <div className="flex items-center gap-2 border-b sm:border-b-0 sm:border-r border-slate-100 dark:border-zinc-800 pb-2 sm:pb-0 pr-0 sm:pr-3">
+            <div className="flex items-center gap-2 border-b sm:border-b-0 sm:border-r border-slate-100 dark:border-zinc-800 pb-2 sm:pb-0 pr-0 sm:pr-3 shrink-0">
               <MapPin size={16} className="text-slate-400 ml-2 shrink-0" />
               <select
                 className="bg-transparent text-sm font-bold text-slate-700 dark:text-zinc-300 outline-none cursor-pointer w-full sm:w-32 truncate appearance-none"
@@ -125,11 +144,11 @@ export default function AnalyticsDashboard() {
             </div>
 
             <select
-              className="bg-slate-100 dark:bg-zinc-800 border-none text-blue-600 dark:text-blue-400 font-black text-sm px-3 py-2 sm:py-1.5 rounded-lg outline-none cursor-pointer w-full sm:w-auto text-center"
+              className="bg-slate-100 dark:bg-zinc-800 border-none text-blue-600 dark:text-blue-400 font-black text-sm px-3 py-2 sm:py-1.5 rounded-lg outline-none cursor-pointer w-full sm:w-auto text-center shrink-0"
               value={targetYear}
               onChange={(e) => setTargetYear(parseInt(e.target.value))}
             >
-              {[2024, 2025, 2026, 2027].map(y => <option key={y} value={y}>{y}</option>)}
+              {availableYears.map(y => <option key={y} value={y}>{y}</option>)}
             </select>
           </div>
         </div>

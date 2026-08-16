@@ -129,17 +129,29 @@ def get_country_analytics(year: Optional[int] = None, current_user: dict = Depen
     return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
 
+@router.get("/available-years", summary="[Admin Only]")
+def get_available_years(current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    cursor.execute("""
+        SELECT DISTINCT start_year 
+        FROM tests 
+        WHERE start_year IS NOT NULL 
+        ORDER BY start_year DESC
+    """)
+    years = [r[0] for r in cursor.fetchall()]
+    if not years:
+        years = [datetime.now().year]
+    return years
+
+
 @router.get("/dashboard", summary="[Admin Only]")
 def get_dashboard_analytics(year: Optional[int] = None, country_id: Optional[str] = None,
-                            region_id: Optional[str] = None, current_user: dict = Depends(require_admin),
+                            region_id: Optional[str] = None, service_lane_id: Optional[str] = None,
+                            current_user: dict = Depends(require_admin),
                             cursor=Depends(get_db_cursor)):
     if not year:
         year = datetime.now().year
 
-    # SQL Parameters
-    params = {'year': year, 'cid': country_id, 'rid': region_id}
-
-    # Metrics
+    # --- KPI QUERY ---
     kpi_query = f"""
         SELECT 
             COUNT(DISTINCT ra.id) as raw,
@@ -153,7 +165,8 @@ def get_dashboard_analytics(year: Optional[int] = None, country_id: Optional[str
                 OR (t.stages::text IN ('NOT_PLANNED', 'SCHEDULED', 'IN_PROGRESS')) 
                 THEN t.id 
             END) as total_tests_year,
-            COUNT(DISTINCT CASE WHEN t.stages::text = 'STOPPED' THEN t.id END) as stopped
+            -- SCOPED STOPPED TESTS BY YEAR
+            COUNT(DISTINCT CASE WHEN t.stages::text = 'STOPPED' AND t.start_year = %s THEN t.id END) as stopped
         FROM raw_assets ra
         {'LEFT JOIN countries c ON ra.country_id = c.id' if region_id else ''}
         LEFT JOIN assets a ON ra.id = a.raw_asset_id
@@ -162,7 +175,7 @@ def get_dashboard_analytics(year: Optional[int] = None, country_id: Optional[str
         WHERE 1=1
     """
 
-    kpi_params = [year, year, year, year]
+    kpi_params = [year, year, year, year, year] # 5 parameters now
 
     if country_id:
         kpi_query += " AND ra.country_id = %s"
@@ -170,22 +183,19 @@ def get_dashboard_analytics(year: Optional[int] = None, country_id: Optional[str
     if region_id:
         kpi_query += " AND c.region_id = %s"
         kpi_params.append(region_id)
+    if service_lane_id:
+        kpi_query += " AND t.service_lane_id = %s"
+        kpi_params.append(service_lane_id)
 
     cursor.execute(kpi_query, tuple(kpi_params))
-
     kpi_row = cursor.fetchone()
     kpis = {
-        "raw": kpi_row[0],
-        "pool": kpi_row[1],
-        "completed": kpi_row[2],
-        "backlog": kpi_row[3],
-        "planned": kpi_row[4],
-        "true_backlog": kpi_row[5],
-        "total_tests_year": kpi_row[6],
-        "stopped": kpi_row[7]
+        "raw": kpi_row[0], "pool": kpi_row[1], "completed": kpi_row[2],
+        "backlog": kpi_row[3], "planned": kpi_row[4], "true_backlog": kpi_row[5],
+        "total_tests_year": kpi_row[6], "stopped": kpi_row[7]
     }
 
-    # pie chart service lane
+    # --- PIE CHART QUERY ---
     pie_query = f"""
         SELECT COALESCE(sl.name, 'Not Set') as name, COUNT(DISTINCT t.id) as value
         FROM tests t
@@ -197,22 +207,22 @@ def get_dashboard_analytics(year: Optional[int] = None, country_id: Optional[str
         WHERE 1=1
           AND t.stages::text != 'STOPPED'
     """
-
     pie_params = []
-
     if country_id:
         pie_query += " AND ra.country_id = %s"
         pie_params.append(country_id)
     if region_id:
         pie_query += " AND c.region_id = %s"
         pie_params.append(region_id)
+    if service_lane_id:
+        pie_query += " AND t.service_lane_id = %s"
+        pie_params.append(service_lane_id)
 
     pie_query += " GROUP BY sl.name ORDER BY value DESC"
-
     cursor.execute(pie_query, tuple(pie_params))
     pie_data = [{"name": r[0], "value": r[1]} for r in cursor.fetchall()]
 
-    # monthly trends
+    # --- TREND CHART QUERY ---
     trend_query = f"""
         SELECT 
             EXTRACT(MONTH FROM TO_DATE(t.start_year::text || '0101', 'YYYYMMDD') + ((t.start_week - 1) * 7)) as month_num,
@@ -225,18 +235,18 @@ def get_dashboard_analytics(year: Optional[int] = None, country_id: Optional[str
         WHERE t.start_year = %s 
           AND t.stages::text IN ('SCHEDULED', 'IN_PROGRESS', 'COMPLETED')
     """
-
     trend_params = [year]
-
     if country_id:
         trend_query += " AND ra.country_id = %s"
         trend_params.append(country_id)
     if region_id:
         trend_query += " AND c.region_id = %s"
         trend_params.append(region_id)
+    if service_lane_id:
+        trend_query += " AND t.service_lane_id = %s"
+        trend_params.append(service_lane_id)
 
     trend_query += " GROUP BY month_num ORDER BY month_num"
-
     cursor.execute(trend_query, tuple(trend_params))
 
     months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
