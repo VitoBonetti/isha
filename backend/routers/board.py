@@ -180,9 +180,24 @@ def get_quarterly_board(year: int, quarter: int, response: Response,
                   for r in cursor.fetchall()]
 
     # 2. Users (Pentesters) & Capacity Matrix
-    cursor.execute('SELECT id, name, role, email, base_capacity, location_id FROM users')
-    pentesters = [{"id": str(r[0]), "name": r[1], "role": r[2], "email": r[3], "capacity": r[4],
-                   "location_id": str(r[5]) if r[5] else None} for r in cursor.fetchall()]
+    cursor.execute('''
+            SELECT id, name, role, email, base_capacity, location_id, 
+                   start_week, start_year, end_week, end_year 
+            FROM users
+        ''')
+
+    pentesters = [{
+        "id": str(r[0]),
+        "name": r[1],
+        "role": r[2],
+        "email": r[3],
+        "capacity": r[4],
+        "location_id": str(r[5]) if r[5] else None,
+        "start_week": r[6],
+        "start_year": r[7],
+        "end_week": r[8],
+        "end_year": r[9]
+    } for r in cursor.fetchall()]
 
     # We pad the requested weeks to handle tests that spill over quarter/year boundaries in the UI modal
     extended_week_pairs = []
