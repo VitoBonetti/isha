@@ -3,7 +3,7 @@ from pydantic import BaseModel, EmailStr
 from typing import Optional, List
 import uuid
 from database import get_db_cursor
-from routers.auth import require_admin
+from routers.auth import require_admin, get_current_user
 from schema import ContactMappingItem, ContactSyncPayload
 from websockets_manager import manager
 from audit_logger import log_audit_event
@@ -124,8 +124,8 @@ def delete_global_contact(contact_id: str, background_tasks: BackgroundTasks = B
     return {"message": "Global contact completely purged."}
 
 
-@router.get("/raw-asset/{raw_asset_id}", summary="[Admin Only] Get Asset Contacts")
-def get_asset_contacts(raw_asset_id: str, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+@router.get("/raw-asset/{raw_asset_id}", summary="Get Asset Contacts")
+def get_asset_contacts(raw_asset_id: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
     cursor.execute("""
         SELECT c.id as contact_id, rac.id as mapping_id, c.email, c.full_name, 
                rac.is_stakeholder, rac.is_developer
@@ -138,8 +138,8 @@ def get_asset_contacts(raw_asset_id: str, current_user: dict = Depends(require_a
     return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
 
-@router.get("/country/{country_id}", summary="[Admin Only] Get Country Contacts")
-def get_country_contacts(country_id: str, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+@router.get("/country/{country_id}", summary="Get Country Contacts")
+def get_country_contacts(country_id: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
     cursor.execute("""
         SELECT c.id as contact_id, cc.id as mapping_id, c.email, c.full_name, 
                cc.is_stakeholder, cc.is_developer

@@ -11,7 +11,7 @@ import TopNav from '../components/TopNav';
 import { useAppContext } from '../context/AppContext';
 import { getWeekDateRange } from '../utils/helpers';
 import type { BoardData, Test } from '../types/board';
-import { ChevronLeft, ChevronRight, Search, X, History, Edit2, Trash2, Plus, Users, CheckCircle, XCircle, CalendarOff, User, LockOpen, Lock, FolderOpen, FolderPlus, CircleQuestionMark, Calendar, CalendarPlus, Layers, Presentation, FileText, ListChecks } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Search, X, History, Edit2, Trash2, Plus, Users, CheckCircle, XCircle, CalendarOff, User, LockOpen, Lock, FolderOpen, FolderPlus, CircleQuestionMark, Calendar, CalendarPlus, Layers, Presentation, FileText, ListChecks, Info } from 'lucide-react';
 
 interface PlannerViewProps {
   onlineUsers: string[];
@@ -426,7 +426,7 @@ export default function PlannerView({
                                                             <button title="Mark Done" className="p-1.5 flex items-center justify-center rounded text-emerald-500 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 transition-colors" onClick={() => handleCompleteTest(test.id)}><CheckCircle size={14}/></button>
                                                             <button title="Stop Test" className="p-1.5 flex items-center justify-center rounded text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors" onClick={() => handleMarkUnable(test.id)}><XCircle size={14}/></button>
                                                             <button title="Unschedule" className="p-1.5 flex items-center justify-center rounded text-amber-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/30 transition-colors" onClick={() => handleUnscheduleTest(test.id)}><CalendarOff size={14}/></button>
-                                                            <button title="Edit" className="p-1.5 flex items-center justify-center rounded text-slate-400 hover:text-slate-700 dark:hover:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-700 transition-colors" onClick={() => openEditModal(test)}><Edit2 size={14}/></button>
+                                                            <button title="Edit" className="p-1.5 flex items-center justify-center rounded text-slate-400 hover:text-slate-700 dark:hover:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-700 transition-colors" onClick={(e) => { e.stopPropagation(); navigate(`/tests/${test.id}`, { state: { from: '/planner', label: 'Planner' } }); }}><Edit2 size={14}/></button>
                                                             <button title="Toggle Tentative / TBC" className="p-1.5 flex items-center justify-center rounded text-amber-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/30 transition-colors" onClick={(e) => { e.stopPropagation(); handleToggleTentative(test.id); }}><CircleQuestionMark size={14}/></button>
                                                           </>
                                                         )}
@@ -467,40 +467,52 @@ export default function PlannerView({
                                                       </button>
                                                     )}
                                                   </div>
-                                                  {service?.auto_provision_workspace && (
-                                                    <div className="mt-1 pt-1 border-t border-slate-200 dark:border-zinc-600 grid grid-cols-3 gap-1">
-                                                      <button
-                                                        title="Create Presentation"
-                                                        className="p-1.5 flex items-center justify-center rounded text-purple-500 hover:text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-900/30 transition-colors"
-                                                        onClick={(e) => {
-                                                          e.stopPropagation();
-                                                          handleCreatePresentation(test);
-                                                        }}
-                                                      >
-                                                        <Presentation size={14}/>
-                                                      </button>
-                                                      <button
-                                                        title="Generate PDF"
-                                                        className="p-1.5 flex items-center justify-center rounded text-rose-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/30 transition-colors"
-                                                        onClick={(e) => {
-                                                          e.stopPropagation();
-                                                          handleGenerateReport(test);
-                                                        }}
-                                                      >
-                                                        <FileText size={14}/>
-                                                      </button>
-                                                      <button
-                                                        title="Verify Findings"
-                                                        className="p-1.5 flex items-center justify-center rounded text-teal-500 hover:text-teal-600 hover:bg-teal-50 dark:hover:bg-teal-900/30 transition-colors"
-                                                        onClick={(e) => {
-                                                          e.stopPropagation();
-                                                          toast.error("Verify Findings is still under development.");
-                                                        }}
-                                                      >
-                                                        <ListChecks size={14}/>
-                                                      </button>
-                                                    </div>
-                                                  )}
+                                                  <div className={`mt-1 grid gap-1 ${service?.auto_provision_workspace ? 'grid-cols-4' : 'grid-cols-1'}`}>
+                                                    <button
+                                                      title="View Details"
+                                                      className="p-1.5 flex items-center justify-center rounded text-cyan-500 hover:text-cyan-600 hover:bg-cyan-50 dark:hover:bg-cyan-900/30 transition-colors"
+                                                      onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        navigate(`/tests/${test.id}`, { state: { from: '/planner', label: 'Planner' } });
+                                                      }}
+                                                    >
+                                                      <Info size={14}/>
+                                                    </button>
+                                                    {service?.auto_provision_workspace && (
+                                                      <>
+                                                        <button
+                                                          title="Create Presentation"
+                                                          className="p-1.5 flex items-center justify-center rounded text-purple-500 hover:text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-900/30 transition-colors"
+                                                          onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            handleCreatePresentation(test);
+                                                          }}
+                                                        >
+                                                          <Presentation size={14}/>
+                                                        </button>
+                                                        <button
+                                                          title="Generate PDF"
+                                                          className="p-1.5 flex items-center justify-center rounded text-rose-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/30 transition-colors"
+                                                          onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            handleGenerateReport(test);
+                                                          }}
+                                                        >
+                                                          <FileText size={14}/>
+                                                        </button>
+                                                        <button
+                                                          title="Verify Findings"
+                                                          className="p-1.5 flex items-center justify-center rounded text-teal-500 hover:text-teal-600 hover:bg-teal-50 dark:hover:bg-teal-900/30 transition-colors"
+                                                          onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            toast.error("Verify Findings is still under development.");
+                                                          }}
+                                                        >
+                                                          <ListChecks size={14}/>
+                                                        </button>
+                                                      </>
+                                                    )}
+                                                  </div>
                                                 </div>
                                               </div>
                                               )}
@@ -672,8 +684,8 @@ export default function PlannerView({
                                 <button title="Mark Done" className="p-2 flex items-center justify-center rounded-lg text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20" onClick={() => handleCompleteTest(test.id)}><CheckCircle size={14}/></button>
                                 <button title="Stop Test" className="p-2 flex items-center justify-center rounded-lg text-red-600 bg-red-50 dark:bg-red-900/20" onClick={() => handleMarkUnable(test.id)}><XCircle size={14}/></button>
                                 <button title="Unschedule" className="p-2 flex items-center justify-center rounded-lg text-amber-600 bg-amber-50 dark:bg-amber-900/20" onClick={() => handleUnscheduleTest(test.id)}><CalendarOff size={14}/></button>
-                                <button title="Edit" className="p-2 flex items-center justify-center rounded-lg text-slate-500 bg-slate-100 dark:bg-zinc-800" onClick={() => openEditModal(test)}><Edit2 size={14}/></button>
-                                <button title="Toggle Tentative" className="p-2 flex items-center justify-center rounded-lg text-amber-500 bg-amber-50 dark:bg-amber-900/20" onClick={() => handleToggleTentative(test.id)}><CircleQuestionMark size={14}/></button>
+                                <button title="Edit" className="p-2 flex items-center justify-center rounded-lg text-slate-500 bg-slate-100 dark:bg-zinc-800" onClick={(e) => { e.stopPropagation(); navigate(`/tests/${test.id}`, { state: { from: '/planner', label: 'Planner' } }); }}><Edit2 size={14}/></button>
+                                <button title="Toggle Tentative" className="p-2 flex items-center justify-center rounded-lg text-amber-500 bg-amber-50 dark:bg-amber-900/20" onClick={(e) => { e.stopPropagation(); handleToggleTentative(test.id); }}><CircleQuestionMark size={14}/></button>
                               </>
                             )}
                           </>
@@ -682,7 +694,7 @@ export default function PlannerView({
                           <a href={test.drive_folder_url} target="_blank" rel="noopener noreferrer" className="p-2 flex items-center justify-center rounded-lg text-blue-600 bg-blue-50 dark:bg-blue-900/20"><FolderOpen size={14} /></a>
                         ) : (
                           currentUser?.role === 'admin' && selectedMobileService?.auto_provision_workspace && (
-                            <button className="p-2 flex items-center justify-center rounded-lg text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20" onClick={() => handleCreateWorkspace(test.id)}><FolderPlus size={14} /></button>
+                            <button className="p-2 flex items-center justify-center rounded-lg text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20" onClick={(e) => { e.stopPropagation(); handleCreateWorkspace(test.id); }}><FolderPlus size={14} /></button>
                           )
                         )}
                         {(test.has_secret || (selectedMobileService?.is_active && selectedMobileService?.auto_provision_workspace)) && (
@@ -690,11 +702,20 @@ export default function PlannerView({
                             {test.has_secret ? <Lock size={14} /> : <LockOpen size={14} />}
                           </button>
                         )}
+
+                        <button
+                          title="View Details"
+                          className="p-2 flex items-center justify-center rounded-lg text-cyan-600 bg-cyan-50 dark:bg-cyan-900/20"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            navigate(`/tests/${test.id}`, { state: { from: '/planner', label: 'Planner' } });
+                          }}
+                        >
+                          <Info size={14}/>
+                        </button>
+
                         {selectedMobileService?.auto_provision_workspace && (
                           <>
-                            {/* Divider to force a new line */}
-                            <div className="w-full h-px bg-slate-100 dark:bg-zinc-800 my-1"></div>
-
                             <button
                               title="Create Presentation"
                               className="p-2 flex items-center justify-center rounded-lg text-purple-600 bg-purple-50 dark:bg-purple-900/20"
@@ -817,7 +838,7 @@ export default function PlannerView({
 
                                         {/* Desktop & Mobile Shared Action Buttons */}
                                         <button title="History" className="p-1.5 text-blue-500 bg-blue-50 dark:bg-blue-900/20 md:bg-transparent md:hover:bg-blue-50 rounded transition-colors" onClick={() => setHistoryTest(test)}><History size={12} /></button>
-                                        <button title="Edit Settings" className="p-1.5 text-slate-500 bg-slate-100 dark:bg-zinc-800 md:bg-transparent md:hover:bg-slate-100 rounded transition-colors" onClick={() => openEditModal(test)}><Edit2 size={12} /></button>
+                                        <button title="Edit Settings" className="p-1.5 text-slate-500 bg-slate-100 dark:bg-zinc-800 md:bg-transparent md:hover:bg-slate-100 rounded transition-colors" onClick={() => navigate(`/tests/${test.id}`, { state: { from: '/planner', label: 'Planner' } })}><Edit2 size={12} /></button>
                                         <button title="Delete Permanently" className="p-1.5 text-red-500 bg-red-50 dark:bg-red-900/20 md:bg-transparent md:hover:bg-red-50 rounded transition-colors" onClick={() => handleDeleteTest(test.id)}><Trash2 size={12} /></button>
                                       </div>
                                     )}

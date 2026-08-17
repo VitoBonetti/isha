@@ -2,11 +2,10 @@ import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import axios from "axios";
 import TopNav from "../components/TopNav";
-import TestHistoryModal from "../components/Modals/TestHistoryModal";
 import SecureNoteModal from "../components/Modals/SecureNoteModal";
 import ConfirmModal from "../components/Modals/ConfirmModal";
 import toast, { Toaster } from "react-hot-toast";
-import { Search, ShieldAlert, Calendar, ChevronsUpDown, ChevronUp, ChevronDown, LockOpen, Lock, FolderOpen, FolderPlus, History } from "lucide-react";
+import { Search, ShieldAlert, Calendar, ChevronsUpDown, ChevronUp, ChevronDown, LockOpen, Lock, FolderOpen, FolderPlus, History, Database } from "lucide-react";
 import { useAppContext } from "../context/AppContext";
 import type { Test } from "../types/board";
 
@@ -20,8 +19,6 @@ export default function TestsView() {
   const [filterYear, setFilterYear] = useState<string>("All");
   const [filterService, setFilterService] = useState<string>("All");
   const [filterStatus, setFilterStatus] = useState<string>("All");
-
-  const [historyTest, setHistoryTest] = useState<Test | null>(null);
 
   // Pagination State
   const [page, setPage] = useState(1);
@@ -149,7 +146,6 @@ export default function TestsView() {
       <TopNav />
       <Toaster position="bottom-right" />
 
-      {historyTest && <TestHistoryModal test={historyTest} onClose={() => setHistoryTest(null)} />}
       <ConfirmModal
         isOpen={!!secretConfirmOpen}
         variant="secure"
@@ -241,20 +237,14 @@ export default function TestsView() {
                   {paginatedTests.map((test) => (
                     <tr key={test.id} className="hover:bg-slate-50 dark:hover:bg-zinc-800/30 transition-colors">
                       <td className="p-4 max-w-[200px]">
-                        {test.raw_asset_id ? (
-                          <Link
-                            to={`/raw/${test.raw_asset_id}`}
-                            state={{ from: '/tests', label: 'Test Registry' }}
-                            className="font-bold text-blue-600 dark:text-blue-400 hover:underline text-left truncate block w-full"
-                            title={`View Asset: ${test.name}`}
-                          >
-                            {test.name}
-                          </Link>
-                        ) : (
-                          <span className="font-bold text-slate-900 dark:text-zinc-100 text-left truncate block w-full">
-                            {test.name}
-                          </span>
-                        )}
+                        <Link
+                          to={`/tests/${test.id}`}
+                          state={{ from: '/tests', label: 'Test Registry' }}
+                          className="font-bold text-blue-600 dark:text-blue-400 hover:underline text-left truncate block w-full"
+                          title={`View Test Details: ${test.name}`}
+                        >
+                          {test.name}
+                        </Link>
                       </td>
                       <td className="p-4">
                         <span className="font-medium text-slate-700 dark:text-zinc-300 whitespace-nowrap">{test.service_lane_name || 'N/A'}</span>
@@ -277,13 +267,16 @@ export default function TestsView() {
                       </td>
                       <td className="p-4 text-center">
                         <div className="flex items-center justify-end gap-1">
-                          <button
-                            onClick={() => setHistoryTest(test)}
-                            className="p-1.5 text-blue-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded transition-colors flex items-center"
-                            title="View History"
-                          >
-                            <History size={14} />
-                          </button>
+                          {currentUser?.role === 'admin' && test.raw_asset_id && (
+                            <Link
+                              to={`/raw/${test.raw_asset_id}`}
+                              state={{ from: '/tests', label: 'Test Registry' }}
+                              className="p-1.5 text-emerald-500 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 rounded transition-colors flex items-center"
+                              title="View Raw Asset Info"
+                            >
+                              <Database size={14} />
+                            </Link>
+                          )}
                           {test.drive_folder_url ? (
                             <a
                               href={test.drive_folder_url}
@@ -327,29 +320,26 @@ export default function TestsView() {
                 <div key={test.id} className="p-4 flex flex-col gap-3">
                   <div className="flex justify-between items-start gap-2">
                     {/* 1. TEST NAME: Now a link to the asset details */}
-                    {test.raw_asset_id ? (
-                      <Link
-                        to={`/raw/${test.raw_asset_id}`}
-                        state={{ from: '/tests', label: 'Test Registry' }}
-                        className="font-bold text-sm text-blue-600 dark:text-blue-400 hover:underline text-left break-words"
-                      >
-                        {test.name}
-                      </Link>
-                    ) : (
-                      <span className="font-bold text-sm text-slate-900 dark:text-zinc-100 text-left break-words">
-                        {test.name}
-                      </span>
-                    )}
+                    <Link
+                      to={`/tests/${test.id}`}
+                      state={{ from: '/tests', label: 'Test Registry' }}
+                      className="font-bold text-sm text-blue-600 dark:text-blue-400 hover:underline text-left break-words"
+                    >
+                      {test.name}
+                    </Link>
 
                     <div className="flex shrink-0 gap-1">
                       {/* 2. NEW HISTORY BUTTON */}
-                      <button
-                        onClick={() => setHistoryTest(test)}
-                        className="p-1.5 text-blue-500 bg-blue-50 dark:bg-blue-900/20 rounded transition-colors"
-                        title="View History"
-                      >
-                        <History size={14} />
-                      </button>
+                      {currentUser?.role === 'admin' && test.raw_asset_id && (
+                        <Link
+                          to={`/raw/${test.raw_asset_id}`}
+                          state={{ from: '/tests', label: 'Test Registry' }}
+                          className="p-1.5 text-emerald-500 bg-emerald-50 dark:bg-emerald-900/20 rounded transition-colors"
+                          title="View Raw Asset Info"
+                        >
+                          <Database size={14} />
+                        </Link>
+                      )}
 
                       {test.drive_folder_url ? (
                         <a

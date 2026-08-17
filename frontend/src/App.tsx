@@ -12,6 +12,7 @@ import Planner from "./pages/Planner";
 import CountriesView from "./pages/CountriesView";
 import InsightsView from "./pages/InsightsView";
 import ContactsView from './pages/ContactsView';
+import TestDetailsView from "./pages/TestDetailsView";
 import { SprayCan, LogOut } from "lucide-react";
 
 function AppContent() {
@@ -43,6 +44,7 @@ function AppContent() {
         <Route path="/raw" element={<RawAssetsView />} />
         <Route path="/raw/:id" element={<AssetDetailView />} />
         <Route path="/tests" element={<TestsView />} />
+        <Route path="/tests/:id" element={<TestDetailsView />} />
         <Route path="/countries" element={<CountriesView />} />
         <Route path="/insights" element={<InsightsView />} />
         <Route path="/contacts" element={<ContactsView />} />
