@@ -399,14 +399,14 @@ export default function TestDetailsView() {
               <div className="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-2xl p-4 md:p-5 shadow-sm mb-2">
 
                 {/* 5-Column Grid for Square Buttons */}
-                <div className="grid grid-cols-5 gap-2 md:gap-3">
+                <div className="grid grid-cols-7 gap-2 md:gap-3">
 
                   <button
                     onClick={handleGeneratePresentation}
                     title="Generate Presentation"
                     className="aspect-square flex flex-col items-center justify-center gap-1.5 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/40 text-blue-600 dark:text-blue-400 rounded-xl transition-colors border border-blue-200 dark:border-blue-900/30 p-2 shadow-sm"
                   >
-                    <Presentation size={22} className="shrink-0" />
+                    <Presentation size={16} className="shrink-0" />
                   </button>
 
                   <button
@@ -414,17 +414,23 @@ export default function TestDetailsView() {
                     title="Generate PDF Report"
                     className="aspect-square flex flex-col items-center justify-center gap-1.5 bg-purple-50 dark:bg-purple-900/20 hover:bg-purple-100 dark:hover:bg-purple-900/40 text-purple-600 dark:text-purple-400 rounded-xl transition-colors border border-purple-200 dark:border-purple-900/30 p-2 shadow-sm"
                   >
-                    <FileDown size={22} className="shrink-0" />
+                    <FileDown size={16} className="shrink-0" />
                   </button>
                   <button
                    onClick={(e) => { e.stopPropagation(); handleVerifyFindings(); }}
                    title="Vulnerabilities Analysis"
                    className="aspect-square flex flex-col items-center justify-center gap-1.5 bg-teal-50 dark:bg-teal-900/20 hover:bg-teal-100 dark:hover:bg-teal-900/40 text-teal-600 dark:text-teal-400 rounded-xl transition-colors border border-teal-200 dark:border-teal-900/30 p-2 shadow-sm"
                    >
-                    <ListChecks size={22} className="shrink-0" />
+                    <ListChecks size={16} className="shrink-0" />
                   </button>
 
                   {/* Placeholders for future buttons */}
+                  <button disabled title="Coming Soon" className="aspect-square flex flex-col items-center justify-center bg-slate-50 dark:bg-zinc-800/50 text-slate-400 dark:text-zinc-500 rounded-xl border border-slate-200 dark:border-zinc-700 border-dashed cursor-not-allowed transition-colors">
+                    <span className="text-lg opacity-50">+</span>
+                  </button>
+                  <button disabled title="Coming Soon" className="aspect-square flex flex-col items-center justify-center bg-slate-50 dark:bg-zinc-800/50 text-slate-400 dark:text-zinc-500 rounded-xl border border-slate-200 dark:border-zinc-700 border-dashed cursor-not-allowed transition-colors">
+                    <span className="text-lg opacity-50">+</span>
+                  </button>
                   <button disabled title="Coming Soon" className="aspect-square flex flex-col items-center justify-center bg-slate-50 dark:bg-zinc-800/50 text-slate-400 dark:text-zinc-500 rounded-xl border border-slate-200 dark:border-zinc-700 border-dashed cursor-not-allowed transition-colors">
                     <span className="text-lg opacity-50">+</span>
                   </button>

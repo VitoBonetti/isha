@@ -83,7 +83,9 @@ export default function VulnAnalysisView() {
       // 3. Ensure HTML block closing tags are followed by blank lines so Markdown parses correctly
       .replace(/(<\/(?:ul|ol|p|h[1-6]|div|blockquote)>)/gi, "$1\n\n")
       // 4. Force metadata fields onto their own bolded lines
-      .replace(/\*\*(State|Attachments|Published At|Created By):\*\*/g, "\n\n**$1:**");
+      .replace(/\*\*(State|Attachments|Published At|Created By):\*\*/g, "\n\n**$1:**")
+      // 5. NEW: Strip hardcoded black/dark text colors safely without breaking HTML!
+      .replace(/color:\s*(?:#000000|#000|black|#333333|#333|#222222|#222)\s*;?/gi, "");
   };
 
   if (loading && !data) {
