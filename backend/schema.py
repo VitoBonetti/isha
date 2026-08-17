@@ -179,6 +179,14 @@ class AssignmentBase(BaseModel):
 class AssignmentResponse(AssignmentBase):
     id: UUID4
 
+class TestAnalysisResponse(BaseModel):
+    status: str
+    analysis_text: Optional[str] = None
+    timestamp: datetime
+
+    class Config:
+        from_attributes = True
+
 class EventType(str, Enum):
     national_holiday = "national_holiday"
     team_day = "team_day"

@@ -5,7 +5,7 @@ import TopNav from "../components/TopNav";
 import SecureNoteModal from "../components/Modals/SecureNoteModal";
 import ConfirmModal from "../components/Modals/ConfirmModal";
 import toast, { Toaster } from "react-hot-toast";
-import { ChevronLeft, Save, ChevronDown, ChevronRight, Database, Users, Shield, Code, MapPin, Server, Activity, Calendar, Edit2, FolderOpen, FolderPlus, Lock, LockOpen, Zap, Presentation, FileDown, CheckSquare, History } from "lucide-react";
+import { ChevronLeft, Save, ChevronDown, ChevronRight, Database, Users, Shield, Code, MapPin, Server, Activity, Calendar, Edit2, FolderOpen, FolderPlus, Lock, LockOpen, Zap, Presentation, FileDown, CheckSquare, History, ListChecks } from "lucide-react";
 import { useAppContext } from "../context/AppContext";
 
 export default function TestDetailsView() {
@@ -35,6 +35,32 @@ export default function TestDetailsView() {
   const [test, setTest] = useState<any>(null);
   const [services, setServices] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
+
+  // Analysis
+  const [analysisPromptOpen, setAnalysisPromptOpen] = useState(false);
+  const [analysisDate, setAnalysisDate] = useState("");
+
+  const handleVerifyFindings = async () => {
+    try {
+      // Check if it exists
+      const res = await axios.get(`/api/tests/${id}/analysis`);
+      setAnalysisDate(res.data.timestamp);
+      setAnalysisPromptOpen(true); // Pop the modal to ask Read vs Regenerate
+    } catch (error: any) {
+      if (error.response?.status === 404) {
+        // Trigger fresh generation
+        const toastId = toast.loading("Starting Vulnerability Analysis...");
+        try {
+          await axios.post(`/api/tests/${id}/analysis`);
+          toast.dismiss(toastId);
+          toast.success("Analysis started! You will be notified when ready.");
+        } catch (e) {
+          toast.dismiss(toastId);
+          toast.error("Failed to start analysis.");
+        }
+      }
+    }
+  };
 
   // Format Helper for DB Status to Frontend Status
   const dbToFrontendStatus = (dbStatus: string) => {
@@ -372,7 +398,6 @@ export default function TestDetailsView() {
                     className="aspect-square flex flex-col items-center justify-center gap-1.5 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/40 text-blue-600 dark:text-blue-400 rounded-xl transition-colors border border-blue-200 dark:border-blue-900/30 p-2 shadow-sm"
                   >
                     <Presentation size={22} className="shrink-0" />
-                    <span className="text-[9px] font-black uppercase tracking-wider text-center leading-tight">PPT</span>
                   </button>
 
                   <button
@@ -381,13 +406,16 @@ export default function TestDetailsView() {
                     className="aspect-square flex flex-col items-center justify-center gap-1.5 bg-purple-50 dark:bg-purple-900/20 hover:bg-purple-100 dark:hover:bg-purple-900/40 text-purple-600 dark:text-purple-400 rounded-xl transition-colors border border-purple-200 dark:border-purple-900/30 p-2 shadow-sm"
                   >
                     <FileDown size={22} className="shrink-0" />
-                    <span className="text-[9px] font-black uppercase tracking-wider text-center leading-tight">PDF</span>
+                  </button>
+                  <button
+                   onClick={(e) => { e.stopPropagation(); handleVerifyFindings(); }}
+                   title="Vulnerabilities Analysis"
+                   className="aspect-square flex flex-col items-center justify-center gap-1.5 bg-teal-50 dark:bg-teal-900/20 hover:bg-teal-100 dark:hover:bg-teal-900/40 text-teal-600 dark:text-teal-400 rounded-xl transition-colors border border-teal-200 dark:border-teal-900/30 p-2 shadow-sm"
+                   >
+                    <ListChecks size={22} className="shrink-0" />
                   </button>
 
                   {/* Placeholders for future buttons */}
-                  <button disabled title="Coming Soon" className="aspect-square flex flex-col items-center justify-center bg-slate-50 dark:bg-zinc-800/50 text-slate-400 dark:text-zinc-500 rounded-xl border border-slate-200 dark:border-zinc-700 border-dashed cursor-not-allowed transition-colors">
-                    <span className="text-lg opacity-50">+</span>
-                  </button>
                   <button disabled title="Coming Soon" className="aspect-square flex flex-col items-center justify-center bg-slate-50 dark:bg-zinc-800/50 text-slate-400 dark:text-zinc-500 rounded-xl border border-slate-200 dark:border-zinc-700 border-dashed cursor-not-allowed transition-colors">
                     <span className="text-lg opacity-50">+</span>
                   </button>
@@ -537,6 +565,29 @@ export default function TestDetailsView() {
           </div>
         </div>
       </div>
+      <ConfirmModal
+        isOpen={analysisPromptOpen}
+        title="Analysis Already Exists"
+        message={`An analysis was generated on ${new Date(analysisDate).toLocaleString()}. Do you want to read it, or generate a fresh one?`}
+        confirmText="Read Existing"
+        cancelText="Generate New"
+        onConfirm={async () => {
+          setAnalysisPromptOpen(false);
+          navigate(`/tests/${id}/analysis`);
+        }}
+        onCancel={async () => {
+          setAnalysisPromptOpen(false);
+          const toastId = toast.loading("Queuing new analysis...");
+          try {
+            await axios.post(`/api/tests/${id}/analysis`);
+            toast.dismiss(toastId);
+            toast.success("Analysis started! You will be notified when ready.");
+          } catch (e) {
+            toast.dismiss(toastId);
+            toast.error("Failed to start analysis.");
+          }
+        }}
+      />
     </div>
   );
 }

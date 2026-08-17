@@ -17,10 +17,11 @@ import google.oauth2.id_token
 from database import get_db_cursor, db_cursor_context
 from routers.auth import get_current_user, require_admin, require_write_access
 from websockets_manager import manager
-from schema import TestCreate, TestBase, AssignmentBase, TestSchedule, BulkTestCreate, AssignmentCreate, SecureNotePayload
+from schema import TestCreate, TestBase, AssignmentBase, TestSchedule, BulkTestCreate, AssignmentCreate, SecureNotePayload, TestAnalysisResponse
 from audit_logger import log_audit_event
 from utils.drive_manager import DriveManager, background_archive_workspace, background_provision_workspace, background_relocate_workspace
 from utils.secret_manager import get_secret
+from utils.vuln_analysis import build_payload, run_cloud_run_analysis
 from presentations.presentation import generate_presentation
 from reports import osrgt_v3, pdf_gen
 
@@ -1208,3 +1209,110 @@ def trigger_report_generation(test_id: str, background_tasks: BackgroundTasks,
     return {
         "message": "Report generation started in the background. You will receive a notification when it's ready!"
     }
+
+
+async def process_vuln_analysis_background(test_id: str, kiss24_id: str, user_id: str, user_email: str, test_name: str):
+    try:
+        # 1. Build Payload
+        payload = await build_payload(kiss24_id)
+        if not payload or not payload.get("vulnerabilities"):
+            raise ValueError("No vulnerabilities found to analyze.")
+
+        # 2. Call Cloud Run
+        analysis_response = await run_cloud_run_analysis(payload)
+
+        # 3. Stitch Markdown
+        results = analysis_response.get("results", [])
+        stitched_markdown = "\n\n---\n\n".join([r.get("analysis", "") for r in results if r.get("status") == "success"])
+
+        if not stitched_markdown:
+            raise ValueError("Cloud Run returned no valid analysis text.")
+
+        # 4. Save to Database
+        with db_cursor_context() as cursor:
+            if cursor:
+                cursor.execute("""
+                    UPDATE test_analyses 
+                    SET status = 'COMPLETED', analysis_text = %s, timestamp = CURRENT_TIMESTAMP 
+                    WHERE test_id = %s
+                """, (stitched_markdown, test_id))
+                cursor.connection.commit()
+
+        # 5. Notify User
+        message = f"Vulnerability Analysis for '{test_name}' is ready!"
+        with db_cursor_context() as cursor:
+            if cursor:
+                cursor.execute(
+                    "INSERT INTO notifications (id, user_id, message, type, created_at) VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)",
+                    (str(uuid.uuid4()), user_id, message, "SUCCESS")
+                )
+                cursor.connection.commit()
+        await manager.broadcast(json.dumps({
+            "action": "REPORT_READY",
+            "email": user_email,
+            "message": message,
+            "link": f"/tests/{test_id}/analysis"
+        }))
+
+    except Exception as e:
+        print(f"Analysis failed: {e}")
+        with db_cursor_context() as cursor:
+            if cursor:
+                cursor.execute(
+                    "UPDATE test_analyses SET status = 'FAILED', timestamp = CURRENT_TIMESTAMP WHERE test_id = %s",
+                    (test_id,))
+                cursor.connection.commit()
+
+        await manager.broadcast(json.dumps({
+            "action": "REPORT_FAILED",
+            "email": user_email,
+            "message": f"Analysis failed for '{test_name}': {str(e)}"
+        }))
+
+
+# --- ANALYSIS ENDPOINTS ---
+@router.get("/{test_id}/analysis", response_model=TestAnalysisResponse)
+def get_test_analysis(test_id: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+    """Check if an analysis exists and retrieve it."""
+    cursor.execute("SELECT status, analysis_text, timestamp FROM test_analyses WHERE test_id = %s", (test_id,))
+    row = cursor.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="No analysis found.")
+
+    return {
+        "status": row[0],
+        "analysis_text": row[1],
+        "timestamp": row[2]
+    }
+
+
+@router.post("/{test_id}/analysis")
+def trigger_test_analysis(test_id: str, background_tasks: BackgroundTasks,
+                          current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+    """Creates a PENDING record and triggers the background generator."""
+    if current_user.get('role') == 'read_only':
+        raise HTTPException(status_code=403, detail="Read-only users cannot trigger generation.")
+
+    # Get Test Data
+    cursor.execute("SELECT name, kiss24 FROM tests WHERE id = %s", (test_id,))
+    row = cursor.fetchone()
+    if not row or not row[1]:
+        raise HTTPException(status_code=400, detail="Missing Kiss24 UUID.")
+
+    test_name, kiss24_id = row[0], row[1]
+
+    # Upsert PENDING status
+    cursor.execute("""
+        INSERT INTO test_analyses (test_id, status, timestamp) 
+        VALUES (%s, 'PENDING', CURRENT_TIMESTAMP)
+        ON CONFLICT (test_id) DO UPDATE SET status = 'PENDING', analysis_text = NULL, timestamp = CURRENT_TIMESTAMP
+    """, (test_id,))
+    cursor.connection.commit()
+
+    # Trigger Background Task
+    background_tasks.add_task(
+        process_vuln_analysis_background,
+        test_id, str(kiss24_id), str(current_user["id"]), current_user["email"], test_name
+    )
+
+    return {"message": "Analysis started in the background."}

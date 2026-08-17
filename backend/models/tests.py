@@ -1,6 +1,6 @@
 import uuid
 import enum
-from sqlalchemy import Column, String, Integer, ForeignKey, REAL, Enum, DateTime, Boolean
+from sqlalchemy import Column, String, Integer, ForeignKey, REAL, Enum, DateTime, Boolean, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from database import Base
@@ -79,3 +79,11 @@ class Assignments(Base):
     # relationship
     tests = relationship("Tests", back_populates="assignments")
     users = relationship("Users", back_populates="assignments")
+
+
+class TestAnalysis(Base):
+    __tablename__ = "test_analyses"
+    test_id = Column(UUID(as_uuid=True), ForeignKey('tests.id', ondelete='CASCADE'), primary_key=True)
+    status = Column(String, nullable=False) # 'PENDING', 'COMPLETED', 'FAILED'
+    analysis_text = Column(Text, nullable=True)
+    timestamp = Column(DateTime(timezone=True), default=aware_utcnow, onupdate=aware_utcnow)

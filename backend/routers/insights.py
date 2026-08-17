@@ -26,8 +26,23 @@ def get_yearly_insights(year: Optional[int] = None, current_user: dict = Depends
                         cursor=Depends(get_db_cursor)):
     if not year: year = datetime.now().year
 
-    # ---  GROSS CAPACITY & TIME OFF ---
-    cursor.execute("SELECT id, base_capacity, start_year, start_week, end_year, end_week, location_id FROM users")
+    # --- DETERMINE PAST WEEKS FOR "WASTED" MATH ---
+    current_year_real = datetime.now().year
+    current_week_real = datetime.now().isocalendar()[1]
+
+    past_weeks = []
+    if year < current_year_real:
+        # If looking at a past year, all weeks are "past"
+        d = datetime(year, 12, 28)
+        max_w = d.isocalendar()[1]
+        past_weeks = list(range(1, max_w + 1))
+    elif year == current_year_real:
+        # If current year, weeks 1 to (current_week - 1) are "past"
+        past_weeks = list(range(1, current_week_real))
+
+    # ---  GROSS CAPACITY, TIME OFF & WASTED ---
+    # NEW: Fetched 'name' to use in the wasted breakdown
+    cursor.execute("SELECT id, name, base_capacity, start_year, start_week, end_year, end_week, location_id FROM users")
     users = cursor.fetchall()
 
     total_gross_credits = 0.0
@@ -35,7 +50,10 @@ def get_yearly_insights(year: Optional[int] = None, current_user: dict = Depends
     event_mapping = {"national_holiday": "National Holiday", "team_day": "Team Day",
                      "personal_time_off": "Personal Time Off", "sick_day": "Sick Day"}
 
-    for u_id, base_cap, s_year, s_week, e_year, e_week, loc_id in users:
+    wasted_breakdown = {}
+    total_wasted = 0.0
+
+    for u_id, u_name, base_cap, s_year, s_week, e_year, e_week, loc_id in users:
         base = float(base_cap or 0.0)
         start = s_week if s_year == year else 1
         end = e_week if e_year == year else 52
@@ -63,21 +81,45 @@ def get_yearly_insights(year: Optional[int] = None, current_user: dict = Depends
             if e_year and (y > e_year or (y == e_year and e_week and w > e_week)): return False
             return True
 
+        time_off_per_week = {}  # Track days off specifically per week for math
+
         for e_type, e_start, e_end in cursor.fetchall():
             actual_days_off = 0
             d = e_start
 
-            # Check day-by-day to ensure the event falls inside the user's active tenure
             while d <= e_end:
                 iso = d.isocalendar()
-                if is_active(iso[0], iso[1]) and d.weekday() < 5:  # Weekdays only
+                if iso[0] == year and is_active(iso[0], iso[1]) and d.weekday() < 5:
                     actual_days_off += 1
+                    time_off_per_week[iso[1]] = time_off_per_week.get(iso[1], 0) + 1
                 d += timedelta(days=1)
 
             cost = actual_days_off * (base * 0.2)
             friendly_name = event_mapping.get(e_type, e_type)
             if friendly_name in events_cost:
                 events_cost[friendly_name] += cost
+
+        # --- Calculate Wasted Credits per User ---
+        cursor.execute("""
+            SELECT week_number, SUM(allocated_credits) 
+            FROM assignments a 
+            JOIN tests t ON a.test_id = t.id 
+            WHERE a.user_id = %s AND a.year = %s AND t.stages::text != 'STOPPED' 
+            GROUP BY week_number
+        """, (str(u_id), year))
+        user_assignments = {row[0]: float(row[1]) for row in cursor.fetchall()}
+
+        u_wasted = 0.0
+        for w in past_weeks:
+            if is_active(year, w):
+                prov = base - (time_off_per_week.get(w, 0) * (base * 0.2))
+                used = user_assignments.get(w, 0.0)
+                waste = max(0.0, prov - used)
+                u_wasted += waste
+
+        if u_wasted > 0:
+            wasted_breakdown[u_name] = round(u_wasted, 1)
+            total_wasted += u_wasted
 
     total_time_off = sum(events_cost.values())
 
@@ -230,7 +272,9 @@ def get_yearly_insights(year: Optional[int] = None, current_user: dict = Depends
             "unassigned_scheduled": {"total": total_unassigned_sched, "breakdown": unassigned_sched_breakdown},
             "backlog": {"total": total_backlog, "breakdown": backlog_breakdown},
             "time_off": {"total": total_time_off, "breakdown": events_cost},
-            "net_capacity": total_gross_credits - (total_scheduled + total_unassigned_sched + total_backlog + total_time_off)
+            "wasted": {"total": total_wasted, "breakdown": wasted_breakdown},
+            "net_capacity": total_gross_credits - (
+                        total_scheduled + total_unassigned_sched + total_backlog + total_time_off + total_wasted)
         },
         "services": services_data
     }

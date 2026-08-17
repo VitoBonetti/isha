@@ -72,6 +72,7 @@ export default function InsightsView() {
   const [showUnassignedSched, setShowUnassignedSched] = useState(false);
   const [showBacklog, setShowBacklog] = useState(false);
   const [showTimeOff, setShowTimeOff] = useState(false);
+  const [showWasted, setShowWasted] = useState(false);
 
   // Accordion Toggles
   const [openServices, setOpenServices] = useState<Record<string, boolean>>({});
@@ -134,11 +135,12 @@ export default function InsightsView() {
         <div className="bg-red-50/50 dark:bg-red-950/10 border border-red-100 dark:border-red-900/30 rounded-2xl p-4 md:p-6 mb-8 md:mb-10 shadow-sm w-full">
           <h2 className="text-lg md:text-xl font-bold text-red-900 dark:text-red-400 mb-4 md:mb-6">Annual Workload Forecast</h2>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 mb-5 md:mb-6">
-            <ForecastCard title="Scheduled (Assigned)" total={data.forecast.scheduled.total} breakdown={data.forecast.scheduled.breakdown} isOpen={showSched} toggleOpen={() => setShowSched(!showSched)} />
-            <ForecastCard title="Scheduled (Unassigned)" total={data.forecast.unassigned_scheduled.total} breakdown={data.forecast.unassigned_scheduled.breakdown} isOpen={showUnassignedSched} toggleOpen={() => setShowUnassignedSched(!showUnassignedSched)} />
-            <ForecastCard title="Backlog Tests" total={data.forecast.backlog.total} breakdown={data.forecast.backlog.breakdown} isOpen={showBacklog} toggleOpen={() => setShowBacklog(!showBacklog)} />
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 md:gap-6 mb-5 md:mb-6">
+            <ForecastCard title="Assigned" total={data.forecast.scheduled.total} breakdown={data.forecast.scheduled.breakdown} isOpen={showSched} toggleOpen={() => setShowSched(!showSched)} />
+            <ForecastCard title="Unassigned" total={data.forecast.unassigned_scheduled.total} breakdown={data.forecast.unassigned_scheduled.breakdown} isOpen={showUnassignedSched} toggleOpen={() => setShowUnassignedSched(!showUnassignedSched)} />
+            <ForecastCard title="Backlog" total={data.forecast.backlog.total} breakdown={data.forecast.backlog.breakdown} isOpen={showBacklog} toggleOpen={() => setShowBacklog(!showBacklog)} />
             <ForecastCard title="Time Off" total={data.forecast.time_off.total} breakdown={data.forecast.time_off.breakdown} isOpen={showTimeOff} toggleOpen={() => setShowTimeOff(!showTimeOff)} />
+            <ForecastCard title="Expired" total={data.forecast.wasted.total} breakdown={data.forecast.wasted.breakdown} isOpen={showWasted} toggleOpen={() => setShowWasted(!showWasted)} />
           </div>
 
           <div className="border-t border-red-200 dark:border-red-900/50 pt-5 md:pt-6 flex flex-col md:flex-row justify-between items-stretch md:items-center gap-4 w-full">
