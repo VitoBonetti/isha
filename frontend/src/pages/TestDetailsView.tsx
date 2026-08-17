@@ -39,6 +39,7 @@ export default function TestDetailsView() {
   // Analysis
   const [analysisPromptOpen, setAnalysisPromptOpen] = useState(false);
   const [analysisDate, setAnalysisDate] = useState("");
+  const [hasAnalysis, setHasAnalysis] = useState(false);
 
   const handleVerifyFindings = async () => {
     try {
@@ -100,6 +101,9 @@ export default function TestDetailsView() {
       toast.error("Failed to load test details");
       navigate("/tests");
     }).finally(() => setLoading(false));
+    axios.get(`/api/tests/${id}/analysis`)
+      .then(() => setHasAnalysis(true))
+      .catch(() => setHasAnalysis(false));
   }, [id, navigate]);
 
   if (loading || !test) return <div className="min-h-screen bg-slate-50 dark:bg-zinc-950 flex items-center justify-center">Loading...</div>;
@@ -262,6 +266,11 @@ export default function TestDetailsView() {
                           <button onClick={() => setSecretConfirmOpen(test)} className={`px-3 py-1.5 rounded-lg border transition-colors flex items-center gap-2 text-xs font-bold ${test.has_secret ? 'text-indigo-600 bg-indigo-50 border-indigo-200 dark:bg-indigo-900/30 dark:border-indigo-900/50' : 'text-slate-500 bg-slate-100 border-slate-200 dark:bg-zinc-800 dark:border-zinc-700 hover:text-indigo-600'}`}>
                             {test.has_secret ? <><Lock size={14} /><span className="hidden sm:inline">View Secret</span></> : <><LockOpen size={14} /><span className="hidden sm:inline">Add Secret</span></>}
                           </button>
+                        )}
+                        {hasAnalysis && (
+                          <Link to={`/tests/${test.id}/analysis`} className="px-3 py-1.5 text-teal-600 bg-teal-50 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-900/50 hover:bg-teal-100 dark:hover:bg-teal-900/40 rounded-lg transition-colors flex items-center gap-2 text-xs font-bold" title="Open Analysis">
+                            <ListChecks size={14} /> <span className="hidden sm:inline">View Analysis</span>
+                          </Link>
                         )}
                       </>
                     )}

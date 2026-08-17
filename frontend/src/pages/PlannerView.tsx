@@ -38,6 +38,7 @@ interface PlannerViewProps {
   handleToggleTentative: (testId: string) => void;
   handleCreatePresentation: (test: Test) => void;
   handleGenerateReport: (test: Test) => void;
+  handleVerifyFindings: (test: Test) => void;
   assignModalTest: Test | null;
   setAssignModalTest: (test: Test | null) => void;
   backlogFilter: string;
@@ -75,7 +76,7 @@ export default function PlannerView({
   boardData, setNewTest, setShowTestForm,
   onDragEnd, handleAssignTeam, handleCompleteTest, handleUnscheduleTest, handleUnassignPentester,
   handleDeleteTest, handleDuplicateTest, openEditModal, handleMarkUnable, handleRevertComplete, handleRevertUnable, handleCreateWorkspace, handleToggleTentative,
-  handleCreatePresentation, handleGenerateReport, assignModalTest, setAssignModalTest, backlogFilter, setBacklogFilter, setTargetYear, handleAddPlaceholder,
+  handleCreatePresentation, handleGenerateReport, handleVerifyFindings, assignModalTest, setAssignModalTest, backlogFilter, setBacklogFilter, setTargetYear, handleAddPlaceholder,
   handleRemovePlaceholder
 }: PlannerViewProps) {
 
@@ -505,10 +506,10 @@ export default function PlannerView({
                                                           className="p-1.5 flex items-center justify-center rounded text-teal-500 hover:text-teal-600 hover:bg-teal-50 dark:hover:bg-teal-900/30 transition-colors"
                                                           onClick={(e) => {
                                                             e.stopPropagation();
-                                                            toast.error("Verify Findings is still under development.");
+                                                            handleVerifyFindings(test);
                                                           }}
                                                         >
-                                                          <ListChecks size={14}/>
+                                                        <ListChecks size={14}/>
                                                         </button>
                                                       </>
                                                     )}

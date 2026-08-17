@@ -25,6 +25,9 @@ export default function Planner() {
   const [assignModalTest, setAssignModalTest] = useState<Test | null>(null);
   const [backlogFilter, setBacklogFilter] = useState("All");
 
+  const [analysisPromptTest, setAnalysisPromptTest] = useState<Test | null>(null);
+  const [analysisDate, setAnalysisDate] = useState("");
+
   // Modal States
   const [editModalTest, setEditModalTest] = useState<Test | null>(null);
   const [confirmModal, setConfirmModal] = useState<{
@@ -58,7 +61,9 @@ export default function Planner() {
         if (data.action === 'REFRESH_BOARD') {
           fetchBoardData();
           // Dispatch a global event so your TopNav knows to re-fetch notifications!
-          window.dispatchEvent(new CustomEvent('refresh_notifications'));
+        }
+        else if (data.action === 'ONLINE_USERS' && data.users) {
+          setOnlineUsers(data.users);
         }
         // 3: Listen for targeted presentation toasts ---
         else if ((data.action === 'PRESENTATION_READY' || data.action === 'REPORT_READY') && data.email === currentUser?.email) {
@@ -118,6 +123,27 @@ export default function Planner() {
     setTargetYear(new Date().getFullYear());
     const month = new Date().getMonth() + 1;
     setTargetQuarter(month > 9 ? 4 : month > 6 ? 3 : month > 3 ? 2 : 1);
+  };
+
+  // --- Verification handler function ---
+  const handleVerifyFindings = async (test: Test) => {
+    try {
+      const res = await axios.get(`/api/tests/${test.id}/analysis`);
+      setAnalysisDate(res.data.timestamp);
+      setAnalysisPromptTest(test);
+    } catch (error: any) {
+      if (error.response?.status === 404) {
+        const toastId = toast.loading("Starting Vulnerability Analysis...");
+        try {
+          await axios.post(`/api/tests/${test.id}/analysis`);
+          toast.dismiss(toastId);
+          toast.success("Analysis started! You will be notified when ready.");
+        } catch (e) {
+          toast.dismiss(toastId);
+          toast.error("Failed to start analysis.");
+        }
+      }
+    }
   };
 
   // --- DRAG AND DROP HANDLER ---
@@ -390,6 +416,7 @@ export default function Planner() {
         handleToggleTentative={handleToggleTentative}
         handleCreatePresentation={handleCreatePresentation}
         handleGenerateReport={handleGenerateReport}
+        handleVerifyFindings={handleVerifyFindings}
         assignModalTest={assignModalTest}
         setAssignModalTest={setAssignModalTest}
         backlogFilter={backlogFilter}
@@ -416,6 +443,31 @@ export default function Planner() {
         boardData={boardData}
         onClose={() => setEditModalTest(null)}
         onSubmit={handleUpdateTest}
+      />
+      <ConfirmModal
+        isOpen={!!analysisPromptTest}
+        title="Analysis Already Exists"
+        message={`An analysis for this test was generated on ${new Date(analysisDate).toLocaleString()}. Do you want to read it, or generate a fresh one?`}
+        confirmText="Read Existing"
+        cancelText="Generate New"
+        onConfirm={async () => {
+          const tId = analysisPromptTest?.id;
+          setAnalysisPromptTest(null);
+          window.location.href = `/tests/${tId}/analysis`;
+        }}
+        onCancel={async () => {
+          const tId = analysisPromptTest?.id;
+          setAnalysisPromptTest(null);
+          const toastId = toast.loading("Queuing new analysis...");
+          try {
+            await axios.post(`/api/tests/${tId}/analysis`);
+            toast.dismiss(toastId);
+            toast.success("Analysis started! You will be notified when ready.");
+          } catch (e) {
+            toast.dismiss(toastId);
+            toast.error("Failed to start analysis.");
+          }
+        }}
       />
     </>
   );

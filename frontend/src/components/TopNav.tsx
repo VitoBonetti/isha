@@ -45,23 +45,59 @@ export default function TopNav() {
 
     document.addEventListener('mousedown', handleClickOutside);
 
-    // 2. WEBSOCKET NOTIFICATION LISTENER
+    // 2. Custom Event Listener
     const handleRefreshNotifications = () => {
       if (typeof fetchNotifications === 'function') {
         fetchNotifications();
       }
     };
-
     window.addEventListener('refresh_notifications', handleRefreshNotifications);
 
-    // Close mobile menu on route change
+    // 3. GLOBAL WEBSOCKET FOR TOASTS & NOTIFICATIONS
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/api/ws/board`;
+    const socket = new WebSocket(wsUrl);
+
+    socket.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+
+        // Auto-refresh the notification bell for ANY board changes
+        if (data.action === 'REFRESH_BOARD' || data.action === 'REPORT_READY') {
+          handleRefreshNotifications();
+        }
+
+        // Handle targeted success toasts (with clickable links!)
+        if (['REPORT_READY', 'PRESENTATION_READY'].includes(data.action) && data.email === currentUser?.email) {
+          toast.success(
+            (t) => (
+              <div className="flex flex-col gap-1">
+                <span className="font-medium text-sm">{data.message}</span>
+                {data.link && (
+                  <Link to={data.link} onClick={() => toast.dismiss(t.id)} className="text-xs text-blue-600 dark:text-blue-400 font-bold hover:underline">
+                    Click here to view
+                  </Link>
+                )}
+              </div>
+            ),
+            { duration: 8000 }
+          );
+        }
+        // Handle targeted error toasts
+        else if (['REPORT_FAILED', 'PRESENTATION_FAILED'].includes(data.action) && data.email === currentUser?.email) {
+          toast.error(data.message, { duration: 8000 });
+        }
+      } catch (e) { console.error(e); }
+    };
+
     setIsMobileMenuOpen(false);
 
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
       window.removeEventListener('refresh_notifications', handleRefreshNotifications);
+      socket.close();
     };
-  }, [fetchNotifications, location.pathname]);
+  }, [fetchNotifications, location.pathname, currentUser?.email]);
 
   const navClass = (path: string) => {
     const isActive = currentPath === path;
