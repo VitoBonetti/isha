@@ -17,9 +17,25 @@ import google.oauth2.id_token
 from database import get_db_cursor, db_cursor_context
 from routers.auth import get_current_user, require_admin, require_write_access
 from websockets_manager import manager
-from schema import TestCreate, TestBase, AssignmentBase, TestSchedule, BulkTestCreate, AssignmentCreate, SecureNotePayload, TestAnalysisResponse
+from schema import (
+    TestCreate,
+    TestBase,
+    AssignmentBase,
+    TestSchedule,
+    BulkTestCreate,
+    AssignmentCreate,
+    SecureNotePayload,
+    TestAnalysisResponse,
+    RequirementCreate,
+    MilestoneUpdate
+)
 from audit_logger import log_audit_event
-from utils.drive_manager import DriveManager, background_archive_workspace, background_provision_workspace, background_relocate_workspace
+from utils.drive_manager import (
+    DriveManager,
+    background_archive_workspace,
+    background_provision_workspace,
+    background_relocate_workspace
+)
 from utils.secret_manager import get_secret
 from utils.vuln_analysis import build_payload, run_cloud_run_analysis
 from presentations.presentation import generate_presentation
@@ -527,6 +543,7 @@ def bulk_create_tests(req: BulkTestCreate, background_tasks: BackgroundTasks,
     background_tasks.add_task(process_bulk_tests_background, req.asset_ids, str(current_user['id']), str(current_user['role']))
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": f"Generating {len(req.asset_ids)} tests from active pool."}
+
 
 # --- 3. SCHEDULING & STATUS LIFECYCLE ---
 @router.put("/{test_id}/schedule", summary="[Admin Only]")
@@ -1160,6 +1177,7 @@ async def process_report_background(test_id: str, kiss24_id: str, user_id: str, 
 
     await manager.broadcast('{"action": "REFRESH_BOARD"}')
 
+
 @router.post("/{test_id}/report")
 def trigger_report_generation(test_id: str, background_tasks: BackgroundTasks,
                               current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
@@ -1316,3 +1334,58 @@ def trigger_test_analysis(test_id: str, background_tasks: BackgroundTasks,
     )
 
     return {"message": "Analysis started in the background."}
+
+
+# -- Milestones ---
+@router.get("/{test_id}/milestones")
+def get_milestones(test_id: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+    cursor.execute("SELECT step_name, is_completed FROM test_milestones WHERE test_id = %s", (test_id,))
+    # Return a simple dictionary: {"Information Email Sent": true, "Intake Meeting Planned": false}
+    return {row[0]: row[1] for row in cursor.fetchall()}
+
+
+@router.put("/{test_id}/milestones")
+def update_milestone(test_id: str, payload: MilestoneUpdate, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+    # UPSERT logic: Insert it, or if it exists, update the boolean
+    cursor.execute("""
+        INSERT INTO test_milestones (id, test_id, step_name, is_completed) 
+        VALUES (gen_random_uuid(), %s, %s, %s)
+        ON CONFLICT (test_id, step_name) DO UPDATE SET is_completed = EXCLUDED.is_completed
+    """, (test_id, payload.step_name, payload.is_completed))
+    cursor.connection.commit()
+    return {"message": "Updated"}
+
+
+@router.get("/{test_id}/requirements")
+def get_requirements(test_id: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+    cursor.execute("SELECT id, description, is_completed FROM test_requirements WHERE test_id = %s ORDER BY id", (test_id,))
+    return [{"id": str(r[0]), "description": r[1], "is_completed": r[2]} for r in cursor.fetchall()]
+
+
+@router.post("/{test_id}/requirements")
+def add_requirement(test_id: str, req: RequirementCreate, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+    cursor.execute("""
+        INSERT INTO test_requirements (id, test_id, description, is_completed) 
+        VALUES (gen_random_uuid(), %s, %s, false) RETURNING id
+    """, (test_id, req.description))
+    req_id = cursor.fetchone()[0]
+    cursor.connection.commit()
+    return {"id": str(req_id), "description": req.description, "is_completed": False}
+
+
+@router.put("/requirements/{req_id}/toggle")
+def toggle_requirement(req_id: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+    cursor.execute("""
+        UPDATE test_requirements SET is_completed = NOT is_completed 
+        WHERE id = %s RETURNING is_completed
+    """, (req_id,))
+    new_status = cursor.fetchone()[0]
+    cursor.connection.commit()
+    return {"is_completed": new_status}
+
+
+@router.delete("/requirements/{req_id}")
+def delete_requirement(req_id: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+    cursor.execute("DELETE FROM test_requirements WHERE id = %s", (req_id,))
+    cursor.connection.commit()
+    return {"message": "Deleted"}

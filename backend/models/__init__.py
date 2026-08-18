@@ -4,7 +4,16 @@ from .territories import Locations, Region, Country
 from .users import Users
 from .raw_assets import AssetTypes, RawAssets, RawAssetsSnowMetadata
 from .assets import Assets
-from .tests import Tests, TestAssets, TestStages, Assignments, TestDocuments, TestAnalysis
+from .tests import (
+    Tests,
+    TestAssets,
+    TestStages,
+    Assignments,
+    TestDocuments,
+    TestAnalysis,
+    TestRequirement,
+    TestMilestone
+)
 from .events import Events
 from .notifications import Notifications
 from .histories import AssetHistory, TestHistory

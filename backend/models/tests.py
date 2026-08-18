@@ -1,6 +1,6 @@
 import uuid
 import enum
-from sqlalchemy import Column, String, Integer, ForeignKey, REAL, Enum, DateTime, Boolean, Text
+from sqlalchemy import Column, String, Integer, ForeignKey, REAL, Enum, DateTime, Boolean, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from database import Base
@@ -87,3 +87,23 @@ class TestAnalysis(Base):
     status = Column(String, nullable=False) # 'PENDING', 'COMPLETED', 'FAILED'
     analysis_text = Column(Text, nullable=True)
     timestamp = Column(DateTime(timezone=True), default=aware_utcnow, onupdate=aware_utcnow)
+
+
+class TestRequirement(Base):
+    __tablename__ = "test_requirements"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    test_id = Column(UUID(as_uuid=True), ForeignKey('tests.id', ondelete='CASCADE'), nullable=False)
+    description = Column(String, nullable=False)
+    is_completed = Column(Boolean, default=False)
+
+
+class TestMilestone(Base):
+    __tablename__ = "test_milestones"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    test_id = Column(UUID(as_uuid=True), ForeignKey('tests.id', ondelete='CASCADE'), nullable=False)
+    step_name = Column(String, nullable=False)
+    is_completed = Column(Boolean, default=False)
+
+    __table_args__ = (
+        UniqueConstraint('test_id', 'step_name', name='uq_test_milestone_step'),
+    )

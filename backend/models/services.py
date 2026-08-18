@@ -41,6 +41,7 @@ class ServiceLanes(Base):
     is_active = Column(Boolean, default=True)
     display_order = Column(Integer, default=99)
     auto_provision_workspace = Column(Boolean, default=False)
+    intro_email_template = Column(String, nullable=True)
 
     # relationship
     service_categories = relationship('ServiceCategories', back_populates='services_lanes')

@@ -5,8 +5,10 @@ import TopNav from "../components/TopNav";
 import SecureNoteModal from "../components/Modals/SecureNoteModal";
 import ConfirmModal from "../components/Modals/ConfirmModal";
 import toast, { Toaster } from "react-hot-toast";
-import { ChevronLeft, Save, ChevronDown, ChevronRight, Database, Users, Shield, Code, MapPin, Server, Activity, Calendar, Edit2, FolderOpen, FolderPlus, Lock, LockOpen, Zap, Presentation, FileDown, CheckSquare, History, ListChecks } from "lucide-react";
+import { ChevronLeft, Save, ChevronDown, ChevronRight, Database, Users, Shield, Code, MapPin, Server, Activity, Calendar, Edit2, FolderOpen, FolderPlus, Lock, LockOpen, Zap, Presentation, FileDown, CheckSquare, History, ListChecks, Mail } from "lucide-react";
 import { useAppContext } from "../context/AppContext";
+import RequirementsModal from "../components/Modals/RequirementsModal";
+import IntroEmailModal from "../components/Modals/IntroEmailModal";
 
 export default function TestDetailsView() {
   const { id } = useParams();
@@ -40,6 +42,27 @@ export default function TestDetailsView() {
   const [analysisPromptOpen, setAnalysisPromptOpen] = useState(false);
   const [analysisDate, setAnalysisDate] = useState("");
   const [hasAnalysis, setHasAnalysis] = useState(false);
+
+  // Requirements Modal
+  const [isRequirementsOpen, setIsRequirementsOpen] = useState(false);
+  const STANDARD_MILESTONES = [
+    "Information Email Sent",
+    "Intake Meeting Planned",
+    "Requirements Documented",
+    "Restitution Meeting Planned",
+    "Final Email Sent"
+  ];
+  const [milestones, setMilestones] = useState<Record<string, boolean>>({});
+
+  const [isIntroEmailOpen, setIsIntroEmailOpen] = useState(false);
+  const refreshMilestones = async () => {
+    try {
+      const resMiles = await axios.get(`/api/tests/${id}/milestones`);
+      setMilestones(resMiles.data);
+    } catch (err) {
+      console.error("Failed to refresh milestones", err);
+    }
+  };
 
   const handleVerifyFindings = async () => {
     try {
@@ -87,23 +110,30 @@ export default function TestDetailsView() {
   };
 
   useEffect(() => {
+    // 1. Core Data (If any of these fail, the page legitimately cannot load)
     Promise.all([
       axios.get(`/api/tests/${id}`),
       axios.get('/api/services/'),
-      axios.get('/api/board/categories/?year=All')
-    ]).then(([resTest, resS, resCat]) => {
+      axios.get('/api/board/categories/?year=All'),
+      axios.get(`/api/tests/${id}/milestones`)
+    ]).then(([resTest, resS, resCat, resMiles]) => {
       const tData = resTest.data;
       tData.status = dbToFrontendStatus(tData.status);
       setTest(tData);
       setServices(resS.data);
       setCategories(resCat.data);
+      setMilestones(resMiles.data);
     }).catch(() => {
       toast.error("Failed to load test details");
       navigate("/tests");
     }).finally(() => setLoading(false));
+
+    // 2. Background Analysis Check (COMPLETELY SEPARATE)
+    // A 404 here is expected and will safely just set hasAnalysis to false!
     axios.get(`/api/tests/${id}/analysis`)
       .then(() => setHasAnalysis(true))
       .catch(() => setHasAnalysis(false));
+
   }, [id, navigate]);
 
   if (loading || !test) return <div className="min-h-screen bg-slate-50 dark:bg-zinc-950 flex items-center justify-center">Loading...</div>;
@@ -133,6 +163,23 @@ export default function TestDetailsView() {
     .sort((a, b) => Number(a.goal_year || 0) - Number(b.goal_year || 0));
 
   // --- ACTIONS ---
+  const handleToggleMilestone = async (stepName: string) => {
+    const currentState = milestones[stepName] || false;
+    const newState = !currentState;
+
+    // Optimistic update
+    setMilestones(prev => ({ ...prev, [stepName]: newState }));
+
+    try {
+      await axios.put(`/api/tests/${id}/milestones`, { step_name: stepName, is_completed: newState });
+    } catch (error) {
+      toast.error("Failed to update milestone");
+      // Revert on failure
+      setMilestones(prev => ({ ...prev, [stepName]: currentState }));
+    }
+  };
+
+
   const handleUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isAdmin) return;
@@ -399,12 +446,12 @@ export default function TestDetailsView() {
               <div className="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-2xl p-4 md:p-5 shadow-sm mb-2">
 
                 {/* 5-Column Grid for Square Buttons */}
-                <div className="grid grid-cols-7 gap-2 md:gap-3">
+                <div className="grid grid-cols-8 gap-2 md:gap-3">
 
                   <button
                     onClick={handleGeneratePresentation}
                     title="Generate Presentation"
-                    className="aspect-square flex flex-col items-center justify-center gap-1.5 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/40 text-blue-600 dark:text-blue-400 rounded-xl transition-colors border border-blue-200 dark:border-blue-900/30 p-2 shadow-sm"
+                    className="aspect-square flex flex-col items-center justify-center gap-1 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/40 text-blue-600 dark:text-blue-400 rounded-xl transition-colors border border-blue-200 dark:border-blue-900/30 p-2 shadow-sm"
                   >
                     <Presentation size={16} className="shrink-0" />
                   </button>
@@ -412,25 +459,36 @@ export default function TestDetailsView() {
                   <button
                     onClick={handleGenerateReport}
                     title="Generate PDF Report"
-                    className="aspect-square flex flex-col items-center justify-center gap-1.5 bg-purple-50 dark:bg-purple-900/20 hover:bg-purple-100 dark:hover:bg-purple-900/40 text-purple-600 dark:text-purple-400 rounded-xl transition-colors border border-purple-200 dark:border-purple-900/30 p-2 shadow-sm"
+                    className="aspect-square flex flex-col items-center justify-center gap-1 bg-purple-50 dark:bg-purple-900/20 hover:bg-purple-100 dark:hover:bg-purple-900/40 text-purple-600 dark:text-purple-400 rounded-xl transition-colors border border-purple-200 dark:border-purple-900/30 p-2 shadow-sm"
                   >
                     <FileDown size={16} className="shrink-0" />
                   </button>
                   <button
                    onClick={(e) => { e.stopPropagation(); handleVerifyFindings(); }}
                    title="Vulnerabilities Analysis"
-                   className="aspect-square flex flex-col items-center justify-center gap-1.5 bg-teal-50 dark:bg-teal-900/20 hover:bg-teal-100 dark:hover:bg-teal-900/40 text-teal-600 dark:text-teal-400 rounded-xl transition-colors border border-teal-200 dark:border-teal-900/30 p-2 shadow-sm"
+                   className="aspect-square flex flex-col items-center justify-center gap-1 bg-teal-50 dark:bg-teal-900/20 hover:bg-teal-100 dark:hover:bg-teal-900/40 text-teal-600 dark:text-teal-400 rounded-xl transition-colors border border-teal-200 dark:border-teal-900/30 p-2 shadow-sm"
                    >
                     <ListChecks size={16} className="shrink-0" />
                   </button>
-
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setIsIntroEmailOpen(true); }}
+                    title="Send Intro Email"
+                    className="aspect-square flex flex-col items-center justify-center gap-1 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/40 text-blue-600 dark:text-blue-400 rounded-xl transition-colors border border-blue-200 dark:border-blue-900/30 p-2 shadow-sm"
+                  >
+                    <Mail size={16} className="shrink-0" />
+                  </button>
                   {/* Placeholders for future buttons */}
                   <button disabled title="Coming Soon" className="aspect-square flex flex-col items-center justify-center bg-slate-50 dark:bg-zinc-800/50 text-slate-400 dark:text-zinc-500 rounded-xl border border-slate-200 dark:border-zinc-700 border-dashed cursor-not-allowed transition-colors">
                     <span className="text-lg opacity-50">+</span>
                   </button>
-                  <button disabled title="Coming Soon" className="aspect-square flex flex-col items-center justify-center bg-slate-50 dark:bg-zinc-800/50 text-slate-400 dark:text-zinc-500 rounded-xl border border-slate-200 dark:border-zinc-700 border-dashed cursor-not-allowed transition-colors">
-                    <span className="text-lg opacity-50">+</span>
+                  <button
+                   onClick={(e) => { e.stopPropagation(); setIsRequirementsOpen(true); }}
+                   title="Test Requirements"
+                   className="aspect-square flex flex-col items-center justify-center gap-1 bg-fuchsia-50 dark:bg-fuchsia-900/20 hover:bg-fuchsia-100 dark:hover:bg-fuchsia-900/40 text-fuchsia-600 dark:text-fuchsia-400 rounded-xl transition-colors border border-fuchsia-200 dark:border-fuchsia-900/30 p-2 shadow-sm"
+                   >
+                    <CheckSquare size={16} className="shrink-0" />
                   </button>
+                  {/* Placeholders for future buttons */}
                   <button disabled title="Coming Soon" className="aspect-square flex flex-col items-center justify-center bg-slate-50 dark:bg-zinc-800/50 text-slate-400 dark:text-zinc-500 rounded-xl border border-slate-200 dark:border-zinc-700 border-dashed cursor-not-allowed transition-colors">
                     <span className="text-lg opacity-50">+</span>
                   </button>
@@ -442,39 +500,53 @@ export default function TestDetailsView() {
               </div>
             )}
 
-            {/* TARGETS / TRACKING MOCKUP */}
+            {/* REAL MILESTONES TRACKING */}
             <div>
               <button onClick={() => setIsTargetsOpen(!isTargetsOpen)} className="flex items-center gap-2 md:gap-3 w-full text-left font-bold text-slate-800 dark:text-zinc-200 bg-white dark:bg-zinc-900 p-4 md:p-5 rounded-2xl border border-slate-200 dark:border-zinc-800 shadow-sm hover:border-slate-300 dark:hover:border-zinc-700 transition-colors outline-none">
                 {isTargetsOpen ? <ChevronDown size={20} className="text-slate-400 flex-shrink-0" /> : <ChevronRight size={20} className="text-slate-400 flex-shrink-0" />}
                 <CheckSquare size={18} className="text-emerald-500 flex-shrink-0 md:h-5 md:w-5" />
-                <span className="truncate">Milestones Tracking</span>
+                <span className="truncate flex-1">Milestones Tracking</span>
+
+                {/* Status Pill on the collapsed header */}
+                <span className="text-[10px] md:text-xs font-black bg-slate-100 dark:bg-zinc-800 text-slate-500 px-2 py-1 rounded-md">
+                  {STANDARD_MILESTONES.filter(m => milestones[m]).length} / {STANDARD_MILESTONES.length}
+                </span>
               </button>
+
               {isTargetsOpen && (
                 <div className="mt-2 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-2xl p-4 md:p-6 shadow-sm animate-in fade-in slide-in-from-top-2">
-                  <div className="space-y-4">
-                    <label className="flex items-center gap-3 cursor-not-allowed opacity-70">
-                      <input type="checkbox" checked readOnly className="w-4 h-4 rounded text-emerald-500 border-slate-300 bg-slate-100 dark:bg-zinc-800" />
-                      <span className="text-sm font-medium text-slate-600 dark:text-zinc-400 line-through">Information Email Sent</span>
-                    </label>
-                    <label className="flex items-center gap-3 cursor-not-allowed opacity-70">
-                      <input type="checkbox" checked readOnly className="w-4 h-4 rounded text-emerald-500 border-slate-300 bg-slate-100 dark:bg-zinc-800" />
-                      <span className="text-sm font-medium text-slate-600 dark:text-zinc-400 line-through">Intake Meeting Planned</span>
-                    </label>
-                    <label className="flex items-center gap-3 cursor-pointer">
-                      <input type="checkbox" className="w-4 h-4 rounded text-emerald-500 border-slate-300" />
-                      <span className="text-sm font-bold text-slate-800 dark:text-zinc-200">Intake Meeting Done</span>
-                    </label>
-                    <label className="flex items-center gap-3 cursor-pointer">
-                      <input type="checkbox" className="w-4 h-4 rounded text-emerald-500 border-slate-300" />
-                      <span className="text-sm font-bold text-slate-800 dark:text-zinc-200">Requirements Documented</span>
-                    </label>
-                    <label className="flex items-center gap-3 cursor-pointer">
-                      <input type="checkbox" className="w-4 h-4 rounded text-emerald-500 border-slate-300" />
-                      <span className="text-sm font-bold text-slate-800 dark:text-zinc-200">Rules of Engagement Signed</span>
-                    </label>
-                    <div className="pt-2 text-xs italic text-slate-400 border-t border-slate-100 dark:border-zinc-800 text-center">
-                      (Checklist logic is a visual mockup)
+
+                  {/* Progress Bar */}
+                  <div className="mb-5">
+                    <div className="flex justify-between text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">
+                      <span>Progress</span>
+                      <span className={STANDARD_MILESTONES.filter(m => milestones[m]).length === STANDARD_MILESTONES.length ? "text-emerald-500" : "text-blue-500"}>
+                        {Math.round((STANDARD_MILESTONES.filter(m => milestones[m]).length / STANDARD_MILESTONES.length) * 100)}%
+                      </span>
                     </div>
+                    <div className="w-full bg-slate-100 dark:bg-zinc-800 rounded-full h-1.5 overflow-hidden">
+                      <div
+                        className={`h-full transition-all duration-500 ${STANDARD_MILESTONES.filter(m => milestones[m]).length === STANDARD_MILESTONES.length ? "bg-emerald-500" : "bg-blue-500"}`}
+                        style={{ width: `${(STANDARD_MILESTONES.filter(m => milestones[m]).length / STANDARD_MILESTONES.length) * 100}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Checklist */}
+                  <div className="space-y-3">
+                    {STANDARD_MILESTONES.map((step) => (
+                      <label key={step} className="flex items-start gap-3 cursor-pointer group">
+                        <input
+                          type="checkbox"
+                          checked={milestones[step] || false}
+                          onChange={() => handleToggleMilestone(step)}
+                          className="mt-0.5 w-4 h-4 rounded text-emerald-500 border-slate-300 dark:border-zinc-700 bg-slate-50 dark:bg-zinc-950 focus:ring-emerald-500 transition-colors cursor-pointer"
+                        />
+                        <span className={`text-sm font-bold transition-colors ${milestones[step] ? 'text-slate-400 dark:text-zinc-500 line-through' : 'text-slate-800 dark:text-zinc-200 group-hover:text-blue-600 dark:group-hover:text-blue-400'}`}>
+                          {step}
+                        </span>
+                      </label>
+                    ))}
                   </div>
                 </div>
               )}
@@ -602,6 +674,17 @@ export default function TestDetailsView() {
             toast.error("Failed to start analysis.");
           }
         }}
+      />
+      <RequirementsModal
+        isOpen={isRequirementsOpen}
+        testId={id as string}
+        onClose={() => setIsRequirementsOpen(false)}
+      />
+      <IntroEmailModal
+        isOpen={isIntroEmailOpen}
+        testId={id as string}
+        onClose={() => setIsIntroEmailOpen(false)}
+        onSuccess={refreshMilestones}
       />
     </div>
   );

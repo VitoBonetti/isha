@@ -187,6 +187,14 @@ class TestAnalysisResponse(BaseModel):
     class Config:
         from_attributes = True
 
+class RequirementCreate(BaseModel):
+    description: str
+
+class MilestoneUpdate(BaseModel):
+    step_name: str
+    is_completed: bool
+
+# Events
 class EventType(str, Enum):
     national_holiday = "national_holiday"
     team_day = "team_day"
@@ -230,3 +238,10 @@ class ContactSyncPayload(BaseModel):
     full_name: Optional[str] = None
     countries: List[ContactMappingItem] = []
     assets: List[ContactMappingItem] = []
+
+# --- Luigi ---
+class SendEmailPayload(BaseModel):
+    to: str
+    cc: str
+    subject: str
+    body: str

@@ -8,7 +8,7 @@ import os
 import time
 import json
 from jose import jwt, JWTError
-from routers import auth, services, users, regions, countries, assets, tests, board, logs, locations, insights, contacts
+from routers import auth, services, users, regions, countries, assets, tests, board, logs, locations, insights, contacts, luigi
 from routers.auth import require_admin, get_google_public_keys
 from database import get_db_connection, run_alembic_migrations
 from websockets_manager import manager
@@ -94,18 +94,19 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 # Register the routes
-app.include_router(auth.router)
-app.include_router(services.router)
-app.include_router(users.router)
-app.include_router(locations.router)
-app.include_router(regions.router)
-app.include_router(countries.router)
 app.include_router(assets.router)
-app.include_router(tests.router)
+app.include_router(auth.router)
 app.include_router(board.router)
-app.include_router(logs.router)
-app.include_router(insights.router)
 app.include_router(contacts.router)
+app.include_router(countries.router)
+app.include_router(insights.router)
+app.include_router(locations.router)
+app.include_router(logs.router)
+app.include_router(luigi.router)
+app.include_router(regions.router)
+app.include_router(services.router)
+app.include_router(tests.router)
+app.include_router(users.router)
 
 
 # --- WEBSOCKET FOR REACTIVE UI ---
