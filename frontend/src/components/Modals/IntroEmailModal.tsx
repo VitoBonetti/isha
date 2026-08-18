@@ -38,8 +38,8 @@ export default function IntroEmailModal({ isOpen, testId, onClose, onSuccess }: 
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!to.trim() || !subject.trim() || !body.trim()) {
-      toast.error("To, Subject, and Body are required.");
+    if ((!to.trim() && !cc.trim()) || !subject.trim() || !body.trim()) {
+      toast.error("At least one recipient (To or CC), Subject, and Body are required.");
       return;
     }
 

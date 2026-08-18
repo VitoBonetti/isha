@@ -7,6 +7,7 @@ from utils.secret_manager import get_secret
 from schema import SendEmailPayload
 from database import get_db_cursor, db_cursor_context
 from routers.auth import get_current_user, require_admin, require_write_access
+from audit_logger import log_audit_event
 from datetime import datetime
 
 
@@ -130,6 +131,9 @@ def draft_intro_email(test_id: str, current_user: dict = Depends(get_current_use
 def send_intro_email(test_id: str, payload: SendEmailPayload, current_user: dict = Depends(get_current_user),
                      cursor=Depends(get_db_cursor)):
 
+    if not payload.to and not payload.cc:
+        raise HTTPException(status_code=400, detail="At least one recipient (To or CC) is required.")
+
     # We combine To and CC for Apps Script (GmailApp handles commas)
     all_recipients = payload.to
     if payload.cc:
@@ -145,6 +149,19 @@ def send_intro_email(test_id: str, payload: SendEmailPayload, current_user: dict
 
     response = requests.post(WEB_APP_URL, json=luigi_payload)
     response.raise_for_status()
+
+    luigi_result = response.json()
+    if luigi_result.get("success") is False:
+        error_msg = luigi_result.get("error", "Unknown Apps Script error")
+        log_audit_event(
+            user_id=str(current_user["id"]),
+            role=current_user["role"],
+            action="LUIGI_FIRST_EMAIL",
+            resource_type="LUIGI",
+            resource_id="N/A",
+            details=f"Luigi Error: {error_msg}",
+        )
+        raise HTTPException(status_code=400, detail=f"Luigi failed: {error_msg}")
 
     # 2. Mark the Milestone as complete!
     cursor.execute("""
