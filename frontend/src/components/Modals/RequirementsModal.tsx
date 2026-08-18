@@ -13,9 +13,10 @@ interface RequirementsModalProps {
   isOpen: boolean;
   testId: string;
   onClose: () => void;
+  onSuccess?: () => void;
 }
 
-export default function RequirementsModal({ isOpen, testId, onClose }: RequirementsModalProps) {
+export default function RequirementsModal({ isOpen, testId, onClose, onSuccess }: RequirementsModalProps) {
   const [requirements, setRequirements] = useState<Requirement[]>([]);
   const [newReq, setNewReq] = useState('');
   const [loading, setLoading] = useState(true);
@@ -40,6 +41,7 @@ export default function RequirementsModal({ isOpen, testId, onClose }: Requireme
       const res = await axios.post(`/api/tests/${testId}/requirements`, { description: newReq });
       setRequirements([...requirements, res.data]);
       setNewReq('');
+      onSuccess?.();
     } catch (error) {
       toast.error("Failed to add requirement");
     }
@@ -50,6 +52,7 @@ export default function RequirementsModal({ isOpen, testId, onClose }: Requireme
     setRequirements(prev => prev.map(r => r.id === reqId ? { ...r, is_completed: !r.is_completed } : r));
     try {
       await axios.put(`/api/tests/requirements/${reqId}/toggle`);
+      onSuccess?.();
     } catch (error) {
       toast.error("Failed to update status");
       // Revert on failure
@@ -61,10 +64,13 @@ export default function RequirementsModal({ isOpen, testId, onClose }: Requireme
     try {
       await axios.delete(`/api/tests/requirements/${reqId}`);
       setRequirements(prev => prev.filter(r => r.id !== reqId));
+      onSuccess?.();
     } catch (error) {
       toast.error("Failed to delete requirement");
     }
   };
+
+
 
   if (!isOpen) return null;
 

@@ -941,12 +941,17 @@ async def process_presentation_background(test_id: str, kiss24_id: str, user_id:
             with db_cursor_context() as cursor:
                 if cursor:
                     cursor.execute("""
-                                INSERT INTO test_documents (id, test_id, drive_file_id, file_name, mime_type, file_url, last_modified, synced_at)
-                                VALUES (gen_random_uuid(), %s, %s, %s, 'application/vnd.openxmlformats-officedocument.presentationml.presentation', %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                                ON CONFLICT (drive_file_id) DO UPDATE SET 
-                                    last_modified = CURRENT_TIMESTAMP, 
-                                    synced_at = CURRENT_TIMESTAMP
-                            """, (test_id, file_id, file_name, drive_link))
+                        INSERT INTO test_documents (id, test_id, drive_file_id, file_name, mime_type, file_url, last_modified, synced_at)
+                        VALUES (gen_random_uuid(), %s, %s, %s, 'application/vnd.openxmlformats-officedocument.presentationml.presentation', %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                        ON CONFLICT (drive_file_id) DO UPDATE SET 
+                            last_modified = CURRENT_TIMESTAMP, 
+                            synced_at = CURRENT_TIMESTAMP
+                    """, (test_id, file_id, file_name, drive_link))
+                    cursor.execute("""
+                        INSERT INTO test_milestones (id, test_id, step_name, is_completed) 
+                        VALUES (gen_random_uuid(), %s, 'Generate Presentation', true)
+                        ON CONFLICT (test_id, step_name) DO UPDATE SET is_completed = true
+                    """, (test_id,))
                     cursor.connection.commit()
 
         # Format the unhealthy warnings into a readable list
@@ -1143,6 +1148,11 @@ async def process_report_background(test_id: str, kiss24_id: str, user_id: str, 
                         last_modified = CURRENT_TIMESTAMP, 
                         synced_at = CURRENT_TIMESTAMP
                 """, (test_id, pdf_result["id"], pdf_filename, pdf_result["link"]))
+                cursor.execute("""
+                    INSERT INTO test_milestones (id, test_id, step_name, is_completed) 
+                    VALUES (gen_random_uuid(), %s, 'Generate Report PDF', true)
+                    ON CONFLICT (test_id, step_name) DO UPDATE SET is_completed = true
+                """, (test_id,))
                 cursor.connection.commit()
 
         # --- SUCCESS HANDLING ---
@@ -1272,6 +1282,12 @@ async def process_vuln_analysis_background(test_id: str, kiss24_id: str, user_id
                     SET status = 'COMPLETED', analysis_text = %s, timestamp = CURRENT_TIMESTAMP 
                     WHERE test_id = %s
                 """, (stitched_markdown, test_id))
+
+                cursor.execute("""
+                    INSERT INTO test_milestones (id, test_id, step_name, is_completed) 
+                    VALUES (gen_random_uuid(), %s, 'Validate Finding', true)
+                    ON CONFLICT (test_id, step_name) DO UPDATE SET is_completed = true
+                """, (test_id,))
                 cursor.connection.commit()
 
         # 5. Notify User
@@ -1419,17 +1435,17 @@ def toggle_requirement(req_id: str, current_user: dict = Depends(get_current_use
     # 3. If all are complete, auto-complete the milestone
     if total_reqs > 0 and total_reqs == completed_reqs:
         cursor.execute("""
-            INSERT INTO test_milestones (id, test_id, step_name, is_completed) 
-            VALUES (gen_random_uuid(), %s, 'Prerequisites Completed', true)
-            ON CONFLICT (test_id, step_name) DO UPDATE SET is_completed = true
-        """, (test_id,))
+                INSERT INTO test_milestones (id, test_id, step_name, is_completed) 
+                VALUES (gen_random_uuid(), %s, 'Requirements', true)
+                ON CONFLICT (test_id, step_name) DO UPDATE SET is_completed = true
+            """, (test_id,))
     else:
         # If they uncheck a requirement, uncheck the milestone
         cursor.execute("""
-            UPDATE test_milestones 
-            SET is_completed = false 
-            WHERE test_id = %s AND step_name = 'Prerequisites Completed'
-        """, (test_id,))
+                UPDATE test_milestones 
+                SET is_completed = false 
+                WHERE test_id = %s AND step_name = 'Requirements'
+            """, (test_id,))
 
     cursor.connection.commit()
     return {"is_completed": new_status, "all_completed": total_reqs == completed_reqs}

@@ -25,7 +25,7 @@ export default function TestDetailsView() {
   const [loading, setLoading] = useState(true);
 
   // Accordion States
-  const [isTargetsOpen, setIsTargetsOpen] = useState(false);
+  const [isTargetsOpen, setIsTargetsOpen] = useState(true);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isAssetContactsOpen, setIsAssetContactsOpen] = useState(false);
   const [isCountryContactsOpen, setIsCountryContactsOpen] = useState(false);
@@ -694,6 +694,7 @@ export default function TestDetailsView() {
         isOpen={isRequirementsOpen}
         testId={id as string}
         onClose={() => setIsRequirementsOpen(false)}
+        onSuccess={refreshMilestones}
       />
       <IntroEmailModal
         isOpen={isIntroEmailOpen}
