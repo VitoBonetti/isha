@@ -5,10 +5,11 @@ import TopNav from "../components/TopNav";
 import SecureNoteModal from "../components/Modals/SecureNoteModal";
 import ConfirmModal from "../components/Modals/ConfirmModal";
 import toast, { Toaster } from "react-hot-toast";
-import { ChevronLeft, Save, ChevronDown, ChevronRight, Database, Users, Shield, Code, MapPin, Server, Activity, Calendar, Edit2, FolderOpen, FolderPlus, Lock, LockOpen, Zap, Presentation, FileDown, CheckSquare, History, ListChecks, Mail } from "lucide-react";
+import { ChevronLeft, Save, ChevronDown, ChevronRight, Database, Users, Shield, Code, MapPin, Server, Activity, Calendar, Edit2, FolderOpen, FolderPlus, Lock, LockOpen, Zap, Presentation, FileDown, CheckSquare, History, ListChecks, Mail, CheckCircle, CircleFadingPlus } from "lucide-react";
 import { useAppContext } from "../context/AppContext";
 import RequirementsModal from "../components/Modals/RequirementsModal";
 import IntroEmailModal from "../components/Modals/IntroEmailModal";
+import FinalEmailModal from "../components/Modals/FinalEmailModal";
 
 export default function TestDetailsView() {
   const { id } = useParams();
@@ -48,13 +49,17 @@ export default function TestDetailsView() {
   const STANDARD_MILESTONES = [
     "Information Email Sent",
     "Intake Meeting Planned",
-    "Requirements Documented",
+    "Requirements",
+    "Validate Finding",
+    "Generate Presentation",
     "Restitution Meeting Planned",
+    "Generate Report PDF",
     "Final Email Sent"
   ];
   const [milestones, setMilestones] = useState<Record<string, boolean>>({});
 
   const [isIntroEmailOpen, setIsIntroEmailOpen] = useState(false);
+  const [isFinalEmailOpen, setIsFinalEmailOpen] = useState(false);
   const refreshMilestones = async () => {
     try {
       const resMiles = await axios.get(`/api/tests/${id}/milestones`);
@@ -447,21 +452,27 @@ export default function TestDetailsView() {
 
                 {/* 5-Column Grid for Square Buttons */}
                 <div className="grid grid-cols-8 gap-2 md:gap-3">
-
                   <button
-                    onClick={handleGeneratePresentation}
-                    title="Generate Presentation"
+                    onClick={(e) => { e.stopPropagation(); setIsIntroEmailOpen(true); }}
+                    title="Send Intro Email"
                     className="aspect-square flex flex-col items-center justify-center gap-1 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/40 text-blue-600 dark:text-blue-400 rounded-xl transition-colors border border-blue-200 dark:border-blue-900/30 p-2 shadow-sm"
                   >
-                    <Presentation size={16} className="shrink-0" />
+                    <Mail size={16} className="shrink-0" />
                   </button>
-
+                  {/* Placeholders for future buttons */}
                   <button
-                    onClick={handleGenerateReport}
-                    title="Generate PDF Report"
-                    className="aspect-square flex flex-col items-center justify-center gap-1 bg-purple-50 dark:bg-purple-900/20 hover:bg-purple-100 dark:hover:bg-purple-900/40 text-purple-600 dark:text-purple-400 rounded-xl transition-colors border border-purple-200 dark:border-purple-900/30 p-2 shadow-sm"
+                    disabled
+                    title="Coming Soon"
+                    className="aspect-square flex flex-col items-center justify-center gap-1 bg-stone-50 dark:bg-stone-900/20 hover:bg-stone-100 dark:hover:bg-stone-900/40 text-stone-600 dark:text-stone-400 rounded-xl transition-colors border border-stone-200 dark:border-stone-900/30 p-2 shadow-sm"
                   >
-                    <FileDown size={16} className="shrink-0" />
+                    <CircleFadingPlus size={16} className="shrink-0" />
+                  </button>
+                  <button
+                   onClick={(e) => { e.stopPropagation(); setIsRequirementsOpen(true); }}
+                   title="Test Requirements"
+                   className="aspect-square flex flex-col items-center justify-center gap-1 bg-fuchsia-50 dark:bg-fuchsia-900/20 hover:bg-fuchsia-100 dark:hover:bg-fuchsia-900/40 text-fuchsia-600 dark:text-fuchsia-400 rounded-xl transition-colors border border-fuchsia-200 dark:border-fuchsia-900/30 p-2 shadow-sm"
+                   >
+                    <CheckSquare size={16} className="shrink-0" />
                   </button>
                   <button
                    onClick={(e) => { e.stopPropagation(); handleVerifyFindings(); }}
@@ -471,29 +482,33 @@ export default function TestDetailsView() {
                     <ListChecks size={16} className="shrink-0" />
                   </button>
                   <button
-                    onClick={(e) => { e.stopPropagation(); setIsIntroEmailOpen(true); }}
-                    title="Send Intro Email"
+                    onClick={handleGeneratePresentation}
+                    title="Generate Presentation"
                     className="aspect-square flex flex-col items-center justify-center gap-1 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/40 text-blue-600 dark:text-blue-400 rounded-xl transition-colors border border-blue-200 dark:border-blue-900/30 p-2 shadow-sm"
                   >
-                    <Mail size={16} className="shrink-0" />
+                    <Presentation size={16} className="shrink-0" />
                   </button>
                   {/* Placeholders for future buttons */}
-                  <button disabled title="Coming Soon" className="aspect-square flex flex-col items-center justify-center bg-slate-50 dark:bg-zinc-800/50 text-slate-400 dark:text-zinc-500 rounded-xl border border-slate-200 dark:border-zinc-700 border-dashed cursor-not-allowed transition-colors">
-                    <span className="text-lg opacity-50">+</span>
+                  <button
+                    disabled
+                    title="Coming Soon"
+                    className="aspect-square flex flex-col items-center justify-center gap-1 bg-olive-50 dark:bg-olive-900/20 hover:bg-olive-100 dark:hover:bg-olive-900/40 text-olive-600 dark:text-olive-400 rounded-xl transition-colors border border-olive-200 dark:border-olive-900/30 p-2 shadow-sm"
+                  >
+                    <CircleFadingPlus size={16} className="shrink-0" />
                   </button>
                   <button
-                   onClick={(e) => { e.stopPropagation(); setIsRequirementsOpen(true); }}
-                   title="Test Requirements"
-                   className="aspect-square flex flex-col items-center justify-center gap-1 bg-fuchsia-50 dark:bg-fuchsia-900/20 hover:bg-fuchsia-100 dark:hover:bg-fuchsia-900/40 text-fuchsia-600 dark:text-fuchsia-400 rounded-xl transition-colors border border-fuchsia-200 dark:border-fuchsia-900/30 p-2 shadow-sm"
-                   >
-                    <CheckSquare size={16} className="shrink-0" />
+                    onClick={handleGenerateReport}
+                    title="Generate PDF Report"
+                    className="aspect-square flex flex-col items-center justify-center gap-1 bg-purple-50 dark:bg-purple-900/20 hover:bg-purple-100 dark:hover:bg-purple-900/40 text-purple-600 dark:text-purple-400 rounded-xl transition-colors border border-purple-200 dark:border-purple-900/30 p-2 shadow-sm"
+                  >
+                    <FileDown size={16} className="shrink-0" />
                   </button>
-                  {/* Placeholders for future buttons */}
-                  <button disabled title="Coming Soon" className="aspect-square flex flex-col items-center justify-center bg-slate-50 dark:bg-zinc-800/50 text-slate-400 dark:text-zinc-500 rounded-xl border border-slate-200 dark:border-zinc-700 border-dashed cursor-not-allowed transition-colors">
-                    <span className="text-lg opacity-50">+</span>
-                  </button>
-                  <button disabled title="Coming Soon" className="aspect-square flex flex-col items-center justify-center bg-slate-50 dark:bg-zinc-800/50 text-slate-400 dark:text-zinc-500 rounded-xl border border-slate-200 dark:border-zinc-700 border-dashed cursor-not-allowed transition-colors">
-                    <span className="text-lg opacity-50">+</span>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setIsFinalEmailOpen(true); }}
+                    title="Send Final Email"
+                    className="aspect-square flex flex-col items-center justify-center gap-1 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/40 text-blue-600 dark:text-blue-400 rounded-xl transition-colors border border-blue-200 dark:border-blue-900/30 p-2 shadow-sm"
+                  >
+                    <CheckCircle size={16} className="shrink-0" />
                   </button>
 
                 </div>
@@ -684,6 +699,12 @@ export default function TestDetailsView() {
         isOpen={isIntroEmailOpen}
         testId={id as string}
         onClose={() => setIsIntroEmailOpen(false)}
+        onSuccess={refreshMilestones}
+      />
+      <FinalEmailModal
+        isOpen={isFinalEmailOpen}
+        testId={id as string}
+        onClose={() => setIsFinalEmailOpen(false)}
         onSuccess={refreshMilestones}
       />
     </div>

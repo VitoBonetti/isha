@@ -933,7 +933,21 @@ async def process_presentation_background(test_id: str, kiss24_id: str, user_id:
         )
 
         drive_link = data.get("driveLink", "No link returned")
+        file_id = data.get("fileId")
+        file_name = data.get("fileName")
         warnings_dict = data.get("warnings", {})
+
+        if file_id and file_name:
+            with db_cursor_context() as cursor:
+                if cursor:
+                    cursor.execute("""
+                                INSERT INTO test_documents (id, test_id, drive_file_id, file_name, mime_type, file_url, last_modified, synced_at)
+                                VALUES (gen_random_uuid(), %s, %s, %s, 'application/vnd.openxmlformats-officedocument.presentationml.presentation', %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                                ON CONFLICT (drive_file_id) DO UPDATE SET 
+                                    last_modified = CURRENT_TIMESTAMP, 
+                                    synced_at = CURRENT_TIMESTAMP
+                            """, (test_id, file_id, file_name, drive_link))
+                    cursor.connection.commit()
 
         # Format the unhealthy warnings into a readable list
         issues = []
@@ -1115,21 +1129,25 @@ async def process_report_background(test_id: str, kiss24_id: str, user_id: str, 
         pdf_content, pdf_filename = await asyncio.to_thread(pdf_gen.convert_html_to_pdf, html_content, html_filename)
 
         drive_manager = DriveManager()
-        await asyncio.to_thread(drive_manager.upload_file, drive_folder_id, html_filename, html_content.encode('utf-8'),
-                                'text/html')
-        pdf_link = await asyncio.to_thread(drive_manager.upload_file, drive_folder_id, pdf_filename, pdf_content,
-                                           'application/pdf')
-
-        # --- SUCCESS HANDLING ---
-        message = f"Report for '{test_name}' is ready!\nPDF Link: {pdf_link}"
-        await manager.broadcast(json.dumps({"action": "REPORT_READY", "email": user_email, "message": message}))
+        html_result = await asyncio.to_thread(drive_manager.upload_file, drive_folder_id, html_filename,
+                                              html_content.encode('utf-8'), 'text/html')
+        pdf_result = await asyncio.to_thread(drive_manager.upload_file, drive_folder_id, pdf_filename, pdf_content,
+                                             'application/pdf')
 
         with db_cursor_context() as cursor:
             if cursor:
-                cursor.execute(
-                    "INSERT INTO notifications (id, user_id, message, type, created_at) VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)",
-                    (str(uuid.uuid4()), user_id, message, "SUCCESS")
-                )
+                cursor.execute("""
+                    INSERT INTO test_documents (id, test_id, drive_file_id, file_name, mime_type, file_url, last_modified, synced_at)
+                    VALUES (gen_random_uuid(), %s, %s, %s, 'application/pdf', %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    ON CONFLICT (drive_file_id) DO UPDATE SET 
+                        last_modified = CURRENT_TIMESTAMP, 
+                        synced_at = CURRENT_TIMESTAMP
+                """, (test_id, pdf_result["id"], pdf_filename, pdf_result["link"]))
+                cursor.connection.commit()
+
+        # --- SUCCESS HANDLING ---
+        message = f"Report for '{test_name}' is ready!\nPDF Link: {pdf_result['link']}"
+        await manager.broadcast(json.dumps({"action": "REPORT_READY", "email": user_email, "message": message}))
 
         await asyncio.to_thread(
             log_audit_event,
@@ -1375,13 +1393,46 @@ def add_requirement(test_id: str, req: RequirementCreate, current_user: dict = D
 
 @router.put("/requirements/{req_id}/toggle")
 def toggle_requirement(req_id: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+    # 1. Toggle the requirement and fetch the parent test_id
     cursor.execute("""
         UPDATE test_requirements SET is_completed = NOT is_completed 
-        WHERE id = %s RETURNING is_completed
+        WHERE id = %s RETURNING is_completed, test_id
     """, (req_id,))
-    new_status = cursor.fetchone()[0]
+
+    row = cursor.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Requirement not found.")
+
+    new_status, test_id = row
+
+    # 2. Check if ALL requirements for this test are now complete
+    cursor.execute("""
+        SELECT 
+            COUNT(*) as total_reqs,
+            SUM(CASE WHEN is_completed THEN 1 ELSE 0 END) as completed_reqs
+        FROM test_requirements
+        WHERE test_id = %s
+    """, (test_id,))
+
+    total_reqs, completed_reqs = cursor.fetchone()
+
+    # 3. If all are complete, auto-complete the milestone
+    if total_reqs > 0 and total_reqs == completed_reqs:
+        cursor.execute("""
+            INSERT INTO test_milestones (id, test_id, step_name, is_completed) 
+            VALUES (gen_random_uuid(), %s, 'Prerequisites Completed', true)
+            ON CONFLICT (test_id, step_name) DO UPDATE SET is_completed = true
+        """, (test_id,))
+    else:
+        # If they uncheck a requirement, uncheck the milestone
+        cursor.execute("""
+            UPDATE test_milestones 
+            SET is_completed = false 
+            WHERE test_id = %s AND step_name = 'Prerequisites Completed'
+        """, (test_id,))
+
     cursor.connection.commit()
-    return {"is_completed": new_status}
+    return {"is_completed": new_status, "all_completed": total_reqs == completed_reqs}
 
 
 @router.delete("/requirements/{req_id}")

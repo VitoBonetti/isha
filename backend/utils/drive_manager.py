@@ -206,7 +206,10 @@ class DriveManager:
             ).execute()
 
             print(f"Uploaded {filename} to Drive successfully.")
-            return file.get('webViewLink')
+            return {
+                "id": file.get('id'),
+                "link": file.get('webViewLink')
+            }
         except Exception as e:
             print(f"Failed to upload file {filename}: {e}")
             raise e

@@ -64,6 +64,10 @@ class PlaceholderResponse(PlaceholderCreate):
     class Config:
         from_attributes = True
 
+class ServiceLaneTemplatesUpdate(BaseModel):
+    intro_email_template: Optional[str] = None
+    final_email_template: Optional[str] = None
+
 # --- USERS ---
 class UserBase(BaseModel):
     name: str

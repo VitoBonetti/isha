@@ -1,7 +1,7 @@
-from fastapi import APIRouter, Depends, BackgroundTasks, Query
+from fastapi import APIRouter, Depends, BackgroundTasks, Query, HTTPException
 from database import get_db_cursor
 from routers.auth import require_admin, get_current_user
-from schema import ServiceLaneBase, PlaceholderResponse, PlaceholderCreate
+from schema import ServiceLaneBase, PlaceholderResponse, PlaceholderCreate, ServiceLaneTemplatesUpdate
 from websockets_manager import manager
 import uuid
 from datetime import datetime
@@ -209,3 +209,27 @@ def delete_placeholder(placeholder_id: str, background_tasks: BackgroundTasks,
 
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Placeholder deleted"}
+
+
+@router.patch("/{service_lane_id}/templates")
+def update_service_lane_templates(
+        service_lane_id: str,
+        payload: ServiceLaneTemplatesUpdate,
+        current_user: dict = Depends(require_admin),
+        cursor=Depends(get_db_cursor)
+):
+    # Update the templates in the database
+    cursor.execute("""
+        UPDATE services_lanes
+        SET intro_email_template = COALESCE(%s, intro_email_template),
+            final_email_template = COALESCE(%s, final_email_template)
+        WHERE id = %s
+        RETURNING id;
+    """, (payload.intro_email_template, payload.final_email_template, service_lane_id))
+
+    updated_id = cursor.fetchone()
+    if not updated_id:
+        raise HTTPException(status_code=404, detail="Service Lane not found")
+
+    cursor.connection.commit()
+    return {"status": "Success", "message": "Templates updated successfully"}

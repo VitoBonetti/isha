@@ -499,7 +499,7 @@ def upload_drive_file(service, folder_id, filename, file_stream):
             resumable=True
         )
         file = service.files().create(body=file_metadata, media_body=media, fields='id, webViewLink', supportsAllDrives=True).execute()
-        return file.get('webViewLink')
+        return file.get('id'), file.get('webViewLink')
     except HttpError as error:
         print(f"An error occurred while uploading file '{filename}': {error}")
         raise
@@ -1100,11 +1100,13 @@ def generate_presentation(test_uuid: str, db_drive_folder_id: str, db_service_na
     )
 
     print(f"Uploading '{output_filename}' to Google Drive...")
-    file_link = upload_drive_file(drive_service, db_drive_folder_id, output_filename, output_stream)
+    file_id, file_link = upload_drive_file(drive_service, db_drive_folder_id, output_filename, output_stream)
     print("Upload complete.")
 
     return {
         "message": "Presentation generated successfully!",
         "driveLink": file_link,
+        "fileId": file_id,
+        "fileName": output_filename,
         "warnings": healthy_check
     }

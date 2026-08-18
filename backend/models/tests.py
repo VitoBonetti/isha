@@ -65,7 +65,6 @@ class TestAssets(Base):
     asset_id = Column(UUID(as_uuid=True), ForeignKey('assets.id', ondelete='CASCADE'), primary_key=True)
 
 
-
 class Assignments(Base):
     __tablename__ = 'assignments'
 
