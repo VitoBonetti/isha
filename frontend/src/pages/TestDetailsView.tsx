@@ -115,29 +115,46 @@ export default function TestDetailsView() {
   };
 
   useEffect(() => {
-    // 1. Core Data (If any of these fail, the page legitimately cannot load)
-    Promise.all([
-      axios.get(`/api/tests/${id}`),
-      axios.get('/api/services/'),
-      axios.get('/api/board/categories/?year=All'),
-      axios.get(`/api/tests/${id}/milestones`)
-    ]).then(([resTest, resS, resCat, resMiles]) => {
-      const tData = resTest.data;
-      tData.status = dbToFrontendStatus(tData.status);
-      setTest(tData);
-      setServices(resS.data);
-      setCategories(resCat.data);
-      setMilestones(resMiles.data);
-    }).catch(() => {
-      toast.error("Failed to load test details");
-      navigate("/tests");
-    }).finally(() => setLoading(false));
+    // 1. Core Data Fetching Function
+    const fetchCoreData = () => {
+      Promise.all([
+        axios.get(`/api/tests/${id}`),
+        axios.get('/api/services/'),
+        axios.get('/api/board/categories/?year=All'),
+        axios.get(`/api/tests/${id}/milestones`)
+      ]).then(([resTest, resS, resCat, resMiles]) => {
+        const tData = resTest.data;
+        tData.status = dbToFrontendStatus(tData.status);
+        setTest(tData);
+        setServices(resS.data);
+        setCategories(resCat.data);
+        setMilestones(resMiles.data);
+      }).catch(() => {
+        toast.error("Failed to load test details");
+        navigate("/tests");
+      }).finally(() => setLoading(false));
+    };
 
-    // 2. Background Analysis Check (COMPLETELY SEPARATE)
-    // A 404 here is expected and will safely just set hasAnalysis to false!
-    axios.get(`/api/tests/${id}/analysis`)
-      .then(() => setHasAnalysis(true))
-      .catch(() => setHasAnalysis(false));
+    // Initial load
+    fetchCoreData();
+
+    // 2. Background Analysis Check
+    const checkAnalysis = () => {
+      axios.get(`/api/tests/${id}/analysis`)
+        .then(() => setHasAnalysis(true))
+        .catch(() => setHasAnalysis(false));
+    };
+    checkAnalysis();
+
+    // --- LISTEN FOR WEBSOCKET UPDATES ---
+    // TopNav fires this event when ANY background task finishes!
+    window.addEventListener('refresh_test_data', fetchCoreData);
+    window.addEventListener('refresh_test_data', checkAnalysis);
+
+    return () => {
+      window.removeEventListener('refresh_test_data', fetchCoreData);
+      window.removeEventListener('refresh_test_data', checkAnalysis);
+    };
 
   }, [id, navigate]);
 

@@ -57,6 +57,7 @@ FRONTEND_TO_DB_STAGES = {
 
 KISS24_BASE_URL = str(os.environ.get("KISS_24_ENDPOINT"))
 CUTOFF_DATE = datetime(2026, 5, 1, tzinfo=timezone.utc)
+BASE_URL = str(os.environ.get("FRONTEND_URL"))
 
 
 # --- SECURITY: ENCRYPTION CIPHER ---
@@ -97,7 +98,7 @@ def log_test_history(cursor, test_id: str, user_id: str, action: str, details: s
         ''', (new_asset_hist_id, str(raw_asset_id), str(user_id) if user_id else None, action, asset_details))
 
 
-# --- HELPER: PDF GENERATION ---
+# --- HELPER: report generations ---
 def fetch_all_kiss24(endpoint: str, api_key: str, payload: dict = None):
     """Helper to fetch all paginated results from KISS24 with safe JSON parsing."""
     if payload is None: payload = {}
@@ -219,8 +220,362 @@ def validate_kiss24_findings(vulns: list, vuln_fields_map: dict, report_type: in
     return invalid_findings
 
 
-# --- CORE TEST MANAGEMENT ---
-@router.post("/", summary="[Admin Only]")
+async def process_presentation_background(test_id: str, kiss24_id: str, user_id: str, user_email: str, user_role: str, test_name: str,
+                                          drive_folder_id: str, service_name: str, snow_number: str,
+                                          start_week: int, start_year: int, duration_weeks: float):
+    """Background task that generates the presentation locally via a thread."""
+    try:
+        # Pass the database values to the generator
+        data = await asyncio.to_thread(
+            generate_presentation,
+            kiss24_id,
+            drive_folder_id,
+            service_name,
+            snow_number,
+            start_week,
+            start_year,
+            duration_weeks
+        )
+
+        drive_link = data.get("driveLink", "No link returned")
+        file_id = data.get("fileId")
+        file_name = data.get("fileName")
+        warnings_dict = data.get("warnings", {})
+
+        if file_id and file_name:
+            with db_cursor_context() as cursor:
+                if cursor:
+                    cursor.execute("""
+                        INSERT INTO test_documents (id, test_id, drive_file_id, file_name, mime_type, file_url, last_modified, synced_at)
+                        VALUES (gen_random_uuid(), %s, %s, %s, 'application/vnd.openxmlformats-officedocument.presentationml.presentation', %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                        ON CONFLICT (drive_file_id) DO UPDATE SET 
+                            last_modified = CURRENT_TIMESTAMP, 
+                            synced_at = CURRENT_TIMESTAMP
+                    """, (test_id, file_id, file_name, drive_link))
+                    cursor.execute("""
+                        INSERT INTO test_milestones (id, test_id, step_name, is_completed) 
+                        VALUES (gen_random_uuid(), %s, 'Generate Presentation', true)
+                        ON CONFLICT (test_id, step_name) DO UPDATE SET is_completed = true
+                    """, (test_id,))
+                    cursor.connection.commit()
+
+        # Format the unhealthy warnings into a readable list
+        issues = []
+        if isinstance(warnings_dict, dict):
+            for key, info in warnings_dict.items():
+                if isinstance(info, dict) and not info.get("healthy"):
+                    issues.append(f"{key.capitalize()}: {info.get('reason')}")
+
+        if issues:
+            issues_text = "\n\n[!] Warnings:\n- " + "\n- ".join(issues)
+        else:
+            issues_text = "\n\n[+] Health Check: 100% Healthy (No warnings)"
+
+        message = f"Presentation for '{test_name}' is ready!\nLink: {drive_link}{issues_text}"
+        notif_type = "SUCCESS"
+
+        await manager.broadcast(json.dumps({
+            "action": "PRESENTATION_READY",
+            "email": user_email,
+            "message": f"Presentation for {test_name} generated successfully!"
+        }))
+
+    except Exception as e:
+        print(f"Error generating presentation: {e}")
+        message = f"Generation failed for '{test_name}'. Error: {str(e)}"
+        notif_type = "ERROR"
+        await manager.broadcast(json.dumps({
+            "action": "PRESENTATION_FAILED",
+            "email": user_email,
+            "message": message
+        }))
+
+    # Save the result as a notification for the user
+    with db_cursor_context() as cursor:
+        if cursor:
+            cursor.execute(
+                "INSERT INTO notifications (id, user_id, message, type, created_at) VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)",
+                (str(uuid.uuid4()), user_id, message, notif_type)
+            )
+
+    await manager.broadcast('{"action": "REFRESH_BOARD"}')
+
+
+def get_report_type_id(display_order: int) -> int:
+    """Maps the service lane's display_order to the report type expected by osrgt_v3."""
+    if display_order == 1:
+        return 1  # Adversary Simulation
+    elif display_order == 2:
+        return 3  # White Box
+    else:
+        return 2  # Black/Grey Box
+
+
+async def process_report_background(test_id: str, kiss24_id: str, user_id: str, user_email: str, user_role: str,
+                                    test_name: str, drive_folder_id: str, display_order: int,
+                                    start_week: int, start_year: int, duration_weeks: float):
+    """Background task that generates the HTML & PDF reports, uploads them, and handles logging."""
+    try:
+        try:
+            test_start = datetime.fromisocalendar(start_year, start_week, 1)
+            dur_weeks = max(1, int(duration_weeks or 1))
+            test_end = test_start + timedelta(days=(dur_weeks - 1) * 7 + 4)
+            start_date_str = test_start.strftime("%d-%m-%Y")
+            end_date_str = test_end.strftime("%d-%m-%Y")
+        except Exception:
+            start_date_str = end_date_str = None
+
+        # CRITICAL FIX: Ensure the API key is stripped of whitespace/newlines
+        raw_api_key = get_secret(os.environ.get("KISS_24_API_KEY_NAME"))
+        api_key = raw_api_key.strip() if raw_api_key else ""
+
+        report_type = get_report_type_id(display_order)
+
+        # 1. RUN VALIDATION BEFORE GENERATING REPORT
+        vulns = await asyncio.to_thread(fetch_all_kiss24, 'vulnerabilities', api_key, {"tests": [kiss24_id]})
+        vuln_uuids = [v['uuid'] for v in vulns]
+        vuln_fields_map = await asyncio.to_thread(get_vuln_fields_map, vuln_uuids, api_key)
+
+        invalid_findings = await asyncio.to_thread(validate_kiss24_findings, vulns, vuln_fields_map, report_type,
+                                                   api_key)
+
+        if invalid_findings:
+            err_msg = f"Report generation aborted for '{test_name}'. Validation failed:\n"
+            for f in invalid_findings:
+                err_msg += f"\n- Vuln {f['vuln_uuid']}:\n  " + "\n  ".join(f['reasons'])
+            raise ValueError(err_msg)
+
+        # 2. PROCEED WITH GENERATION
+        report_args = {
+            "pentest": kiss24_id,
+            "type": report_type,
+            "api_key": api_key,
+            "action": "generate",
+            "minify": False,
+            "environment": "sec24prd",
+            "loglevel": "info",
+            "devoteam": False,
+            "start": start_date_str,
+            "end": end_date_str,
+            "custom_fields": vuln_fields_map
+        }
+
+        html_content, html_filename = await asyncio.to_thread(osrgt_v3.generate_html_report, report_args)
+        pdf_content, pdf_filename = await asyncio.to_thread(pdf_gen.convert_html_to_pdf, html_content, html_filename)
+
+        drive_manager = DriveManager()
+        html_result = await asyncio.to_thread(drive_manager.upload_file, drive_folder_id, html_filename,
+                                              html_content.encode('utf-8'), 'text/html')
+        pdf_result = await asyncio.to_thread(drive_manager.upload_file, drive_folder_id, pdf_filename, pdf_content,
+                                             'application/pdf')
+
+        with db_cursor_context() as cursor:
+            if cursor:
+                cursor.execute("""
+                    INSERT INTO test_documents (id, test_id, drive_file_id, file_name, mime_type, file_url, last_modified, synced_at)
+                    VALUES (gen_random_uuid(), %s, %s, %s, 'application/pdf', %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    ON CONFLICT (drive_file_id) DO UPDATE SET 
+                        last_modified = CURRENT_TIMESTAMP, 
+                        synced_at = CURRENT_TIMESTAMP
+                """, (test_id, pdf_result["id"], pdf_filename, pdf_result["link"]))
+                cursor.execute("""
+                    INSERT INTO test_milestones (id, test_id, step_name, is_completed) 
+                    VALUES (gen_random_uuid(), %s, 'Generate Report PDF', true)
+                    ON CONFLICT (test_id, step_name) DO UPDATE SET is_completed = true
+                """, (test_id,))
+                cursor.connection.commit()
+
+        # --- SUCCESS HANDLING ---
+        message = f"Report for '{test_name}' is ready!\nPDF Link: {pdf_result['link']}"
+        await manager.broadcast(json.dumps({"action": "REPORT_READY", "email": user_email, "message": message}))
+
+        with db_cursor_context() as cursor:
+            if cursor:
+                cursor.execute(
+                    "INSERT INTO notifications (id, user_id, message, type, created_at) VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)",
+                    (str(uuid.uuid4()), user_id, message, "SUCCESS")
+                )
+                cursor.connection.commit()
+
+        await asyncio.to_thread(
+            log_audit_event,
+            user_id=user_id,
+            role=user_role,
+            action="REPORT_GENERATION_SUCCESS",
+            resource_type="REPORTING",
+            resource_id=test_id,
+            details=f"Successfully generated and uploaded PDF report for '{test_name}'."
+        )
+
+    except Exception as e:
+        error_details = str(e)
+
+        # Catch the full python stack trace so we can debug exactly which line failed in BigQuery
+        full_traceback = traceback.format_exc()
+        print(f"Error generating report: {error_details}\n{full_traceback}")
+
+        # Format a clean message for the User
+        if isinstance(e, ValueError) and (
+                "Validation failed" in error_details or "API Error" in error_details or "Invalid JSON" in error_details):
+            user_message = error_details
+        else:
+            user_message = f"Report generation failed for '{test_name}'. Please contact an administrator or check the logs."
+
+        await manager.broadcast(json.dumps({"action": "REPORT_FAILED", "email": user_email, "message": user_message}))
+
+        with db_cursor_context() as cursor:
+            if cursor:
+                cursor.execute(
+                    "INSERT INTO notifications (id, user_id, message, type, created_at) VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)",
+                    (str(uuid.uuid4()), user_id, user_message, "ERROR")
+                )
+
+        # Log the raw technical crash to BigQuery
+        await asyncio.to_thread(
+            log_audit_event,
+            user_id=user_id,
+            role=user_role,
+            action="REPORT_GENERATION_CRASH",
+            resource_type="REPORTING",
+            resource_id=test_id,
+            details=f"Crash during report generation for '{test_name}': {error_details}\nTraceback: {full_traceback}"
+        )
+
+    await manager.broadcast('{"action": "REFRESH_BOARD"}')
+
+
+# --- HELPER: Vulnerability analysis ---
+async def process_vuln_analysis_background(test_id: str, kiss24_id: str, user_id: str, user_email: str, test_name: str):
+    try:
+        # 1. Build Payload
+        payload = await build_payload(kiss24_id)
+        if not payload or not payload.get("vulnerabilities"):
+            raise ValueError("No vulnerabilities found to analyze.")
+
+        # 2. Call Cloud Run
+        analysis_response = await run_cloud_run_analysis(payload)
+
+        # 3. Stitch Markdown
+        results = analysis_response.get("results", [])
+        stitched_markdown = "\n\n---\n\n".join([r.get("analysis", "") for r in results if r.get("status") == "success"])
+
+        if not stitched_markdown:
+            raise ValueError("Cloud Run returned no valid analysis text.")
+
+        # 4. Save to Database
+        with db_cursor_context() as cursor:
+            if cursor:
+                cursor.execute("""
+                    UPDATE test_analyses 
+                    SET status = 'COMPLETED', analysis_text = %s, timestamp = CURRENT_TIMESTAMP 
+                    WHERE test_id = %s
+                """, (stitched_markdown, test_id))
+
+                cursor.execute("""
+                    INSERT INTO test_milestones (id, test_id, step_name, is_completed) 
+                    VALUES (gen_random_uuid(), %s, 'Validate Finding', true)
+                    ON CONFLICT (test_id, step_name) DO UPDATE SET is_completed = true
+                """, (test_id,))
+                cursor.connection.commit()
+
+        # 5. Notify User
+        db_message = f"Vulnerability Analysis for '{test_name}' is ready! Link: {BASE_URL}/tests/{test_id}/analysis"
+        with db_cursor_context() as cursor:
+            if cursor:
+                cursor.execute(
+                    "INSERT INTO notifications (id, user_id, message, type, created_at) VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)",
+                    (str(uuid.uuid4()), user_id, db_message, "SUCCESS")
+                )
+                cursor.connection.commit()
+
+        toast_message = f"Vulnerability Analysis for '{test_name}' is ready!"
+        await manager.broadcast(json.dumps({
+            "action": "REPORT_READY",
+            "email": user_email,
+            "message": toast_message,
+            "link": f"/tests/{test_id}/analysis"
+        }))
+
+    except Exception as e:
+        print(f"Analysis failed: {e}")
+        with db_cursor_context() as cursor:
+            if cursor:
+                cursor.execute(
+                    "UPDATE test_analyses SET status = 'FAILED', timestamp = CURRENT_TIMESTAMP WHERE test_id = %s",
+                    (test_id,))
+                cursor.connection.commit()
+
+        await manager.broadcast(json.dumps({
+            "action": "REPORT_FAILED",
+            "email": user_email,
+            "message": f"Analysis failed for '{test_name}': {str(e)}"
+        }))
+
+
+# --- HELPER: bulk generation ---
+def process_bulk_tests_background(asset_ids: List[UUID4], user_id: str, role: str,):
+    tests_to_provision = []
+
+    with db_cursor_context() as cursor:
+        if not cursor: return
+        for asset_id in asset_ids:
+            cursor.execute('''
+                SELECT r.name, r.service_forecast_id, s.default_credits, s.default_duration_weeks,
+                       s.name as service_name, c.name as country_name, s.auto_provision_workspace
+                FROM assets a
+                JOIN raw_assets r ON a.raw_asset_id = r.id
+                LEFT JOIN services_lanes s ON r.service_forecast_id = s.id
+                LEFT JOIN countries c ON r.country_id = c.id
+                WHERE a.id = %s 
+                 AND (r.duplicate_allowed = TRUE OR NOT EXISTS (
+                    SELECT 1 FROM test_assets ta 
+                     JOIN tests t ON ta.test_id = t.id 
+                     WHERE ta.asset_id = a.id 
+                         AND t.stages::text IN ('NOT_PLANNED', 'SCHEDULED', 'IN_PROGRESS')
+                ))
+            ''', (str(asset_id),))
+            asset_data = cursor.fetchone()
+            if not asset_data or not asset_data[1]: continue
+
+            asset_name, service_lane_id, default_credits, default_duration_weeks, service_name, country_name, auto_provision = asset_data
+
+            new_test_id = str(uuid.uuid4())
+            credits = float(default_credits) if default_credits is not None else 2.0
+            duration = int(default_duration_weeks) if default_duration_weeks is not None else 1
+
+            cursor.execute('''
+                INSERT INTO tests (id, name, service_lane_id, credits_per_week, duration_weeks, stages) 
+                 VALUES (%s, %s, %s, %s, %s, 'NOT_PLANNED') RETURNING id
+            ''', (new_test_id, asset_name, str(service_lane_id), credits, duration))
+
+            log_audit_event(
+                user_id=str(user_id),
+                role=str(role),
+                action="TEST_CREATED",
+                resource_type="TESTS",
+                resource_id=str(new_test_id),
+                details=f"Test {asset_name} with ID: {new_test_id} was created. Service Lane ID: {service_lane_id} in a Bulk Action."
+            )
+
+            cursor.execute('INSERT INTO test_assets (test_id, asset_id) VALUES (%s, %s)', (new_test_id, str(asset_id)))
+            log_test_history(cursor, new_test_id, user_id, "GENERATED", f"Test generated from Asset Pool.")
+
+            # Store the data to provision later
+            current_year = datetime.now().year
+            tests_to_provision.append(
+                (new_test_id, current_year, service_name, country_name, asset_name, auto_provision))
+
+        # Commit the transaction so the database unlocks the rows!
+        cursor.connection.commit()
+
+    # Now that the DB is unlocked, we can safely contact Google Drive
+    for test_id, year, s_name, c_name, t_name, auto_prov in tests_to_provision:
+        if auto_prov:
+            DriveManager().provision_test_workspace(test_id, year, s_name, c_name, t_name)
+
+
+# --- Test endpoint api ---
+@router.post("/", summary="[Admin Only] Create a new Test")
 def create_test(t: TestCreate, background_tasks: BackgroundTasks,
                 current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     new_test_id = str(uuid.uuid4())
@@ -253,7 +608,7 @@ def create_test(t: TestCreate, background_tasks: BackgroundTasks,
     return {"message": "Test created successfully", "id": new_id}
 
 
-@router.get("/")
+@router.get("/", summary="Return all tests")
 def get_all_tests(current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
     cursor.execute('''
         SELECT t.id, t.name, t.start_week, t.start_year, t.duration_weeks, t.stages::text as status,
@@ -367,7 +722,7 @@ def get_test_details(test_id: str, current_user: dict = Depends(get_current_user
     return test_data
 
 
-@router.put("/{test_id}", summary="[Admin Only]")
+@router.put("/{test_id}", summary="[Admin Only] Update a specific test")
 def update_test(test_id: str, t: TestBase, background_tasks: BackgroundTasks,
                 current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     # 1. Fetch old data to see if we need to relocate the Google Drive folder
@@ -441,7 +796,7 @@ def update_test(test_id: str, t: TestBase, background_tasks: BackgroundTasks,
     return {"message": "Test updated successfully."}
 
 
-@router.delete("/{test_id}", summary="[Admin Only]")
+@router.delete("/{test_id}", summary="[Admin Only] Delete a specific test")
 def delete_test(test_id: str, background_tasks: BackgroundTasks,
                 current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
 
@@ -475,69 +830,7 @@ def delete_test(test_id: str, background_tasks: BackgroundTasks,
     return {"message": "Test permanently deleted and assets freed."}
 
 
-# --- BULK GENERATION ---
-def process_bulk_tests_background(asset_ids: List[UUID4], user_id: str, role: str,):
-    tests_to_provision = []
-
-    with db_cursor_context() as cursor:
-        if not cursor: return
-        for asset_id in asset_ids:
-            cursor.execute('''
-                SELECT r.name, r.service_forecast_id, s.default_credits, s.default_duration_weeks,
-                       s.name as service_name, c.name as country_name, s.auto_provision_workspace
-                FROM assets a
-                JOIN raw_assets r ON a.raw_asset_id = r.id
-                LEFT JOIN services_lanes s ON r.service_forecast_id = s.id
-                LEFT JOIN countries c ON r.country_id = c.id
-                WHERE a.id = %s 
-                 AND (r.duplicate_allowed = TRUE OR NOT EXISTS (
-                    SELECT 1 FROM test_assets ta 
-                     JOIN tests t ON ta.test_id = t.id 
-                     WHERE ta.asset_id = a.id 
-                         AND t.stages::text IN ('NOT_PLANNED', 'SCHEDULED', 'IN_PROGRESS')
-                ))
-            ''', (str(asset_id),))
-            asset_data = cursor.fetchone()
-            if not asset_data or not asset_data[1]: continue
-
-            asset_name, service_lane_id, default_credits, default_duration_weeks, service_name, country_name, auto_provision = asset_data
-
-            new_test_id = str(uuid.uuid4())
-            credits = float(default_credits) if default_credits is not None else 2.0
-            duration = int(default_duration_weeks) if default_duration_weeks is not None else 1
-
-            cursor.execute('''
-                INSERT INTO tests (id, name, service_lane_id, credits_per_week, duration_weeks, stages) 
-                 VALUES (%s, %s, %s, %s, %s, 'NOT_PLANNED') RETURNING id
-            ''', (new_test_id, asset_name, str(service_lane_id), credits, duration))
-
-            log_audit_event(
-                user_id=str(user_id),
-                role=str(role),
-                action="TEST_CREATED",
-                resource_type="TESTS",
-                resource_id=str(new_test_id),
-                details=f"Test {asset_name} with ID: {new_test_id} was created. Service Lane ID: {service_lane_id} in a Bulk Action."
-            )
-
-            cursor.execute('INSERT INTO test_assets (test_id, asset_id) VALUES (%s, %s)', (new_test_id, str(asset_id)))
-            log_test_history(cursor, new_test_id, user_id, "GENERATED", f"Test generated from Asset Pool.")
-
-            # Store the data to provision later
-            current_year = datetime.now().year
-            tests_to_provision.append(
-                (new_test_id, current_year, service_name, country_name, asset_name, auto_provision))
-
-        # Commit the transaction so the database unlocks the rows!
-        cursor.connection.commit()
-
-    # Now that the DB is unlocked, we can safely contact Google Drive
-    for test_id, year, s_name, c_name, t_name, auto_prov in tests_to_provision:
-        if auto_prov:
-            DriveManager().provision_test_workspace(test_id, year, s_name, c_name, t_name)
-
-
-@router.post("/bulk", summary="[Admin Only]")
+@router.post("/bulk", summary="[Admin Only] bulk creation of tests")
 def bulk_create_tests(req: BulkTestCreate, background_tasks: BackgroundTasks,
                       current_user: dict = Depends(require_admin)):
     background_tasks.add_task(process_bulk_tests_background, req.asset_ids, str(current_user['id']), str(current_user['role']))
@@ -545,8 +838,53 @@ def bulk_create_tests(req: BulkTestCreate, background_tasks: BackgroundTasks,
     return {"message": f"Generating {len(req.asset_ids)} tests from active pool."}
 
 
-# --- 3. SCHEDULING & STATUS LIFECYCLE ---
-@router.put("/{test_id}/schedule", summary="[Admin Only]")
+@router.post("/{test_id}/workspace", summary="[Admin Only] Create workspace on Google for each test")
+def provision_workspace_manually(test_id: str, background_tasks: BackgroundTasks,
+                                 current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    # Fetch required metadata to create the folder path
+    cursor.execute('''
+        SELECT t.name, s.name, c.name, t.start_year
+        FROM tests t
+        LEFT JOIN services_lanes s ON t.service_lane_id = s.id
+        LEFT JOIN test_assets ta ON t.id = ta.test_id
+        LEFT JOIN assets a ON ta.asset_id = a.id
+        LEFT JOIN countries c ON a.country_id = c.id
+        WHERE t.id = %s LIMIT 1
+    ''', (test_id,))
+
+    test_data = cursor.fetchone()
+    if not test_data:
+        raise HTTPException(status_code=404, detail="Test not found.")
+
+    test_name, service_name, country_name, start_year = test_data
+    target_year = start_year if start_year else datetime.now().year
+
+    # Run the provisioner in the background. It will automatically broadcast a REFRESH_BOARD event when done!
+    background_tasks.add_task(background_provision_workspace, test_id, target_year, service_name, country_name,
+                              test_name)
+
+    return {"message": "Workspace provisioning started."}
+
+
+@router.put("/{test_id}/tentative", summary="[Admin Only] Flag the test as Tentative")
+def toggle_tentative(test_id: str, background_tasks: BackgroundTasks,
+                     current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    # Flips the boolean from True to False, or False to True
+    cursor.execute("UPDATE tests SET is_tentative = NOT is_tentative WHERE id = %s", (test_id,))
+
+    # Log it
+    cursor.execute("SELECT is_tentative FROM tests WHERE id = %s", (test_id,))
+    is_tent = cursor.fetchone()[0]
+    state_str = "Marked as Tentative (TBC)" if is_tent else "Removed Tentative mark"
+    log_test_history(cursor, test_id, current_user['id'], "UPDATED", state_str)
+
+    cursor.connection.commit()
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+    return {"message": state_str}
+
+
+# --- test Scheduling ---
+@router.put("/{test_id}/schedule", summary="[Admin Only] Schedule a test")
 def schedule_test(test_id: str, schedule: TestSchedule, background_tasks: BackgroundTasks,
                   current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     # Fetch old schedule to see if the dates are actively shifting
@@ -596,7 +934,7 @@ def schedule_test(test_id: str, schedule: TestSchedule, background_tasks: Backgr
     return {"message": "Test scheduled on the board."}
 
 
-@router.put("/{test_id}/unschedule", summary="[Admin Only]")
+@router.put("/{test_id}/unschedule", summary="[Admin Only] Unschedule a test")
 def unschedule_test(test_id: str, background_tasks: BackgroundTasks,
                     current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     cursor.execute('SELECT user_id FROM assignments WHERE test_id = %s', (test_id,))
@@ -632,7 +970,7 @@ def unschedule_test(test_id: str, background_tasks: BackgroundTasks,
     return {"message": "Test returned to backlog."}
 
 
-@router.put("/{test_id}/complete", summary="[Admin Only]")
+@router.put("/{test_id}/complete", summary="[Admin Only] Flag a test as complete")
 def complete_test(test_id: str, background_tasks: BackgroundTasks,
                   current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     cursor.execute("UPDATE tests SET stages = 'COMPLETED' WHERE id = %s", (test_id,))
@@ -646,7 +984,7 @@ def complete_test(test_id: str, background_tasks: BackgroundTasks,
     return {"message": "Test marked as Completed."}
 
 
-@router.put("/{test_id}/unable", summary="[Admin Only]")
+@router.put("/{test_id}/unable", summary="[Admin Only] Flag a test as unable")
 def mark_test_unable(test_id: str, background_tasks: BackgroundTasks,
                      current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     #  original test details
@@ -691,7 +1029,7 @@ def mark_test_unable(test_id: str, background_tasks: BackgroundTasks,
     return {"message": "Test marked as Stopped."}
 
 
-@router.put("/{test_id}/unstop", summary="[Admin Only]")
+@router.put("/{test_id}/unstop", summary="[Admin Only] Roll back a unable test to normal")
 def unstop_test(test_id: str, background_tasks: BackgroundTasks,
                 current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
 
@@ -736,8 +1074,7 @@ def unstop_test(test_id: str, background_tasks: BackgroundTasks,
     return {"message": "Test unstopped successfully."}
 
 
-# Make un-completing a test cleaner on the backend
-@router.put("/{test_id}/uncomplete", summary="[Admin Only]")
+@router.put("/{test_id}/uncomplete", summary="[Admin Only] Make un-completing a test cleaner on the backend")
 def uncomplete_test(test_id: str, background_tasks: BackgroundTasks,
                     current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     cursor.execute("UPDATE tests SET stages = 'SCHEDULED' WHERE id = %s", (test_id,))
@@ -747,8 +1084,8 @@ def uncomplete_test(test_id: str, background_tasks: BackgroundTasks,
     return {"message": "Test uncompleted."}
 
 
-# ---  ASSIGNMENTS ---
-@router.post("/assignments", summary="[Admin Only]")
+# ---  Assign a test ---
+@router.post("/assignments", summary="[Admin Only] Assigne a test to a pentester")
 def create_assignment(assign: AssignmentCreate, background_tasks: BackgroundTasks,
                       current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     cursor.execute('''
@@ -789,7 +1126,7 @@ def create_assignment(assign: AssignmentCreate, background_tasks: BackgroundTask
     return {"message": "Successfully Assigned"}
 
 
-@router.delete("/assignments/{test_id}/{user_id}", summary="[Admin Only]")
+@router.delete("/assignments/{test_id}/{user_id}", summary="[Admin Only] Remove pentester from assigned test")
 def remove_assignment(test_id: str, user_id: str, background_tasks: BackgroundTasks,
                       current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     cursor.execute("SELECT name FROM tests WHERE id = %s", (test_id,))
@@ -814,8 +1151,8 @@ def remove_assignment(test_id: str, user_id: str, background_tasks: BackgroundTa
     return {"message": "Successfully Unassigned"}
 
 
-# ---  HISTORY ROUTE ---
-@router.get("/{test_id}/history")
+# ---  History Test ---
+@router.get("/{test_id}/history", summary="REturn the test history")
 def get_test_history(test_id: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
     cursor.execute('''
         SELECT th.id, th.action, th.details, th.timestamp, u.name as user_name
@@ -828,8 +1165,8 @@ def get_test_history(test_id: str, current_user: dict = Depends(get_current_user
     return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
 
-# --- SECURE NOTES CRUD ---
-@router.get("/{test_id}/secret")
+# --- Secure note ---
+@router.get("/{test_id}/secret", summary="Return the test secret")
 def get_test_secret(test_id: str, current_user: dict = Depends(require_write_access), cursor=Depends(get_db_cursor)):
     cursor.execute("SELECT encrypted_note FROM secret_notes WHERE test_id = %s", (test_id,))
     row = cursor.fetchone()
@@ -843,7 +1180,7 @@ def get_test_secret(test_id: str, current_user: dict = Depends(require_write_acc
         raise HTTPException(status_code=500, detail="Failed to decrypt the secure note.")
 
 
-@router.put("/{test_id}/secret")
+@router.put("/{test_id}/secret", summary="Update the test secret")
 def update_test_secret(test_id: str, payload: SecureNotePayload, background_tasks: BackgroundTasks,
                        current_user: dict = Depends(require_write_access), cursor=Depends(get_db_cursor)):
     cipher = get_cipher()
@@ -859,7 +1196,7 @@ def update_test_secret(test_id: str, payload: SecureNotePayload, background_task
     return {"message": "Secure note encrypted and saved."}
 
 
-@router.delete("/{test_id}/secret", summary="[Admin Only]")
+@router.delete("/{test_id}/secret", summary="[Admin Only] Delete the test secret")
 def delete_test_secret(test_id: str, background_tasks: BackgroundTasks,
                        current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     cursor.execute("DELETE FROM secret_notes WHERE test_id = %s", (test_id,))
@@ -868,135 +1205,8 @@ def delete_test_secret(test_id: str, background_tasks: BackgroundTasks,
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Secure note permanently deleted."}
 
-
-@router.post("/{test_id}/workspace", summary="[Admin Only]")
-def provision_workspace_manually(test_id: str, background_tasks: BackgroundTasks,
-                                 current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
-    # Fetch required metadata to create the folder path
-    cursor.execute('''
-        SELECT t.name, s.name, c.name, t.start_year
-        FROM tests t
-        LEFT JOIN services_lanes s ON t.service_lane_id = s.id
-        LEFT JOIN test_assets ta ON t.id = ta.test_id
-        LEFT JOIN assets a ON ta.asset_id = a.id
-        LEFT JOIN countries c ON a.country_id = c.id
-        WHERE t.id = %s LIMIT 1
-    ''', (test_id,))
-
-    test_data = cursor.fetchone()
-    if not test_data:
-        raise HTTPException(status_code=404, detail="Test not found.")
-
-    test_name, service_name, country_name, start_year = test_data
-    target_year = start_year if start_year else datetime.now().year
-
-    # Run the provisioner in the background. It will automatically broadcast a REFRESH_BOARD event when done!
-    background_tasks.add_task(background_provision_workspace, test_id, target_year, service_name, country_name,
-                              test_name)
-
-    return {"message": "Workspace provisioning started."}
-
-
-@router.put("/{test_id}/tentative", summary="[Admin Only]")
-def toggle_tentative(test_id: str, background_tasks: BackgroundTasks,
-                     current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
-    # Flips the boolean from True to False, or False to True
-    cursor.execute("UPDATE tests SET is_tentative = NOT is_tentative WHERE id = %s", (test_id,))
-
-    # Log it
-    cursor.execute("SELECT is_tentative FROM tests WHERE id = %s", (test_id,))
-    is_tent = cursor.fetchone()[0]
-    state_str = "Marked as Tentative (TBC)" if is_tent else "Removed Tentative mark"
-    log_test_history(cursor, test_id, current_user['id'], "UPDATED", state_str)
-
-    cursor.connection.commit()
-    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
-    return {"message": state_str}
-
-
 # --- Generation PPT ---
-async def process_presentation_background(test_id: str, kiss24_id: str, user_id: str, user_email: str, user_role: str, test_name: str,
-                                          drive_folder_id: str, service_name: str, snow_number: str,
-                                          start_week: int, start_year: int, duration_weeks: float):
-    """Background task that generates the presentation locally via a thread."""
-    try:
-        # Pass the database values to the generator
-        data = await asyncio.to_thread(
-            generate_presentation,
-            kiss24_id,
-            drive_folder_id,
-            service_name,
-            snow_number,
-            start_week,
-            start_year,
-            duration_weeks
-        )
-
-        drive_link = data.get("driveLink", "No link returned")
-        file_id = data.get("fileId")
-        file_name = data.get("fileName")
-        warnings_dict = data.get("warnings", {})
-
-        if file_id and file_name:
-            with db_cursor_context() as cursor:
-                if cursor:
-                    cursor.execute("""
-                        INSERT INTO test_documents (id, test_id, drive_file_id, file_name, mime_type, file_url, last_modified, synced_at)
-                        VALUES (gen_random_uuid(), %s, %s, %s, 'application/vnd.openxmlformats-officedocument.presentationml.presentation', %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                        ON CONFLICT (drive_file_id) DO UPDATE SET 
-                            last_modified = CURRENT_TIMESTAMP, 
-                            synced_at = CURRENT_TIMESTAMP
-                    """, (test_id, file_id, file_name, drive_link))
-                    cursor.execute("""
-                        INSERT INTO test_milestones (id, test_id, step_name, is_completed) 
-                        VALUES (gen_random_uuid(), %s, 'Generate Presentation', true)
-                        ON CONFLICT (test_id, step_name) DO UPDATE SET is_completed = true
-                    """, (test_id,))
-                    cursor.connection.commit()
-
-        # Format the unhealthy warnings into a readable list
-        issues = []
-        if isinstance(warnings_dict, dict):
-            for key, info in warnings_dict.items():
-                if isinstance(info, dict) and not info.get("healthy"):
-                    issues.append(f"{key.capitalize()}: {info.get('reason')}")
-
-        if issues:
-            issues_text = "\n\n[!] Warnings:\n- " + "\n- ".join(issues)
-        else:
-            issues_text = "\n\n[+] Health Check: 100% Healthy (No warnings)"
-
-        message = f"Presentation for '{test_name}' is ready!\nLink: {drive_link}{issues_text}"
-        notif_type = "SUCCESS"
-
-        await manager.broadcast(json.dumps({
-            "action": "PRESENTATION_READY",
-            "email": user_email,
-            "message": f"Presentation for {test_name} generated successfully!"
-        }))
-
-    except Exception as e:
-        print(f"Error generating presentation: {e}")
-        message = f"Generation failed for '{test_name}'. Error: {str(e)}"
-        notif_type = "ERROR"
-        await manager.broadcast(json.dumps({
-            "action": "PRESENTATION_FAILED",
-            "email": user_email,
-            "message": message
-        }))
-
-    # Save the result as a notification for the user
-    with db_cursor_context() as cursor:
-        if cursor:
-            cursor.execute(
-                "INSERT INTO notifications (id, user_id, message, type, created_at) VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)",
-                (str(uuid.uuid4()), user_id, message, notif_type)
-            )
-
-    await manager.broadcast('{"action": "REFRESH_BOARD"}')
-
-
-@router.post("/{test_id}/presentation")
+@router.post("/{test_id}/presentation", summary="Create a new presentation")
 def trigger_presentation_generation(test_id: str, background_tasks: BackgroundTasks,
                                     current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
     if current_user.get('role') == 'read_only':
@@ -1071,142 +1281,7 @@ def trigger_presentation_generation(test_id: str, background_tasks: BackgroundTa
 
 
 # --- Generation PDF ---
-def get_report_type_id(display_order: int) -> int:
-    """Maps the service lane's display_order to the report type expected by osrgt_v3."""
-    if display_order == 1:
-        return 1  # Adversary Simulation
-    elif display_order == 2:
-        return 3  # White Box
-    else:
-        return 2  # Black/Grey Box
-
-
-async def process_report_background(test_id: str, kiss24_id: str, user_id: str, user_email: str, user_role: str,
-                                    test_name: str, drive_folder_id: str, display_order: int,
-                                    start_week: int, start_year: int, duration_weeks: float):
-    """Background task that generates the HTML & PDF reports, uploads them, and handles logging."""
-    try:
-        try:
-            test_start = datetime.fromisocalendar(start_year, start_week, 1)
-            dur_weeks = max(1, int(duration_weeks or 1))
-            test_end = test_start + timedelta(days=(dur_weeks - 1) * 7 + 4)
-            start_date_str = test_start.strftime("%d-%m-%Y")
-            end_date_str = test_end.strftime("%d-%m-%Y")
-        except Exception:
-            start_date_str = end_date_str = None
-
-        # CRITICAL FIX: Ensure the API key is stripped of whitespace/newlines
-        raw_api_key = get_secret(os.environ.get("KISS_24_API_KEY_NAME"))
-        api_key = raw_api_key.strip() if raw_api_key else ""
-
-        report_type = get_report_type_id(display_order)
-
-        # 1. RUN VALIDATION BEFORE GENERATING REPORT
-        vulns = await asyncio.to_thread(fetch_all_kiss24, 'vulnerabilities', api_key, {"tests": [kiss24_id]})
-        vuln_uuids = [v['uuid'] for v in vulns]
-        vuln_fields_map = await asyncio.to_thread(get_vuln_fields_map, vuln_uuids, api_key)
-
-        invalid_findings = await asyncio.to_thread(validate_kiss24_findings, vulns, vuln_fields_map, report_type,
-                                                   api_key)
-
-        if invalid_findings:
-            err_msg = f"Report generation aborted for '{test_name}'. Validation failed:\n"
-            for f in invalid_findings:
-                err_msg += f"\n- Vuln {f['vuln_uuid']}:\n  " + "\n  ".join(f['reasons'])
-            raise ValueError(err_msg)
-
-        # 2. PROCEED WITH GENERATION
-        report_args = {
-            "pentest": kiss24_id,
-            "type": report_type,
-            "api_key": api_key,
-            "action": "generate",
-            "minify": False,
-            "environment": "sec24prd",
-            "loglevel": "info",
-            "devoteam": False,
-            "start": start_date_str,
-            "end": end_date_str,
-            "custom_fields": vuln_fields_map
-        }
-
-        html_content, html_filename = await asyncio.to_thread(osrgt_v3.generate_html_report, report_args)
-        pdf_content, pdf_filename = await asyncio.to_thread(pdf_gen.convert_html_to_pdf, html_content, html_filename)
-
-        drive_manager = DriveManager()
-        html_result = await asyncio.to_thread(drive_manager.upload_file, drive_folder_id, html_filename,
-                                              html_content.encode('utf-8'), 'text/html')
-        pdf_result = await asyncio.to_thread(drive_manager.upload_file, drive_folder_id, pdf_filename, pdf_content,
-                                             'application/pdf')
-
-        with db_cursor_context() as cursor:
-            if cursor:
-                cursor.execute("""
-                    INSERT INTO test_documents (id, test_id, drive_file_id, file_name, mime_type, file_url, last_modified, synced_at)
-                    VALUES (gen_random_uuid(), %s, %s, %s, 'application/pdf', %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                    ON CONFLICT (drive_file_id) DO UPDATE SET 
-                        last_modified = CURRENT_TIMESTAMP, 
-                        synced_at = CURRENT_TIMESTAMP
-                """, (test_id, pdf_result["id"], pdf_filename, pdf_result["link"]))
-                cursor.execute("""
-                    INSERT INTO test_milestones (id, test_id, step_name, is_completed) 
-                    VALUES (gen_random_uuid(), %s, 'Generate Report PDF', true)
-                    ON CONFLICT (test_id, step_name) DO UPDATE SET is_completed = true
-                """, (test_id,))
-                cursor.connection.commit()
-
-        # --- SUCCESS HANDLING ---
-        message = f"Report for '{test_name}' is ready!\nPDF Link: {pdf_result['link']}"
-        await manager.broadcast(json.dumps({"action": "REPORT_READY", "email": user_email, "message": message}))
-
-        await asyncio.to_thread(
-            log_audit_event,
-            user_id=user_id,
-            role=user_role,
-            action="REPORT_GENERATION_SUCCESS",
-            resource_type="REPORTING",
-            resource_id=test_id,
-            details=f"Successfully generated and uploaded PDF report for '{test_name}'."
-        )
-
-    except Exception as e:
-        error_details = str(e)
-
-        # Catch the full python stack trace so we can debug exactly which line failed in BigQuery
-        full_traceback = traceback.format_exc()
-        print(f"Error generating report: {error_details}\n{full_traceback}")
-
-        # Format a clean message for the User
-        if isinstance(e, ValueError) and (
-                "Validation failed" in error_details or "API Error" in error_details or "Invalid JSON" in error_details):
-            user_message = error_details
-        else:
-            user_message = f"Report generation failed for '{test_name}'. Please contact an administrator or check the logs."
-
-        await manager.broadcast(json.dumps({"action": "REPORT_FAILED", "email": user_email, "message": user_message}))
-
-        with db_cursor_context() as cursor:
-            if cursor:
-                cursor.execute(
-                    "INSERT INTO notifications (id, user_id, message, type, created_at) VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)",
-                    (str(uuid.uuid4()), user_id, user_message, "ERROR")
-                )
-
-        # Log the raw technical crash to BigQuery
-        await asyncio.to_thread(
-            log_audit_event,
-            user_id=user_id,
-            role=user_role,
-            action="REPORT_GENERATION_CRASH",
-            resource_type="REPORTING",
-            resource_id=test_id,
-            details=f"Crash during report generation for '{test_name}': {error_details}\nTraceback: {full_traceback}"
-        )
-
-    await manager.broadcast('{"action": "REFRESH_BOARD"}')
-
-
-@router.post("/{test_id}/report")
+@router.post("/{test_id}/report", summary="Generate PDF report")
 def trigger_report_generation(test_id: str, background_tasks: BackgroundTasks,
                               current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
     """API Endpoint to trigger the background report generation."""
@@ -1257,73 +1332,8 @@ def trigger_report_generation(test_id: str, background_tasks: BackgroundTasks,
     }
 
 
-async def process_vuln_analysis_background(test_id: str, kiss24_id: str, user_id: str, user_email: str, test_name: str):
-    try:
-        # 1. Build Payload
-        payload = await build_payload(kiss24_id)
-        if not payload or not payload.get("vulnerabilities"):
-            raise ValueError("No vulnerabilities found to analyze.")
-
-        # 2. Call Cloud Run
-        analysis_response = await run_cloud_run_analysis(payload)
-
-        # 3. Stitch Markdown
-        results = analysis_response.get("results", [])
-        stitched_markdown = "\n\n---\n\n".join([r.get("analysis", "") for r in results if r.get("status") == "success"])
-
-        if not stitched_markdown:
-            raise ValueError("Cloud Run returned no valid analysis text.")
-
-        # 4. Save to Database
-        with db_cursor_context() as cursor:
-            if cursor:
-                cursor.execute("""
-                    UPDATE test_analyses 
-                    SET status = 'COMPLETED', analysis_text = %s, timestamp = CURRENT_TIMESTAMP 
-                    WHERE test_id = %s
-                """, (stitched_markdown, test_id))
-
-                cursor.execute("""
-                    INSERT INTO test_milestones (id, test_id, step_name, is_completed) 
-                    VALUES (gen_random_uuid(), %s, 'Validate Finding', true)
-                    ON CONFLICT (test_id, step_name) DO UPDATE SET is_completed = true
-                """, (test_id,))
-                cursor.connection.commit()
-
-        # 5. Notify User
-        message = f"Vulnerability Analysis for '{test_name}' is ready!"
-        with db_cursor_context() as cursor:
-            if cursor:
-                cursor.execute(
-                    "INSERT INTO notifications (id, user_id, message, type, created_at) VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)",
-                    (str(uuid.uuid4()), user_id, message, "SUCCESS")
-                )
-                cursor.connection.commit()
-        await manager.broadcast(json.dumps({
-            "action": "REPORT_READY",
-            "email": user_email,
-            "message": message,
-            "link": f"/tests/{test_id}/analysis"
-        }))
-
-    except Exception as e:
-        print(f"Analysis failed: {e}")
-        with db_cursor_context() as cursor:
-            if cursor:
-                cursor.execute(
-                    "UPDATE test_analyses SET status = 'FAILED', timestamp = CURRENT_TIMESTAMP WHERE test_id = %s",
-                    (test_id,))
-                cursor.connection.commit()
-
-        await manager.broadcast(json.dumps({
-            "action": "REPORT_FAILED",
-            "email": user_email,
-            "message": f"Analysis failed for '{test_name}': {str(e)}"
-        }))
-
-
-# --- ANALYSIS ENDPOINTS ---
-@router.get("/{test_id}/analysis", response_model=TestAnalysisResponse)
+# --- Vulne analysis ---
+@router.get("/{test_id}/analysis", response_model=TestAnalysisResponse, summary="Get Analysis report")
 def get_test_analysis(test_id: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
     """Check if an analysis exists and retrieve it."""
     cursor.execute("SELECT status, analysis_text, timestamp FROM test_analyses WHERE test_id = %s", (test_id,))
@@ -1338,7 +1348,7 @@ def get_test_analysis(test_id: str, current_user: dict = Depends(get_current_use
     }
 
 
-@router.post("/{test_id}/analysis")
+@router.post("/{test_id}/analysis", summary="Perform vulnerabilities analysis")
 def trigger_test_analysis(test_id: str, background_tasks: BackgroundTasks,
                           current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
     """Creates a PENDING record and triggers the background generator."""
@@ -1371,14 +1381,14 @@ def trigger_test_analysis(test_id: str, background_tasks: BackgroundTasks,
 
 
 # -- Milestones ---
-@router.get("/{test_id}/milestones")
+@router.get("/{test_id}/milestones", summary="Get Milestones test")
 def get_milestones(test_id: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
     cursor.execute("SELECT step_name, is_completed FROM test_milestones WHERE test_id = %s", (test_id,))
     # Return a simple dictionary: {"Information Email Sent": true, "Intake Meeting Planned": false}
     return {row[0]: row[1] for row in cursor.fetchall()}
 
 
-@router.put("/{test_id}/milestones")
+@router.put("/{test_id}/milestones", summary="Update Milestones test")
 def update_milestone(test_id: str, payload: MilestoneUpdate, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
     # UPSERT logic: Insert it, or if it exists, update the boolean
     cursor.execute("""
@@ -1390,13 +1400,13 @@ def update_milestone(test_id: str, payload: MilestoneUpdate, current_user: dict 
     return {"message": "Updated"}
 
 
-@router.get("/{test_id}/requirements")
+@router.get("/{test_id}/requirements", summary="Get Requirement test")
 def get_requirements(test_id: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
     cursor.execute("SELECT id, description, is_completed FROM test_requirements WHERE test_id = %s ORDER BY id", (test_id,))
     return [{"id": str(r[0]), "description": r[1], "is_completed": r[2]} for r in cursor.fetchall()]
 
 
-@router.post("/{test_id}/requirements")
+@router.post("/{test_id}/requirements", summary="Add Requirement test")
 def add_requirement(test_id: str, req: RequirementCreate, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
     cursor.execute("""
         INSERT INTO test_requirements (id, test_id, description, is_completed) 
@@ -1407,7 +1417,7 @@ def add_requirement(test_id: str, req: RequirementCreate, current_user: dict = D
     return {"id": str(req_id), "description": req.description, "is_completed": False}
 
 
-@router.put("/requirements/{req_id}/toggle")
+@router.put("/requirements/{req_id}/toggle", summary="Edit Requirement test")
 def toggle_requirement(req_id: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
     # 1. Toggle the requirement and fetch the parent test_id
     cursor.execute("""
@@ -1451,7 +1461,7 @@ def toggle_requirement(req_id: str, current_user: dict = Depends(get_current_use
     return {"is_completed": new_status, "all_completed": total_reqs == completed_reqs}
 
 
-@router.delete("/requirements/{req_id}")
+@router.delete("/requirements/{req_id}", summary="Delete Requirement test")
 def delete_requirement(req_id: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
     cursor.execute("DELETE FROM test_requirements WHERE id = %s", (req_id,))
     cursor.connection.commit()

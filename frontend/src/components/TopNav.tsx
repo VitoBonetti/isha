@@ -65,6 +65,7 @@ export default function TopNav() {
         // Auto-refresh the notification bell for ANY board changes
         if (data.action === 'REFRESH_BOARD' || data.action === 'REPORT_READY') {
           handleRefreshNotifications();
+          window.dispatchEvent(new Event('refresh_test_data'));
         }
 
         // Handle targeted success toasts (with clickable links!)
