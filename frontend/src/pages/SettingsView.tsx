@@ -3,8 +3,9 @@ import { useState, useEffect } from 'react';
 import { useSettings } from '../hooks/useSettings';
 import TopNav from '../components/TopNav';
 import ConfirmModal from '../components/Modals/ConfirmModal';
+import TemplateEditorModal from '../components/Modals/TemplateEditorModal';
 import toast, { Toaster } from 'react-hot-toast';
-import { Key, Users, MapPin, Activity, Tags, Globe, Flag, Server, Trash2, Download, AlertTriangle, Plus, Database, Terminal, Edit2, LayoutTemplate, ChevronsUpDown, ChevronUp, ChevronDown, FolderClosed } from 'lucide-react';
+import { Key, Users, MapPin, Activity, Tags, Globe, Flag, Server, Trash2, Download, AlertTriangle, Plus, Database, Terminal, Edit2, LayoutTemplate, ChevronsUpDown, ChevronUp, ChevronDown, FolderClosed, Mail, CheckCircle } from 'lucide-react';
 
 // Sleek Custom Toggle Component
 const Toggle = ({ checked, onChange, label, disabled = false }: { checked: boolean, onChange: (c: boolean) => void, label: string, disabled?: boolean }) => (
@@ -56,6 +57,17 @@ export default function SettingsView() {
   const [ledgerGoals, setLedgerGoals] = useState<{year: number, target_goal: number}[]>([]);
   const [newLedgerYear, setNewLedgerYear] = useState(currentYear);
   const [newLedgerGoal, setNewLedgerGoal] = useState(0);
+
+  // Template State
+  const [templateModal, setTemplateModal] = useState<{
+    isOpen: boolean;
+    serviceId: string;
+    serviceName: string;
+    type: 'intro' | 'final' | null;
+    initialTemplate: string;
+  }>({
+    isOpen: false, serviceId: '', serviceName: '', type: null, initialTemplate: ''
+  });
 
   // Update Category Fetching to use the new Filters
   useEffect(() => {
@@ -756,38 +768,55 @@ export default function SettingsView() {
                   </div>
                 </form>
               )}
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="flex flex-col gap-4">
                 {localServices?.map((item: any) => (
-                  <div key={item.id} className={`border p-4 md:p-5 rounded-2xl flex flex-col sm:flex-row sm:justify-between items-start transition-colors bg-white dark:bg-zinc-900 shadow-sm hover:shadow-md gap-4 sm:gap-0 ${item.is_active ? 'border-slate-200 dark:border-zinc-800 hover:border-blue-500 dark:hover:border-blue-500' : 'border-slate-200 dark:border-zinc-800 opacity-60 grayscale'}`}>
-                    <div className="w-full">
+                  <div key={item.id} className={`border p-4 md:p-5 rounded-2xl flex flex-col md:flex-row md:items-center transition-colors bg-white dark:bg-zinc-900 shadow-sm hover:shadow-md gap-4 ${item.is_active ? 'border-slate-200 dark:border-zinc-800 hover:border-blue-500 dark:hover:border-blue-500' : 'border-slate-200 dark:border-zinc-800 opacity-60 grayscale'}`}>
+
+                    {/* LEFT SECTION: Basic Info */}
+                    <div className="flex-1 min-w-[250px]">
                       <div className="font-bold text-base md:text-lg text-slate-900 dark:text-zinc-100 flex items-center gap-2">
                         {item.theme_color && <div className="w-4 h-4 rounded-full shadow-sm shrink-0" style={{backgroundColor: item.theme_color}}></div>}
                         <span className="truncate">{item.name}</span>
+                        <span className={`ml-2 px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider shadow-sm border ${item.is_active ? 'bg-emerald-100 dark:bg-emerald-500/10 border-emerald-200 dark:border-emerald-500/20 text-emerald-800 dark:text-emerald-400' : 'bg-slate-100 dark:bg-zinc-800 border-slate-200 dark:border-zinc-700 text-slate-500 dark:text-zinc-400'}`}>
+                          {item.is_active ? 'Active' : 'Inactive'}
+                        </span>
                       </div>
-                      <div className="mt-2 text-xs md:text-sm text-slate-500 dark:text-zinc-400 font-medium">
-                        <div>Credits: <span className="text-slate-900 dark:text-zinc-200">{item.default_credits}cr</span></div>
-                        <div>Duration: <span className="text-slate-900 dark:text-zinc-200">{item.default_duration_weeks}w</span></div>
-                        <div>Max: <span className="text-slate-900 dark:text-zinc-200">{item.max_concurrent_per_week || '∞'}</span></div>
-                        <div className="flex items-center gap-1 mt-1 pt-1 border-t border-slate-100 dark:border-zinc-800">
-                          Goal Ledger:
-                          <button
-                            onClick={async () => {
-                              setGoalLedgerService({id: item.id, name: item.name});
-                              const res = await axios.get(`/api/services/${item.id}/goals`);
-                              setLedgerGoals(res.data);
-                            }}
-                            className="text-blue-600 dark:text-blue-400 font-bold hover:underline px-1.5 py-0.5 rounded hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
-                          >
-                            Manage Years
-                          </button>
-                        </div>
-                      </div>
-                      <div className={`mt-3 md:mt-4 px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-wider w-fit shadow-sm border ${item.is_active ? 'bg-emerald-100 dark:bg-emerald-500/10 border-emerald-200 dark:border-emerald-500/20 text-emerald-800 dark:text-emerald-400' : 'bg-slate-100 dark:bg-zinc-800 border-slate-200 dark:border-zinc-700 text-slate-500 dark:text-zinc-400'}`}>
-                        {item.is_active ? 'Active' : 'Inactive'}
+                      <div className="mt-2 text-xs md:text-sm text-slate-500 dark:text-zinc-400 font-medium flex flex-wrap items-center gap-4">
+                        <span>Credits: <strong className="text-slate-900 dark:text-zinc-200">{item.default_credits}cr</strong></span>
+                        <span>Duration: <strong className="text-slate-900 dark:text-zinc-200">{item.default_duration_weeks}w</strong></span>
+                        <span>Max: <strong className="text-slate-900 dark:text-zinc-200">{item.max_concurrent_per_week || '∞'}</strong></span>
+                        <button
+                          onClick={async () => {
+                            setGoalLedgerService({id: item.id, name: item.name});
+                            const res = await axios.get(`/api/services/${item.id}/goals`);
+                            setLedgerGoals(res.data);
+                          }}
+                          className="text-blue-600 dark:text-blue-400 font-bold hover:underline px-2 py-1 rounded hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
+                        >
+                          Manage Yearly Goals
+                        </button>
                       </div>
                     </div>
-                    <div className="flex sm:flex-col justify-end w-full sm:w-auto gap-2 sm:gap-1 mt-2 sm:mt-0 pt-3 sm:pt-0 border-t border-slate-100 dark:border-transparent sm:border-0">
+                    {/* MIDDLE SECTION: Email Templates */}
+                    <div className="flex-1 flex flex-col gap-2 min-w-[200px] border-l border-slate-200 dark:border-zinc-800 pl-4">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Email Automations</span>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          onClick={() => setTemplateModal({ isOpen: true, serviceId: item.id, serviceName: item.name, type: 'intro', initialTemplate: item.intro_email_template })}
+                          className={`text-xs font-bold flex items-center gap-1.5 px-3 py-1.5 rounded-lg border transition-colors ${item.intro_email_template ? 'bg-white dark:bg-zinc-900 border-slate-200 dark:border-zinc-700 text-slate-700 dark:text-zinc-300 hover:border-blue-500' : 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-900/50 text-blue-600 dark:text-blue-400 hover:bg-blue-100'}`}
+                        >
+                          <Mail size={14} /> {item.intro_email_template ? 'Edit Intro Email' : 'Add Intro Email'}
+                        </button>
+                        <button
+                          onClick={() => setTemplateModal({ isOpen: true, serviceId: item.id, serviceName: item.name, type: 'final', initialTemplate: item.final_email_template })}
+                          className={`text-xs font-bold flex items-center gap-1.5 px-3 py-1.5 rounded-lg border transition-colors ${item.final_email_template ? 'bg-white dark:bg-zinc-900 border-slate-200 dark:border-zinc-700 text-slate-700 dark:text-zinc-300 hover:border-emerald-500' : 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-900/50 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-100'}`}
+                        >
+                          <CheckCircle size={14} /> {item.final_email_template ? 'Edit Final Email' : 'Add Final Email'}
+                        </button>
+                      </div>
+                    </div>
+                    {/* RIGHT SECTION: Actions */}
+                    <div className="flex md:flex-col justify-end w-full md:w-auto gap-2 shrink-0 border-t border-slate-100 dark:border-transparent md:border-t-0 pt-3 md:pt-0">
                       <button onClick={() => {
                         setEditServiceId(item.id);
                         setServiceForm({
@@ -797,16 +826,15 @@ export default function SettingsView() {
                           auto_provision_workspace: item.auto_provision_workspace || false
                         });
                         setShowForm('services');
-                      }} className="flex-1 sm:flex-none flex justify-center text-slate-500 bg-slate-100 dark:bg-zinc-800 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-500/10 p-2.5 md:p-2 rounded-lg transition-colors"><Edit2 size={16} className="md:w-[18px] md:h-[18px]" /></button>
-                      <button onClick={() => confirmDelete('/api/services/', item.id, item.name)} className="flex-1 sm:flex-none flex justify-center text-red-500 bg-red-50 dark:bg-red-900/20 hover:text-red-600 hover:bg-red-100 p-2.5 md:p-2 rounded-lg transition-colors"><Trash2 size={16} className="md:w-[18px] md:h-[18px]" /></button>
+                      }} className="flex-1 md:flex-none flex justify-center text-slate-500 bg-slate-100 dark:bg-zinc-800 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-500/10 p-2.5 md:p-2 rounded-lg transition-colors"><Edit2 size={16} /></button>
+                      <button onClick={() => confirmDelete('/api/services/', item.id, item.name)} className="flex-1 md:flex-none flex justify-center text-red-500 bg-red-50 dark:bg-red-900/20 hover:text-red-600 hover:bg-red-100 p-2.5 md:p-2 rounded-lg transition-colors"><Trash2 size={16} /></button>
                     </div>
                   </div>
                 ))}
-                {(!services || services.length === 0) && <div className="col-span-full p-12 text-center text-sm text-slate-500 dark:text-zinc-500 bg-slate-50/50 dark:bg-zinc-900/50 rounded-2xl">No services found.</div>}
+                {(!services || services.length === 0) && <div className="p-12 text-center text-sm text-slate-500 bg-slate-50/50 dark:bg-zinc-900/50 rounded-2xl">No services found.</div>}
               </div>
             </div>
           )}
-
           {/* REGIONS */}
           {activeTab === 'regions' && (
             <div className="fade-in flex-1 flex flex-col">
@@ -1446,6 +1474,17 @@ export default function SettingsView() {
 
         </section>
       </main>
+      <TemplateEditorModal
+        isOpen={templateModal.isOpen}
+        serviceId={templateModal.serviceId}
+        serviceName={templateModal.serviceName}
+        templateType={templateModal.type}
+        initialTemplate={templateModal.initialTemplate}
+        onClose={() => setTemplateModal({ ...templateModal, isOpen: false })}
+        onSuccess={() => {
+          axios.get(`/api/services/?year=${targetYear}`).then(res => setLocalServices(res.data));
+        }}
+      />
     </div>
   );
 }

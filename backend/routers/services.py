@@ -16,6 +16,7 @@ def get_services(year: int = Query(default_factory=lambda: datetime.now().year),
         SELECT sl.id, sl.name, sl.max_concurrent_per_week, sl.theme_color, 
                 sl.default_credits, sl.default_duration_weeks, sl.display_order, sl.is_active,
                 sl.auto_provision_workspace, 
+                sl.intro_email_template, sl.final_email_template, 
                 COALESCE(slg.target_goal, 0) as target_goal
         FROM services_lanes sl
         LEFT JOIN service_lane_goals slg ON sl.id = slg.service_lane_id AND slg.year = %s
