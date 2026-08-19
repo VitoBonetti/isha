@@ -5,11 +5,12 @@ import TopNav from "../components/TopNav";
 import SecureNoteModal from "../components/Modals/SecureNoteModal";
 import ConfirmModal from "../components/Modals/ConfirmModal";
 import toast, { Toaster } from "react-hot-toast";
-import { ChevronLeft, Save, ChevronDown, ChevronRight, Database, Users, Shield, Code, MapPin, Server, Activity, Calendar, Edit2, FolderOpen, FolderPlus, Lock, LockOpen, Zap, Presentation, FileDown, CheckSquare, History, ListChecks, Mail, CheckCircle, CircleFadingPlus } from "lucide-react";
+import { ChevronLeft, Save, ChevronDown, CalendarClock, CalendarCheck, ChevronRight, Database, Users, Shield, Code, MapPin, Server, Activity, Calendar, Edit2, FolderOpen, FolderPlus, Lock, LockOpen, Zap, Presentation, FileDown, CheckSquare, History, ListChecks, Mail, CheckCircle, CircleFadingPlus } from "lucide-react";
 import { useAppContext } from "../context/AppContext";
 import RequirementsModal from "../components/Modals/RequirementsModal";
 import IntroEmailModal from "../components/Modals/IntroEmailModal";
 import FinalEmailModal from "../components/Modals/FinalEmailModal";
+import MeetingParticipantsModal from "../components/Modals/MeetingParticipantsModal";
 
 export default function TestDetailsView() {
   const { id } = useParams();
@@ -43,6 +44,11 @@ export default function TestDetailsView() {
   const [analysisPromptOpen, setAnalysisPromptOpen] = useState(false);
   const [analysisDate, setAnalysisDate] = useState("");
   const [hasAnalysis, setHasAnalysis] = useState(false);
+
+  // Meeting
+  const [isParticipantsModalOpen, setIsParticipantsModalOpen] = useState(false);
+  const [pendingMeetingType, setPendingMeetingType] = useState("");
+  const [defaultEmails, setDefaultEmails] = useState("");
 
   // Requirements Modal
   const [isRequirementsOpen, setIsRequirementsOpen] = useState(false);
@@ -257,6 +263,36 @@ export default function TestDetailsView() {
     } catch (error: any) {
       toast.dismiss(toastId);
       toast.error(error.response?.data?.detail || "Failed to trigger report.");
+    }
+  };
+
+  const handleOpenParticipants = async (meetingType: string) => {
+    const toastId = toast.loading("Fetching default participants...");
+    try {
+      const res = await axios.get(`/api/luigi/${id}/meeting-participants`);
+      setDefaultEmails(res.data.emails.join(", "));
+      setPendingMeetingType(meetingType);
+      setIsParticipantsModalOpen(true);
+     toast.dismiss(toastId);
+    } catch (error) {
+      toast.dismiss(toastId);
+      toast.error("Failed to fetch participants.");
+    }
+  };
+
+  const handleConfirmParticipants = async (emails: string[]) => {
+    setIsParticipantsModalOpen(false);
+    const toastId = toast.loading(`Asking Luigi to find slots for the ${pendingMeetingType}...`);
+    try {
+      await axios.post(`/api/luigi/${id}/request-meeting-proposals`, {
+        meeting_type: pendingMeetingType,
+        emails: emails // We now send the edited JSON list!
+      });
+      toast.dismiss(toastId);
+      toast.success("Luigi is analyzing calendars! You'll be notified shortly.");
+    } catch (error) {
+      toast.dismiss(toastId);
+      toast.error("Failed to request meeting.");
     }
   };
 
@@ -476,13 +512,12 @@ export default function TestDetailsView() {
                   >
                     <Mail size={16} className="shrink-0" />
                   </button>
-                  {/* Placeholders for future buttons */}
                   <button
-                    disabled
-                    title="Coming Soon"
-                    className="aspect-square flex flex-col items-center justify-center gap-1 bg-stone-50 dark:bg-stone-900/20 hover:bg-stone-100 dark:hover:bg-stone-900/40 text-stone-600 dark:text-stone-400 rounded-xl transition-colors border border-stone-200 dark:border-stone-900/30 p-2 shadow-sm"
+                    onClick={(e) => { e.stopPropagation(); handleOpenParticipants('Intake Meeting Planned'); }}
+                    title="Schedule Intake Meeting"
+                    className="aspect-square flex flex-col items-center justify-center gap-1 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/40 text-red-600 dark:text-red-400 rounded-xl transition-colors border border-red-200 dark:border-red-900/30 p-2 shadow-sm"
                   >
-                    <CircleFadingPlus size={16} className="shrink-0" />
+                    <CalendarClock size={16} className="shrink-0" />
                   </button>
                   <button
                    onClick={(e) => { e.stopPropagation(); setIsRequirementsOpen(true); }}
@@ -507,11 +542,11 @@ export default function TestDetailsView() {
                   </button>
                   {/* Placeholders for future buttons */}
                   <button
-                    disabled
-                    title="Coming Soon"
-                    className="aspect-square flex flex-col items-center justify-center gap-1 bg-olive-50 dark:bg-olive-900/20 hover:bg-olive-100 dark:hover:bg-olive-900/40 text-olive-600 dark:text-olive-400 rounded-xl transition-colors border border-olive-200 dark:border-olive-900/30 p-2 shadow-sm"
+                    onClick={(e) => { e.stopPropagation(); handleOpenParticipants('Restitution Meeting Planned'); }}
+                    title="Schedule Restitution Meeting"
+                    className="aspect-square flex flex-col items-center justify-center gap-1 bg-orange-50 dark:bg-orange-900/20 hover:bg-orange-100 dark:hover:bg-orange-900/40 text-orange-600 dark:text-orange-400 rounded-xl transition-colors border border-orange-200 dark:border-orange-900/30 p-2 shadow-sm"
                   >
-                    <CircleFadingPlus size={16} className="shrink-0" />
+                    <CalendarCheck size={16} className="shrink-0" />
                   </button>
                   <button
                     onClick={handleGenerateReport}
@@ -724,6 +759,13 @@ export default function TestDetailsView() {
         testId={id as string}
         onClose={() => setIsFinalEmailOpen(false)}
         onSuccess={refreshMilestones}
+      />
+      <MeetingParticipantsModal
+        isOpen={isParticipantsModalOpen}
+        meetingType={pendingMeetingType}
+        initialEmails={defaultEmails}
+        onClose={() => setIsParticipantsModalOpen(false)}
+        onConfirm={handleConfirmParticipants}
       />
     </div>
   );

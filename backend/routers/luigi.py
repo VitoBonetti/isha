@@ -1,20 +1,24 @@
 import google.auth
 from google.auth.transport.requests import Request
+from google.cloud import pubsub_v1
+from datetime import datetime, timedelta, timezone
+import json
 import requests
 import os
 from fastapi import APIRouter, Depends, HTTPException
 from utils.secret_manager import get_secret
-from schema import SendEmailPayload
+from schema import SendEmailPayload, MeetingProposalRequest
 from database import get_db_cursor, db_cursor_context
 from routers.auth import get_current_user, require_admin, require_write_access
 from audit_logger import log_audit_event
-from datetime import datetime
+from websockets_manager import manager
 
 
 router = APIRouter(prefix="/api/luigi", tags=["Luigi"])
 
 WEB_APP_URL = os.environ.get("LUIGI_MIDDLEWARE_CONTACTS_URL")
 LUIGI_MIDDLEWARE_KEY_NAME = get_secret(os.environ.get("LUIGI_MIDDLEWARE_KEY_NAME"))
+PUBSUB_TOPIC_PATH = os.environ.get("PUBSUB_TOPIC_PATH")
 
 # Intro email
 @router.get("/{test_id}/draft-intro-email")
@@ -310,3 +314,159 @@ def send_final_email(test_id: str, payload: SendEmailPayload, current_user: dict
     cursor.connection.commit()
 
     return {"status": "Success"}
+
+# request meeting
+@router.get("/{test_id}/meeting-participants")
+def get_meeting_participants(test_id: str, current_user: dict = Depends(get_current_user),
+                             cursor=Depends(get_db_cursor)):
+    # Get Pentesters
+    cursor.execute("SELECT u.email FROM assignments a JOIN users u ON a.user_id = u.id WHERE a.test_id = %s",
+                   (test_id,))
+    emails = [r[0] for r in cursor.fetchall() if r[0]]
+
+    # Get Asset Contacts
+    cursor.execute("""
+        SELECT DISTINCT c.email FROM test_assets ta 
+        JOIN assets a ON ta.asset_id = a.id 
+        JOIN raw_asset_contacts rac ON a.raw_asset_id = rac.raw_asset_id
+        JOIN contacts c ON rac.contact_id = c.id WHERE ta.test_id = %s
+    """, (test_id,))
+    emails.extend([r[0] for r in cursor.fetchall() if r[0]])
+
+    # Get Country Contacts
+    cursor.execute("""
+        SELECT DISTINCT con.email
+        FROM test_assets ta
+        JOIN assets a ON ta.asset_id = a.id
+        JOIN country_contacts cc ON a.country_id = cc.country_id
+        JOIN contacts con ON cc.contact_id = con.id
+        WHERE ta.test_id = %s
+    """, (test_id,))
+    emails.extend([r[0] for r in cursor.fetchall() if r[0]])
+
+    emails = list(set([e for e in emails if e]))  # Deduplicate
+    return {"emails": emails}
+
+
+# 2. UPDATED ENDPOINT: Send the custom list to Luigi
+@router.post("/{test_id}/request-meeting-proposals")
+def request_meeting_proposals(test_id: str, payload: MeetingProposalRequest,
+                              current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+    meeting_type = payload.meeting_type
+    emails = payload.emails  # Use the emails sent from the React modal!
+
+    # 1. Fetch test dates, duration, and test name
+    cursor.execute("""
+            SELECT t.start_week, t.start_year, t.duration_weeks, t.name, c.name 
+            FROM tests t 
+            LEFT JOIN test_assets ta ON t.id = ta.test_id
+            LEFT JOIN assets a ON ta.asset_id = a.id
+            LEFT JOIN countries c ON a.country_id = c.id
+            WHERE t.id = %s LIMIT 1
+        """, (test_id,))
+    t_week, t_year, t_duration, test_name, country_name = cursor.fetchone()
+
+    duration_weeks = float(t_duration) if t_duration else 1.0
+
+    # 2. Calculate the Strict Time Boundaries
+    now = datetime.now(timezone.utc)
+    try:
+        start_date = datetime.strptime(f'{t_year} {t_week} 1', "%G %V %u").replace(tzinfo=timezone.utc)
+    except:
+        start_date = now + timedelta(weeks=4)
+
+    if "Intake" in meeting_type:
+        time_min = max(now, start_date - timedelta(weeks=6))
+        time_max = start_date
+        if now > start_date:
+            time_min = now
+            time_max = now + timedelta(weeks=2)
+    elif "Restitution" in meeting_type:
+        end_date = start_date + timedelta(weeks=duration_weeks)
+        time_min = max(now, end_date)
+        time_max = time_min + timedelta(weeks=3)
+    else:
+        time_min = now
+        time_max = now + timedelta(weeks=4)
+
+    # 3. Ask Apps Script for the Calendars using the strict boundaries
+    luigi_payload = {
+        "secret_key": LUIGI_MIDDLEWARE_KEY_NAME,
+        "action": "GET_FREEBUSY",
+        "emails": emails,
+        "timeMin": time_min.isoformat(),
+        "timeMax": time_max.isoformat()
+    }
+
+    response = requests.post(WEB_APP_URL, json=luigi_payload)
+    free_busy_data = response.json()
+
+    # 4. Drop the data into Pub/Sub for the Luigi Worker
+    publisher = pubsub_v1.PublisherClient()
+    message_data = {
+        "task": "SCHEDULE_MEETING",
+        "test_id": test_id,
+        "test_name": test_name,
+        "country_name": country_name or "Unknown Location",
+        "meeting_type": meeting_type,
+        "user_email": current_user["email"],
+        "free_busy": free_busy_data,
+        "emails": emails
+    }
+
+    publisher.publish(PUBSUB_TOPIC_PATH, json.dumps(message_data).encode("utf-8"))
+    return {"message": "Luigi is analyzing the calendars. You will be notified shortly!"}
+
+
+# Luigi  will call this when it's done thinking!
+@router.post("/save-meeting-proposals")
+async def receive_meeting_proposals(payload: dict):
+    # payload contains the test_id, user_email, and the AI's proposed slots
+    user_email = payload.get("user_email")
+
+    # Broadcast directly to the user's browser!
+    await manager.broadcast(json.dumps({
+        "action": "MEETING_PROPOSALS_READY",
+        "email": user_email,
+        "test_id": payload.get("test_id"),
+        "test_name": payload.get("test_name"),
+        "meeting_type": payload.get("meeting_type"),
+        "proposals": payload.get("proposals"),
+        "emails": payload.get("emails")
+    }))
+
+    return {"status": "success"}
+
+
+# schedule meeting
+@router.post("/{test_id}/book-meeting")
+def book_meeting(test_id: str, payload: dict, current_user: dict = Depends(get_current_user),
+                 cursor=Depends(get_db_cursor)):
+    # Payload expects: summary, description, emails, startTime, endTime, meeting_type
+    luigi_payload = {
+        "secret_key": LUIGI_MIDDLEWARE_KEY_NAME,
+        "action": "SCHEDULE_MEETING",
+        "summary": payload.get("summary"),
+        "description": payload.get("description", ""),
+        "emails": payload.get("emails", []),
+        "startTime": payload.get("startTime"),
+        "endTime": payload.get("endTime")
+    }
+
+    response = requests.post(WEB_APP_URL, json=luigi_payload)
+    luigi_result = response.json()
+
+    if luigi_result.get("success") is False:
+        raise HTTPException(status_code=400, detail=f"Booking failed: {luigi_result.get('error')}")
+
+    # Mark the specific Milestone as complete!
+    meeting_type = payload.get("meeting_type")  # e.g., 'Intake Meeting Planned'
+    if meeting_type:
+        cursor.execute("""
+            INSERT INTO test_milestones (id, test_id, step_name, is_completed) 
+            VALUES (gen_random_uuid(), %s, %s, true)
+            ON CONFLICT (test_id, step_name) DO UPDATE SET is_completed = true
+        """, (test_id, meeting_type))
+        cursor.connection.commit()
+
+    return {"status": "Success", "link": luigi_result.get("data", {}).get("eventLink")}

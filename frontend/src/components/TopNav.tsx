@@ -1,8 +1,10 @@
 import { useState, useRef, useEffect } from 'react';
 import { Link, useLocation } from "react-router-dom";
+import toast from 'react-hot-toast';
 import { useAppContext } from '../context/AppContext';
 import { useTheme } from './ThemeProvider';
 import ApiKeysModal from './Modals/ApiKeysModal';
+import MeetingProposalsModal from './Modals/MeetingProposalsModal';
 import {
   Sun, Moon, Laptop, LogOut, User as UserIcon, Bell,
   SprayCan, Snail, SunMoon, Fingerprint, Rabbit, Cat, Shell, Turtle, Radar, HandMetal, Drum, TentTree,
@@ -26,6 +28,9 @@ export default function TopNav() {
   const settingsRef = useRef<HTMLDivElement>(null);
   const notificationRef = useRef<HTMLDivElement>(null);
   const mobileMenuRef = useRef<HTMLDivElement>(null);
+
+  const [meetingProposalData, setMeetingProposalData] = useState<any>(null);
+  const [isMeetingModalOpen, setIsMeetingModalOpen] = useState(false);
 
   // Rotating Logo Icons Logic
   const logoIcons = [SprayCan, Snail, SunMoon, Fingerprint, Rabbit, Cat, Shell, Turtle, Radar, HandMetal, Drum, TentTree, Wifi, WifiOff, LockOpen, Lock, Feather, PawPrint, Origami];
@@ -83,6 +88,13 @@ export default function TopNav() {
             ),
             { duration: 8000 }
           );
+        }
+        // --- Catch Meeting Proposals ---
+        else if (data.action === 'MEETING_PROPOSALS_READY' && data.email === currentUser?.email) {
+          toast.success("Luigi found available meeting slots!", { duration: 5000 });
+          // INSTEAD OF DISPATCHING AN EVENT, WE JUST OPEN THE MODAL DIRECTLY!
+          setMeetingProposalData(data);
+          setIsMeetingModalOpen(true);
         }
         // Handle targeted error toasts
         else if (['REPORT_FAILED', 'PRESENTATION_FAILED'].includes(data.action) && data.email === currentUser?.email) {
@@ -324,9 +336,19 @@ export default function TopNav() {
         </div>
       )}
     </nav>
-    <ApiKeysModal
+      <ApiKeysModal
         isOpen={isApiModalOpen}
         onClose={() => setIsApiModalOpen(false)}
+      />
+      <MeetingProposalsModal
+        isOpen={isMeetingModalOpen}
+        testId={meetingProposalData?.test_id}
+        testName={meetingProposalData?.test_name}
+        proposalData={meetingProposalData}
+        onClose={() => setIsMeetingModalOpen(false)}
+        onSuccess={() => {
+          window.dispatchEvent(new Event('refresh_test_data'));
+        }}
       />
     </>
   );

@@ -249,3 +249,7 @@ class SendEmailPayload(BaseModel):
     cc: str
     subject: str
     body: str
+
+class MeetingProposalRequest(BaseModel):
+    meeting_type: str
+    emails: List[str]
