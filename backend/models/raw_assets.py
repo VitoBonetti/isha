@@ -37,6 +37,7 @@ class RawAssets(Base):
     duplicate_allowed = Column(Boolean, default=False)
     snow_number = Column(String(100), nullable=True)
     team_note = Column(Text, nullable=True)
+    kiss24_asset_id = Column(String, nullable=True)
 
     # relashionship
     asset_types = relationship("AssetTypes", back_populates="raw_assets")

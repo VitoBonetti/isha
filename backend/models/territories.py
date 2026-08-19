@@ -36,6 +36,7 @@ class Country(Base):
     code = Column(String(10), unique=True, nullable=False)
     name = Column(String(100), unique=True, nullable=False)
     is_active = Column(Boolean, default=True)
+    kiss24_uuid = Column(String(100), nullable=True)
 
     # relashionship
     regions = relationship("Region", back_populates="countries")

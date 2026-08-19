@@ -8,7 +8,7 @@ import os
 import time
 import json
 from jose import jwt, JWTError
-from routers import auth, services, users, regions, countries, assets, tests, board, logs, locations, insights, contacts, luigi
+from routers import auth, services, users, regions, countries, assets, tests, board, logs, locations, insights, contacts, luigi, kiss24
 from routers.auth import require_admin, get_google_public_keys
 from database import get_db_connection, run_alembic_migrations
 from websockets_manager import manager
@@ -107,6 +107,7 @@ app.include_router(regions.router)
 app.include_router(services.router)
 app.include_router(tests.router)
 app.include_router(users.router)
+app.include_router(kiss24.router)
 
 
 # --- WEBSOCKET FOR REACTIVE UI ---

@@ -33,6 +33,7 @@ class CountryBase(BaseModel):
     name: str
     region_id: Optional[UUID4] = None
     is_active: bool = True
+    kiss24_uuid: Optional[str] = None
 
 class CountryResponse(CountryBase):
     id: UUID4
@@ -113,6 +114,7 @@ class RawAssetCreate(AssetBase):
     duplicate_allowed: bool = False
     snow_number: Optional[str] = None
     team_note: Optional[str] = None
+    kiss24_asset_id: Optional[str] = None
 
 class AssetResponse(AssetBase):
     id: UUID4

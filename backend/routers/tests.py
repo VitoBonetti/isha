@@ -62,7 +62,7 @@ BASE_URL = str(os.environ.get("FRONTEND_URL"))
 
 # --- SECURITY: ENCRYPTION CIPHER ---
 def get_cipher():
-    secret = os.getenv("SECRET_KEY", "fallback_secret_for_development")
+    secret = str(get_secret(os.environ.get("SECURE_NOTE_SECRET_NAME")))
     key = base64.urlsafe_b64encode(hashlib.sha256(secret.encode()).digest())
     return Fernet(key)
 

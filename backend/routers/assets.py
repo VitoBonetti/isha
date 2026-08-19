@@ -255,7 +255,7 @@ def get_single_raw_asset(raw_id: str, current_user: dict = Depends(get_current_u
         SELECT r.id, r.name, r.description, r.business_critical, r.confidentiality_rating, 
             r.integrity_rating, r.availability_rating, r.country_id, r.service_forecast_id, 
             r.category_id, r.asset_type_id, r.facing_internet, r.duplicate_allowed, r.create_date, r.update_date,
-            r.snow_number, r.team_note, m.snow_data,
+            r.snow_number, r.team_note, r.kiss24_asset_id, m.snow_data,
             CASE WHEN a.id IS NOT NULL THEN true ELSE false END as is_promoted,
             a.is_archived, a.archived_years
         FROM raw_assets r
@@ -305,7 +305,7 @@ def update_raw_asset(raw_id: str, asset: RawAssetCreate, background_tasks: Backg
     cursor.execute("""
             SELECT r.name, r.facing_internet, r.duplicate_allowed, r.confidentiality_rating, r.integrity_rating, r.availability_rating,
                    c.name as country_name, s.name as service_name, cat.name as category_name, at.name as type_name,
-                   r.snow_number, r.team_note
+                   r.snow_number, r.team_note, r.kiss24_asset_id
             FROM raw_assets r
             LEFT JOIN countries c ON r.country_id = c.id
             LEFT JOIN services_lanes s ON r.service_forecast_id = s.id
@@ -318,7 +318,7 @@ def update_raw_asset(raw_id: str, asset: RawAssetCreate, background_tasks: Backg
         raise HTTPException(status_code=404, detail="Asset not found")
 
     # Unpack old state and handle NULLs gracefully
-    old_name, old_internet, old_duplicate_allowed, old_c, old_i, old_a, old_country, old_service, old_category, old_type, old_snow_number, old_team_note = old_state
+    old_name, old_internet, old_duplicate_allowed, old_c, old_i, old_a, old_country, old_service, old_category, old_type, old_snow_number, old_team_note, old_kiss24_asset_id = old_state
     old_country = old_country or "None"
     old_service = old_service or "None"
     old_category = old_category or "None"
@@ -355,12 +355,12 @@ def update_raw_asset(raw_id: str, asset: RawAssetCreate, background_tasks: Backg
         SET name=%s, description=%s, business_critical=%s, 
             confidentiality_rating=%s, integrity_rating=%s, availability_rating=%s, 
             country_id=%s, service_forecast_id=%s, category_id=%s, asset_type_id=%s, facing_internet=%s, duplicate_allowed=%s,
-            snow_number=%s, team_note=%s, update_date=CURRENT_TIMESTAMP
+            snow_number=%s, team_note=%s, kiss24_asset_id=%s,  update_date=CURRENT_TIMESTAMP
         WHERE id=%s
     """, (
         asset.name, asset.description, asset.business_critical,
         asset.confidentiality_rating, asset.integrity_rating, asset.availability_rating,
-        c_id, s_id, cat_id, at_id, asset.facing_internet, asset.duplicate_allowed, asset.snow_number, asset.team_note,
+        c_id, s_id, cat_id, at_id, asset.facing_internet, asset.duplicate_allowed, asset.snow_number, asset.team_note, asset.kiss24_asset_id,
         raw_id
     ))
 
@@ -390,6 +390,7 @@ def update_raw_asset(raw_id: str, asset: RawAssetCreate, background_tasks: Backg
 
     if old_snow_number != asset.snow_number: changes.append(f"SNOW ID: '{old_snow_number}' ➔ '{asset.snow_number}'")
     if old_team_note != asset.team_note: changes.append(f"Team Note was updated")
+    if old_kiss24_asset_id != asset.kiss24_asset_id: changes.append(f"Kiss 24 asset uuid was updated")
 
     details_str = " | ".join(changes) if changes else "Description Updated."
 

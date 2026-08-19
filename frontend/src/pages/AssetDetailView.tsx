@@ -4,12 +4,15 @@ import axios from "axios";
 import TopNav from "../components/TopNav";
 import ConfirmModal from "../components/Modals/ConfirmModal";
 import toast, { Toaster } from "react-hot-toast";
-import { ChevronLeft, Save, Trash2, ShieldAlert, FileText, Edit2, X, History, ChevronDown, ChevronRight, Clock, CheckCircle, HelpCircle, Database, RefreshCw, Users, Shield, Code, MapPin, Server } from "lucide-react";
+import { ChevronLeft, Save, Trash2, ShieldAlert, FileText, Edit2, X, History, ChevronDown, ChevronRight, Clock, CheckCircle, HelpCircle, Database, RefreshCw, Users, Shield, Code, MapPin, Server, Cable, ExternalLink } from "lucide-react";
+import { useAppContext } from "../context/AppContext";
 
 export default function AssetDetailView() {
   const { id } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
+  const { currentUser } = useAppContext();
+  const isAdmin = currentUser?.role === 'admin';
   const backPath = location.state?.from || "/raw";
   const backLabel = location.state?.label || "Raw Assets";
 
@@ -211,10 +214,26 @@ export default function AssetDetailView() {
             {/* Header Section */}
             <div className="flex flex-col md:flex-row justify-between items-start gap-4 md:gap-0 mb-6 md:mb-8 border-b border-slate-100 dark:border-zinc-800 pb-6">
               <div>
-                <h1 className="text-xl md:text-2xl font-bold flex items-start md:items-center gap-2">
-                  <FileText className="text-emerald-500 flex-shrink-0 mt-1 md:mt-0" />
-                  <span className="break-words">{asset.name}</span>
-                </h1>
+                <div className="flex items-center gap-2 mt-2 xl:mt-0">
+                  <h1 className="text-xl md:text-2xl font-bold flex items-start md:items-center gap-2">
+                    <FileText className="text-emerald-500 flex-shrink-0 mt-1 md:mt-0" />
+                    <span className="break-words">{asset.name}</span>
+                  </h1>
+                  { isAdmin && asset.kiss24_asset_id && (
+                    <>
+                      <button
+                        disabled
+                        title="Keep Secure Toggle Toolbar"
+                        className="px-3 py-1.5 text-blue-600 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 border border-blue-200 dark:border-blue-900/50 rounded-lg transition-colors flex items-center gap-2 text-xs font-bold"
+                      >
+                        <Cable size={14} /> <span className="hidden sm:inline">Kiss24 Toolbar</span>
+                      </button>
+                      <a href={`https://randstad.eu.vulnmanager.com/assets/${asset.kiss24_asset_id}/show`} target="_blank" rel="noopener noreferrer">
+                        <ExternalLink size={14} title="Keep Secure 24 link" />
+                      </a>
+                    </>
+                  )}
+                </div>
                 <div className="text-slate-500 text-xs md:text-sm mt-2 flex flex-col gap-1.5">
                   <span className="font-mono break-all">ID: {asset.id}</span>
                   <span className="flex items-center gap-1.5"><Clock size={14}/> Created: {formatDate(asset.create_date)}</span>
@@ -294,6 +313,12 @@ export default function AssetDetailView() {
                       <input type="checkbox" disabled={!isEditing} className="h-4 w-4 rounded text-blue-500 border-slate-300 disabled:opacity-70" checked={asset.duplicate_allowed || false} onChange={e => setAsset({...asset, duplicate_allowed: e.target.checked})} />
                       <span className="text-sm font-bold text-slate-700 dark:text-zinc-300">Yes</span>
                     </label>
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-1.5 mb-1">
+                    <label className="text-sm font-bold text-slate-700 dark:text-zinc-300">Kiss24 UUID</label>
+                  </div>
+                  <input disabled={!isEditing} className={inputClasses} placeholder="123a45bc-6d7e-..." value={asset.kiss24_asset_id || ""} onChange={e => setAsset({...asset, kiss24_asset_id: e.target.value})} />
                   </div>
                 </div>
               </div>
