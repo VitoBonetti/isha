@@ -4,7 +4,16 @@ from routers.auth import get_current_user, require_admin
 from audit_logger import log_audit_event
 from sqlalchemy.testing.pickleable import User
 from utils.timeaware import aware_utcnow
-from utils.kiss24_service import map_asset_onetrust_custom_field, map_organizations, create_test, get_test_info, get_test_vulns_info
+from utils.kiss24_service import (
+    map_asset_onetrust_custom_field,
+    map_organizations,
+    create_test,
+    get_test_info,
+    get_test_vulns_info,
+    add_snowid_to_kiss24asset,
+    sync_vuln_type_kiss24,
+    map_mario_user_kiss24_uuid
+)
 from datetime import datetime
 
 router = APIRouter(prefix="/api/kiss24", tags=["Kiss24"])
@@ -89,9 +98,6 @@ def sync_kiss24_asset_ids(
 ):
     """
     Admin-only endpoint to sync KISS24 asset UUIDs with Raw Assets.
-    1. Fetches OneTrust ID -> KISS24 Asset UUID mappings from KISS24.
-    2. Matches with raw_assets_snow_metadata.snow_data->>'u_onetrust_number'.
-    3. Updates raw_assets.kiss24_asset_id for all matches.
     """
     try:
         # 1. Fetch OneTrust ID -> KISS24 Asset UUID mapping dict from KISS24
@@ -171,10 +177,211 @@ def sync_kiss24_asset_ids(
         )
 
 
-@router.post("/{test_id}/create-test", status_code=status.HTTP_200_OK, summary="[Admin Only]")
+@router.post("/sync-update-kiss24-snowid", status_code=status.HTTP_200_OK, summary="[Admin Only]")
+def sync_update_kiss24_snowid(
+        current_user: dict = Depends(require_admin),
+        cursor=Depends(get_db_cursor)
+):
+    """
+    Admin-only endpoint to Update the Custom Field 'Service Now ID' of Assets in KISS24 with the known value.
+    """
+
+    # 1. Fetch assets excluding NULLs and empty strings
+    cursor.execute("""
+        SELECT kiss24_asset_id, snow_number
+        FROM raw_assets
+        WHERE kiss24_asset_id IS NOT NULL AND kiss24_asset_id != ''
+          AND snow_number IS NOT NULL AND snow_number != ''
+    """)
+    rows = cursor.fetchall()
+
+    if not rows:
+        return {"message": "No eligible assets found to sync.", "results": None}
+
+    # 2. Build the dictionary payload
+    asset_dict_payload = {row[0]: row[1] for row in rows}
+
+    try:
+        # 3. Call the helper function
+        sync_results = add_snowid_to_kiss24asset(asset_dict_payload)
+
+        # 4. Log the audit event
+        log_audit_event(
+            user_id=str(current_user["id"]),
+            role=current_user.get("role", "admin"),
+            action="KISS24_SNOW_ID_SYNC",
+            resource_type="KISS24",
+            resource_id="N/A",
+            details=f"Pushed ServiceNow IDs to KISS24. Success: {sync_results['success_count']}, Failed: {sync_results['failed_count']}."
+        )
+
+        return {
+            "message": f"Sync complete. Successfully updated {sync_results['success_count']} assets.",
+            "results": sync_results
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An unexpected error occurred during sync: {str(e)}"
+        )
+
+
+@router.post("/sync-vuln-types", status_code=status.HTTP_200_OK, summary="[Admin Only]")
+def sync_kiss24_vulnerability_types(
+        current_user: dict = Depends(require_admin),
+        cursor=Depends(get_db_cursor)
+):
+    """
+    Fetches Vulnerability Types and Contexts from Keep Secure 24 and
+    synchronizes them with the local database tables using a Many-to-Many architecture.
+    """
+    try:
+        # fetch data from kiss24
+        map_type, map_context = sync_vuln_type_kiss24()
+
+        #  sync context
+        for ctx_id, ctx_name in map_context.items():
+            cursor.execute("""
+                INSERT INTO kiss24_context (id, name)
+                VALUES (%s, %s)
+                ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name
+            """, (ctx_id, ctx_name))
+
+        if map_context:
+            format_strings = ','.join(['%s'] * len(map_context))
+            cursor.execute(f"DELETE FROM kiss24_context WHERE id NOT IN ({format_strings})", tuple(map_context.keys()))
+        else:
+            cursor.execute("DELETE FROM kiss24_context")
+
+        #  sync vuln types
+        for v_id, v_data in map_type.items():
+            cursor.execute("""
+                INSERT INTO kiss24_vuln_types (id, name)
+                VALUES (%s, %s)
+                ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name
+            """, (v_id, v_data["name"]))
+
+        if map_type:
+            format_strings = ','.join(['%s'] * len(map_type))
+            cursor.execute(f"DELETE FROM kiss24_vuln_types WHERE id NOT IN ({format_strings})", tuple(map_type.keys()))
+        else:
+            cursor.execute("DELETE FROM kiss24_vuln_types")
+
+        # sync associations (Many-to-Many links)
+        # Clear existing associations safely
+        cursor.execute("DELETE FROM kiss24_vuln_context_association")
+
+        # Build a list of tuples linking Vulns to Contexts
+        association_values = []
+        for v_id, v_data in map_type.items():
+            for ctx in v_data.get("contexts", []):
+                association_values.append((v_id, ctx["uuid"]))
+
+        # Execute a batch insert for all associations
+        if association_values:
+            cursor.executemany("""
+                INSERT INTO kiss24_vuln_context_association (vuln_id, context_id)
+                VALUES (%s, %s)
+                ON CONFLICT DO NOTHING
+            """, association_values)
+
+        # Commit all 3 table updates at once!
+        cursor.connection.commit()
+
+        # Log the audit event
+        log_audit_event(
+            user_id=str(current_user["id"]),
+            role=current_user.get("role", "admin"),
+            action="KISS24_VULN_TYPE_SYNC",
+            resource_type="KISS24",
+            resource_id="N/A",
+            details=f"Synced {len(map_context)} Contexts, {len(map_type)} Vuln Types, and {len(association_values)} Connections."
+        )
+
+        return {
+            "status": "Success",
+            "message": "Many-to-Many Synchronization complete.",
+            "contexts_synced": len(map_context),
+            "vuln_types_synced": len(map_type),
+            "associations_created": len(association_values)
+        }
+
+    except Exception as e:
+        cursor.connection.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to sync KISS24 Vulnerability Types: {str(e)}"
+        )
+
+
+@router.post("/sync-user-kiss24-uuid", status_code=status.HTTP_200_OK, summary="[Admin Only]")
+def sync_user_kiss24_uuid(
+        current_user: dict = Depends(require_admin),
+        cursor=Depends(get_db_cursor)
+):
+    """
+    Fetch the active users' emails from the database and retrieve/update their kiss24 UUIDs.
+    """
+    try:
+        # fetch active user emails
+        email_list = []
+        cursor.execute("""
+            SELECT email FROM users WHERE end_week IS NULL and end_year IS NULL
+        """)
+        for row in cursor.fetchall():
+            email_list.append(row[0])
+
+        if not email_list:
+            return {"message": "No active users found to sync.", "updated_count": 0}
+
+        # get the mapping from kiss24
+        sync_dat = map_mario_user_kiss24_uuid(email_list)
+
+        if not sync_dat:
+            return {"message": "No matching users found in Keep Secure 24.", "updated_count": 0}
+
+        # update the database
+        updated_count = 0
+        for email, kiss_uuid in sync_dat.items():
+            cursor.execute("""
+                UPDATE users SET kiss24_uuid = %s WHERE email = %s
+            """, (kiss_uuid, email))
+            # rowcount tells us if a row was actually updated
+            updated_count += cursor.rowcount
+
+        # commit and log
+        cursor.connection.commit()
+
+        log_audit_event(
+            user_id=str(current_user["id"]),
+            role=current_user.get("role", "admin"),
+            action="KISS24_USER_UUID_SYNC",
+            resource_type="USERS",
+            resource_id="N/A",
+            details=f"Synced {updated_count} users with their KISS24 UUIDs."
+        )
+
+        return {
+            "status": "Success",
+            "message": f"Successfully updated {updated_count} users.",
+            "updated_count": updated_count,
+            "mapped_emails": list(sync_dat.keys())
+        }
+
+    except Exception as e:
+        cursor.connection.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to sync user UUIDs: {str(e)}"
+        )
+
+
+# Creation action
+@router.post("/{test_id}/create-test", status_code=status.HTTP_200_OK)
 def create_kiss24_test(
         test_id: str,
-        current_user: dict = Depends(require_admin),
+        current_user: dict = Depends(get_current_user),
         cursor=Depends(get_db_cursor)
 ):
     """
@@ -254,7 +461,7 @@ def create_kiss24_test(
 
 
 # live fetching info
-@router.get("/{test_id}/live-status", status_code=status.HTTP_200_OK, summary="[Admin Only]")
+@router.get("/{test_id}/live-status", status_code=status.HTTP_200_OK)
 def get_kiss24_live_status(
         test_id: str,
         current_user: dict = Depends(get_current_user),
@@ -302,7 +509,7 @@ def get_kiss24_live_status(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@router.get("/{test_id}/vulnerabilities", status_code=status.HTTP_200_OK, summary="[Admin Only]")
+@router.get("/{test_id}/vulnerabilities", status_code=status.HTTP_200_OK)
 def get_kiss24_vulnerabilities(
         test_id: str,
         current_user: dict = Depends(get_current_user),

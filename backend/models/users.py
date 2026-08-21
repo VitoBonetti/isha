@@ -20,6 +20,8 @@ class Users(Base):
     start_year = Column(Integer, default=2024)
     end_week = Column(Integer, nullable=True)
     end_year = Column(Integer, nullable=True)
+    kiss24_uuid = Column(String(100), nullable=True)
+    kiss24_api_key = Column(String(255), unique=True, nullable=True)
 
     # relationship
     locations = relationship("Locations", back_populates="users")

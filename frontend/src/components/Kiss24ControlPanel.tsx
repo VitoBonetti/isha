@@ -1,10 +1,12 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import axios from 'axios';
 import toast from 'react-hot-toast';
 import {
   X, Cable, CheckCircle2, AlertCircle,
-  Database, Activity, ShieldAlert, Lock, RefreshCw, Send, Check, DownloadCloud, Clock, User, ExternalLink
+  Database, Activity, ShieldAlert, Lock, RefreshCw, Send, Check, DownloadCloud, Clock, User, ExternalLink, FingerprintPattern, TestTubeDiagonal, Bug
 } from 'lucide-react';
+import { useAppContext } from '../context/AppContext';
+import Kiss24KeyModal from './Modals/Kiss24KeyModal';
 
 interface Kiss24ControlPanelProps {
   isOpen: boolean;
@@ -14,15 +16,37 @@ interface Kiss24ControlPanelProps {
 }
 
 export default function Kiss24ControlPanel({ isOpen, onClose, test, onRefresh }: Kiss24ControlPanelProps) {
+
+  const { currentUser } = useAppContext();
   const [activeTab, setActiveTab] = useState<'identifiers' | 'tests' | 'vulnerabilities'>('identifiers');
 
   // Action States
   const [isSyncingOrg, setIsSyncingOrg] = useState(false);
   const [isSyncingAsset, setIsSyncingAsset] = useState(false);
+  const [isSyncingSnowID, setIsSyncingSnowID] = useState(false);
+  const [isSyncingVulnTypesID, setIsSyncingVulnTypesID] = useState(false);
+  const [isSyncingUserKissID, setIsSyncingUserKissID] = useState(false);
   const [isCreatingTest, setIsCreatingTest] = useState(false);
   const [isFetchingLive, setIsFetchingLive] = useState(false);
   const [isFetchingVulns, setIsFetchingVulns] = useState(false);
-  const [isRefreshing, setIsRefreshing] = useState(false); // Visual feedback for Footer Refresh
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isKeyModalOpen, setIsKeyModalOpen] = useState(false);
+
+  // kiss24 key State
+  const [isKeyValid, setIsKeyValid] = useState<boolean | null>(null);
+  const [isValidatingKey, setIsValidatingKey] = useState(false);
+
+  useEffect(() => {
+    if (isOpen && currentUser?.has_kiss24_key) {
+      setIsValidatingKey(true);
+      axios.get('/api/users/me/kiss24-key/validate')
+        .then(res => setIsKeyValid(res.data.is_valid))
+        .catch(() => setIsKeyValid(false))
+        .finally(() => setIsValidatingKey(false));
+    } else if (!currentUser?.has_kiss24_key) {
+      setIsKeyValid(false);
+    }
+  }, [isOpen, currentUser?.has_kiss24_key]);
 
   // Data States
   const [liveData, setLiveData] = useState<any>(null);
@@ -76,6 +100,48 @@ export default function Kiss24ControlPanel({ isOpen, onClose, test, onRefresh }:
     }
   };
 
+  const handleSyncKissSnowID = async () => {
+    setIsSyncingSnowID(true);
+    const toastId = toast.loading("Updating CustomField 'Service Now ID' in Keep Secure 24...");
+    try {
+      await axios.post(`/api/kiss24/sync-update-kiss24-snowid`);
+      toast.success("CustomField 'Service Now ID' has been updated", { id: toastId });
+      onRefresh();
+    } catch (e: any) {
+      toast.error(e.response?.data?.detail || "Update CustomField 'Service Now ID'", { id: toastId });
+    } finally {
+      setIsSyncingSnowID(false);
+    }
+  }
+
+  const handleSyncKissVulnTypesID = async () => {
+    setIsSyncingVulnTypesID(true);
+    const toastId = toast.loading("Updating contexts and vulns type from Keep Secure 24...");
+    try {
+      await axios.post(`/api/kiss24/sync-vuln-types`);
+      toast.success("Contexts and Vuln Types have been updated", { id: toastId });
+      onRefresh();
+    } catch (e: any) {
+      toast.error(e.response?.data?.detail || "Update Contexts and Vuln Types", { id: toastId });
+    } finally {
+      setIsSyncingVulnTypesID(false);
+    }
+  }
+
+  const handleSyncKissUserID = async () => {
+    setIsSyncingUserKissID(true);
+    const toastId = toast.loading("Updating users with kiss24 UUID...");
+    try {
+      await axios.post(`/api/kiss24/sync-user-kiss24-uuid`);
+      toast.success("Users have been updated", { id: toastId });
+      onRefresh();
+    } catch (e: any) {
+      toast.error(e.response?.data?.detail || "Update Users ", { id: toastId });
+    } finally {
+      setIsSyncingUserKissID(false);
+    }
+  }
+
   const handleCreateTest = async () => {
     setIsCreatingTest(true);
     const toastId = toast.loading("Registering Test in Keep Secure 24...");
@@ -114,14 +180,14 @@ export default function Kiss24ControlPanel({ isOpen, onClose, test, onRefresh }:
     } catch (e: any) {
       toast.error(e.response?.data?.detail || "Failed to fetch vulnerabilities.", { id: toastId });
     } finally {
-      setIsFetchingVulns(false); // FIXED: No longer pointing to setIsFetchingLive
+      setIsFetchingVulns(false);
     }
   };
 
   const handleLocalRefresh = () => {
     setIsRefreshing(true);
-    onRefresh(); // Dispatches the global event
-    setTimeout(() => setIsRefreshing(false), 800); // Give user visual feedback that it worked
+    onRefresh();
+    setTimeout(() => setIsRefreshing(false), 800);
   };
 
   // Date Formatting for the Recap
@@ -144,7 +210,6 @@ export default function Kiss24ControlPanel({ isOpen, onClose, test, onRefresh }:
 
   return (
     <div className="fixed inset-0 z-[120] overflow-hidden bg-black/40 backdrop-blur-xs animate-in fade-in duration-200">
-      {/* Container aligned right, full width on mobile, constrained on desktop */}
       <div className="absolute inset-y-0 right-0 w-full sm:w-[500px] md:w-[600px] lg:w-[700px] flex" onClick={(e) => e.stopPropagation()}>
         <div className="w-full h-full bg-white dark:bg-zinc-950 border-l border-slate-200 dark:border-zinc-800 shadow-2xl flex flex-col">
 
@@ -174,13 +239,13 @@ export default function Kiss24ControlPanel({ isOpen, onClose, test, onRefresh }:
           {/* TABS - Scrollable horizontally on mobile */}
           <div className="flex border-b border-slate-200 dark:border-zinc-800 px-2 sm:px-6 bg-slate-50/50 dark:bg-zinc-900/30 shrink-0 overflow-x-auto no-scrollbar whitespace-nowrap">
             <button onClick={() => handleTabSwitch('identifiers')} className={`py-3 sm:py-4 px-3 sm:px-4 text-xs sm:text-sm font-bold border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'identifiers' ? 'border-blue-600 text-blue-600 dark:text-blue-400' : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-zinc-200'}`}>
-              <Database size={16} /> Identifiers
+              <FingerprintPattern size={16} /> Identifiers
             </button>
             <button onClick={() => handleTabSwitch('tests')} className={`py-3 sm:py-4 px-3 sm:px-4 text-xs sm:text-sm font-bold border-b-2 transition-colors flex items-center gap-2 ${!canAccessTests ? 'opacity-40 cursor-not-allowed border-transparent text-slate-400' : activeTab === 'tests' ? 'border-blue-600 text-blue-600 dark:text-blue-400' : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-zinc-200'}`}>
-              {!canAccessTests ? <Lock size={16} /> : <Activity size={16} />} Test Management
+              {!canAccessTests ? <Lock size={16} /> : <TestTubeDiagonal size={16} />} Test Management
             </button>
             <button onClick={() => handleTabSwitch('vulnerabilities')} className={`py-3 sm:py-4 px-3 sm:px-4 text-xs sm:text-sm font-bold border-b-2 transition-colors flex items-center gap-2 ${!canAccessVulns ? 'opacity-40 cursor-not-allowed border-transparent text-slate-400' : activeTab === 'vulnerabilities' ? 'border-blue-600 text-blue-600 dark:text-blue-400' : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-zinc-200'}`}>
-              {!canAccessVulns ? <Lock size={16} /> : <ShieldAlert size={16} />} Vulnerabilities
+              {!canAccessVulns ? <Lock size={16} /> : <Bug size={16} />} Vulnerabilities
             </button>
           </div>
 
@@ -189,12 +254,48 @@ export default function Kiss24ControlPanel({ isOpen, onClose, test, onRefresh }:
 
             {/* TAB 1: IDENTIFIERS */}
             {activeTab === 'identifiers' && (
-              <div className="space-y-4 sm:space-y-6 animate-in fade-in">
+              <div className="space-y-4 sm:space-y-6 animate-in fade-in flex flex-col h-full">
+                {!currentUser?.has_kiss24_key && (
+                  <div className="bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-900/30 p-4 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-4 mb-6 shadow-sm">
+                    <div className="flex items-center gap-3 text-red-800 dark:text-red-300">
+                      <AlertCircle className="shrink-0" size={24} />
+                      <div className="text-sm">
+                        <strong className="block mb-0.5">Missing Personal API Key</strong>
+                        You must configure your Keep Secure 24 API key before you can interact with the external platform.
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setIsKeyModalOpen(true)}
+                      className="w-full sm:w-auto shrink-0 px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-lg transition-colors shadow-md"
+                    >
+                      Configure Key
+                    </button>
+                  </div>
+                )}
+
+                {currentUser?.has_kiss24_key && isKeyValid === false && !isValidatingKey && (
+                  <div className="bg-orange-50 dark:bg-orange-900/10 border border-orange-200 dark:border-orange-900/30 p-4 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-4 mb-6 shadow-sm">
+                    <div className="flex items-center gap-3 text-orange-800 dark:text-orange-300">
+                      <AlertCircle className="shrink-0" size={24} />
+                      <div className="text-sm">
+                        <strong className="block mb-0.5">Invalid or Expired API Key</strong>
+                        Your Keep Secure 24 API key was rejected by the server. It may have expired or been revoked.
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setIsKeyModalOpen(true)}
+                      className="w-full sm:w-auto shrink-0 px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold rounded-lg transition-colors shadow-md"
+                    >
+                      Reset Key
+                    </button>
+                  </div>
+                )}
+
                 <div className="bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-900/30 p-3 sm:p-4 rounded-xl text-xs sm:text-sm text-blue-800 dark:text-blue-300">
                   <strong>System Prerequisites:</strong> Ensure UUIDs are populated before interacting with the API. You can trigger a global sync to fetch missing IDs at any time.
                 </div>
 
-                <div className="space-y-4">
+                <div className="space-y-4 flex-1">
                   {/* Country Check */}
                   <div className={`p-4 sm:p-5 rounded-xl border flex flex-col md:flex-row items-start md:items-center justify-between gap-3 sm:gap-4 shadow-sm ${countryKiss24Uuid ? 'bg-white dark:bg-zinc-900 border-slate-200 dark:border-zinc-800' : 'bg-red-50 dark:bg-red-900/10 border-red-200 dark:border-red-900/30'}`}>
                     <div className="flex items-start gap-3 sm:gap-4 w-full md:w-auto">
@@ -206,10 +307,6 @@ export default function Kiss24ControlPanel({ isOpen, onClose, test, onRefresh }:
                         </div>
                       </div>
                     </div>
-                    {/* FIXED: Sync button is always visible */}
-                    <button onClick={handleGlobalSyncOrg} disabled={isSyncingOrg} className="w-full md:w-auto shrink-0 px-4 py-2.5 sm:py-2 bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold rounded-lg transition-colors flex items-center justify-center gap-2 mt-2 md:mt-0">
-                      <RefreshCw size={14} className={isSyncingOrg ? 'animate-spin' : ''} /> Sync Orgs
-                    </button>
                   </div>
 
                   {/* Asset Check */}
@@ -223,10 +320,6 @@ export default function Kiss24ControlPanel({ isOpen, onClose, test, onRefresh }:
                         </div>
                       </div>
                     </div>
-                    {/* FIXED: Sync button is always visible */}
-                    <button onClick={handleGlobalSyncAsset} disabled={isSyncingAsset} className="w-full md:w-auto shrink-0 px-4 py-2.5 sm:py-2 bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold rounded-lg transition-colors flex items-center justify-center gap-2 mt-2 md:mt-0">
-                      <RefreshCw size={14} className={isSyncingAsset ? 'animate-spin' : ''} /> Sync Assets
-                    </button>
                   </div>
 
                   {/* Test Check */}
@@ -241,6 +334,75 @@ export default function Kiss24ControlPanel({ isOpen, onClose, test, onRefresh }:
                     </div>
                   </div>
                 </div>
+
+                {/* ADMIN ACTION PANEL */}
+                {currentUser?.role === 'admin' && (
+                  <div className="mt-8 pt-6 border-t border-slate-200 dark:border-zinc-800">
+                    <h3 className="text-sm font-bold text-slate-800 dark:text-zinc-200 mb-1 flex items-center gap-2">
+                      <Database size={16} className="text-blue-500" /> Global Synchronization
+                    </h3>
+                    <p className="text-xs text-slate-500 dark:text-zinc-400 mb-4">
+                      Admin-only actions to batch update Keep Secure 24 mappings across all services.
+                    </p>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-5 gap-3">
+                      <button
+                        onClick={handleGlobalSyncOrg}
+                        disabled={isSyncingOrg}
+                        className="flex flex-col items-center justify-center gap-3 p-4 bg-slate-50 hover:bg-slate-100 dark:bg-zinc-900 dark:hover:bg-zinc-800/80 border border-slate-200 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 font-bold text-xs rounded-xl transition-all shadow-sm disabled:opacity-50"
+                      >
+                        <div className={`p-2 rounded-lg ${isSyncingOrg ? 'bg-blue-100 text-blue-600 dark:bg-blue-900/30' : 'bg-slate-200 text-slate-600 dark:bg-zinc-800 dark:text-zinc-400'}`}>
+                          <RefreshCw size={18} className={isSyncingOrg ? 'animate-spin' : ''} />
+                        </div>
+                        Sync Orgs
+                      </button>
+
+                      <button
+                        onClick={handleGlobalSyncAsset}
+                        disabled={isSyncingAsset}
+                        className="flex flex-col items-center justify-center gap-3 p-4 bg-slate-50 hover:bg-slate-100 dark:bg-zinc-900 dark:hover:bg-zinc-800/80 border border-slate-200 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 font-bold text-xs rounded-xl transition-all shadow-sm disabled:opacity-50"
+                      >
+                        <div className={`p-2 rounded-lg ${isSyncingAsset ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30' : 'bg-slate-200 text-slate-600 dark:bg-zinc-800 dark:text-zinc-400'}`}>
+                          <RefreshCw size={18} className={isSyncingAsset ? 'animate-spin' : ''} />
+                        </div>
+                        Sync Assets
+                      </button>
+
+                      <button
+                        onClick={handleSyncKissSnowID}
+                        disabled={isSyncingSnowID}
+                        className="flex flex-col items-center justify-center gap-3 p-4 bg-slate-50 hover:bg-slate-100 dark:bg-zinc-900 dark:hover:bg-zinc-800/80 border border-slate-200 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 font-bold text-xs rounded-xl transition-all shadow-sm disabled:opacity-50"
+                      >
+                        <div className={`p-2 rounded-lg ${isSyncingSnowID ? 'bg-amber-100 text-amber-600 dark:bg-amber-900/30' : 'bg-slate-200 text-slate-600 dark:bg-zinc-800 dark:text-zinc-400'}`}>
+                          <RefreshCw size={18} className={isSyncingSnowID ? 'animate-spin' : ''} />
+                        </div>
+                        Sync SnowID
+                      </button>
+
+                      <button
+                        onClick={handleSyncKissVulnTypesID}
+                        disabled={isSyncingVulnTypesID}
+                        className="flex flex-col items-center justify-center gap-3 p-4 bg-slate-50 hover:bg-slate-100 dark:bg-zinc-900 dark:hover:bg-zinc-800/80 border border-slate-200 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 font-bold text-xs rounded-xl transition-all shadow-sm disabled:opacity-50"
+                      >
+                        <div className={`p-2 rounded-lg ${isSyncingVulnTypesID ? 'bg-amber-100 text-amber-600 dark:bg-amber-900/30' : 'bg-slate-200 text-slate-600 dark:bg-zinc-800 dark:text-zinc-400'}`}>
+                          <RefreshCw size={18} className={isSyncingVulnTypesID ? 'animate-spin' : ''} />
+                        </div>
+                        Sync Types
+                      </button>
+
+                      <button
+                        onClick={handleSyncKissUserID}
+                        disabled={isSyncingUserKissID}
+                        className="flex flex-col items-center justify-center gap-3 p-4 bg-slate-50 hover:bg-slate-100 dark:bg-zinc-900 dark:hover:bg-zinc-800/80 border border-slate-200 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 font-bold text-xs rounded-xl transition-all shadow-sm disabled:opacity-50"
+                      >
+                        <div className={`p-2 rounded-lg ${isSyncingUserKissID ? 'bg-amber-100 text-amber-600 dark:bg-amber-900/30' : 'bg-slate-200 text-slate-600 dark:bg-zinc-800 dark:text-zinc-400'}`}>
+                          <RefreshCw size={18} className={isSyncingUserKissID ? 'animate-spin' : ''} />
+                        </div>
+                        Sync Users
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -481,6 +643,7 @@ export default function Kiss24ControlPanel({ isOpen, onClose, test, onRefresh }:
 
         </div>
       </div>
+      <Kiss24KeyModal isOpen={isKeyModalOpen} onClose={() => setIsKeyModalOpen(false)} />
     </div>
   );
 }

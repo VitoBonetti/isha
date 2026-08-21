@@ -1,11 +1,14 @@
 import uuid
+from datetime import datetime
 from fastapi import APIRouter, Depends, BackgroundTasks, status, HTTPException
 from database import get_db_cursor
 from routers.auth import get_current_user, require_admin
-from schema import UserCreate, UserBase
+from schema import UserCreate, UserBase, Kiss24KeyUpdate
 from websockets_manager import manager
-from datetime import datetime
 from audit_logger import log_audit_event
+from utils.secret_manager import get_secret
+from utils.kiss24_service import verify_kiss24_api_key
+from utils.security_chipher import get_cipher
 
 router = APIRouter(prefix="/api/users", tags=["Users"])
 
@@ -28,7 +31,7 @@ def get_system_time(current_user: dict = Depends(get_current_user)):
 @router.get("/", summary="[Admin Only]")
 def get_all_users(current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     cursor.execute("""
-        SELECT id, email, name, role, base_capacity, start_week, start_year, end_week, end_year, location_id  
+        SELECT id, email, name, role, base_capacity, start_week, start_year, end_week, end_year, location_id, kiss24_uuid, kiss24_api_key   
         FROM users ORDER BY name
     """)
     users = []
@@ -36,7 +39,8 @@ def get_all_users(current_user: dict = Depends(require_admin), cursor=Depends(ge
         users.append({
             "id": r[0], "email": r[1], "name": r[2], "role": r[3],
             "base_capacity": r[4], "start_week": r[5], "start_year": r[6],
-            "end_week": r[7], "end_year": r[8], "location_id": r[9]
+            "end_week": r[7], "end_year": r[8], "location_id": r[9], "kiss24_uuid": r[10],
+            "kiss24_api_key": r[11]
         })
     return users
 
@@ -72,6 +76,7 @@ def create_user(u: UserCreate, background_tasks: BackgroundTasks,
 
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": f"User {u.name} whitelisted in the database."}
+
 
 @router.delete("/{user_id}", summary="[Admin Only]")
 def delete_user(user_id: str, background_tasks: BackgroundTasks,
@@ -168,9 +173,60 @@ def update_user(user_id: str, u: UserBase, background_tasks: BackgroundTasks,
     return {"message": "User updated."}
 
 
+@router.post("/me/kiss24-key", summary="Securely store personal KISS24 API Key")
+def update_my_kiss24_key(payload: Kiss24KeyUpdate, current_user: dict = Depends(get_current_user),
+                         cursor=Depends(get_db_cursor)):
+    clean_key = payload.api_key.strip()
+
+    is_valid, msg = verify_kiss24_api_key(clean_key)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=f"Keep Secure 24 rejected this API Key: {msg}")
+
+    cipher = get_cipher()
+    encrypted_key = cipher.encrypt(clean_key.encode('utf-8')).decode('utf-8')
+
+    cursor.execute("UPDATE users SET kiss24_api_key = %s WHERE id = %s", (encrypted_key, str(current_user["id"])))
+    cursor.connection.commit()
+
+    log_audit_event(
+        user_id=str(current_user["id"]),
+        role=current_user.get("role", "pentester"),
+        action="KISS24_API_KEY_UPDATED",
+        resource_type="USER",
+        resource_id=str(current_user["id"]),
+        details="User securely updated their Keep Secure 24 API key."
+    )
+    return {"message": "Keep Secure 24 API key validated and securely stored."}
+
+
+@router.get("/me/kiss24-key/validate", summary="Check if stored key is still valid")
+def validate_stored_kiss24_key(current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+    cursor.execute("SELECT kiss24_api_key FROM users WHERE id = %s", (str(current_user["id"]),))
+    row = cursor.fetchone()
+
+    if not row or not row[0]:
+        return {"is_valid": False, "message": "No API key configured."}
+
+    cipher = get_cipher()
+    try:
+        decrypted_key = cipher.decrypt(row[0].encode('utf-8')).decode('utf-8')
+    except Exception:
+        return {"is_valid": False, "message": "Failed to decrypt API key."}
+
+    is_valid, msg = verify_kiss24_api_key(decrypted_key)
+    return {"is_valid": is_valid, "message": msg}
+
+
 @router.get("/me")
-def get_my_profile(current_user: dict = Depends(get_current_user)):
-    return current_user
+def get_my_profile(current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+    # Check if user has a kiss24 key
+    cursor.execute("SELECT kiss24_api_key FROM users WHERE id = %s", (str(current_user["id"]),))
+    row = cursor.fetchone()
+
+    # Create a mutable dictionary and add the boolean flag
+    profile = dict(current_user)
+    profile["has_kiss24_key"] = bool(row and row[0])
+    return profile
 
 
 # --- NOTIFICATIONS RESTORED ---

@@ -1,16 +1,12 @@
 from typing import List
 import uuid
 import os
-import base64
-import hashlib
-import httpx
 import json
 import asyncio
 import requests
 import traceback
 from datetime import datetime, timedelta, timezone
-from cryptography.fernet import Fernet
-from pydantic import BaseModel, UUID4
+from pydantic import UUID4
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 import google.auth.transport.requests
 import google.oauth2.id_token
@@ -38,6 +34,7 @@ from utils.drive_manager import (
 )
 from utils.secret_manager import get_secret
 from utils.vuln_analysis import build_payload, run_cloud_run_analysis
+from utils.security_chipher import get_cipher
 from presentations.presentation import generate_presentation
 from reports import osrgt_v3, pdf_gen
 
@@ -58,13 +55,6 @@ FRONTEND_TO_DB_STAGES = {
 KISS24_BASE_URL = str(os.environ.get("KISS_24_ENDPOINT"))
 CUTOFF_DATE = datetime(2026, 5, 1, tzinfo=timezone.utc)
 BASE_URL = str(os.environ.get("FRONTEND_URL"))
-
-
-# --- SECURITY: ENCRYPTION CIPHER ---
-def get_cipher():
-    secret = str(get_secret(os.environ.get("SECURE_NOTE_SECRET_NAME")))
-    key = base64.urlsafe_b64encode(hashlib.sha256(secret.encode()).digest())
-    return Fernet(key)
 
 
 # --- HELPER: TEST HISTORY LOGGER ---

@@ -477,7 +477,7 @@ export default function TestDetailsView() {
 
                 <div className="sm:col-span-2">
                   <label className="text-sm font-bold text-slate-700 dark:text-zinc-300 flex items-center gap-1.5">
-                    KISS24 Vulnerability UUID
+                    KISS24 Test UUID
                     {isAdmin && <span className="text-[10px] bg-slate-100 dark:bg-zinc-800 text-slate-500 px-2 py-0.5 rounded-full font-normal">(Required for Report Generation)</span>}
                   </label>
                   <input

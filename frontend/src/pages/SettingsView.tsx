@@ -5,7 +5,7 @@ import TopNav from '../components/TopNav';
 import ConfirmModal from '../components/Modals/ConfirmModal';
 import TemplateEditorModal from '../components/Modals/TemplateEditorModal';
 import toast, { Toaster } from 'react-hot-toast';
-import { Key, Users, MapPin, Activity, Tags, Globe, Flag, Server, Trash2, Download, AlertTriangle, Plus, Database, Terminal, Edit2, LayoutTemplate, ChevronsUpDown, ChevronUp, ChevronDown, FolderClosed, Mail, CheckCircle } from 'lucide-react';
+import { Key, Users, MapPin, Activity, Tags, Globe, Flag, Server, Trash2, Download, AlertTriangle, Plus, Database, Terminal, Edit2, LayoutTemplate, ChevronsUpDown, ChevronUp, ChevronDown, FolderClosed, Mail, CheckCircle, CircleCheckBig, CircleAlert } from 'lucide-react';
 
 // Sleek Custom Toggle Component
 const Toggle = ({ checked, onChange, label, disabled = false }: { checked: boolean, onChange: (c: boolean) => void, label: string, disabled?: boolean }) => (
@@ -208,7 +208,7 @@ export default function SettingsView() {
   };
 
   // Forms
-  const defaultUserForm = { email: '', name: '', role: 'read_only', base_capacity: 1.0, location_id: '', start_week: 1, start_year: new Date().getFullYear(), end_week: '', end_year: '', auto_provision_workspace: false };
+  const defaultUserForm = { email: '', name: '', role: 'read_only', base_capacity: 1.0, location_id: '', start_week: 1, start_year: new Date().getFullYear(), end_week: '', end_year: '', auto_provision_workspace: false, kiss24_uuid: '', kiss24_api_key: '' };
   const [userForm, setUserForm] = useState(defaultUserForm);
   const [editUserId, setEditUserId] = useState<string | null>(null);
 

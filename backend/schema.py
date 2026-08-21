@@ -79,6 +79,8 @@ class UserBase(BaseModel):
     end_week: Optional[int] = None
     end_year: Optional[int] = None
     location_id: Optional[UUID4] = None
+    kiss24_uuid: Optional[str] = None
+    kiss24_api_key: Optional[str] = None
 
 class UserCreate(UserBase):
     email: EmailStr  # We invite by email now
@@ -86,6 +88,9 @@ class UserCreate(UserBase):
 class UserResponse(UserBase):
     id: UUID4
     email: EmailStr
+
+class Kiss24KeyUpdate(BaseModel):
+    api_key: str
 
 class NotificationResponse(BaseModel):
     id: UUID4
@@ -255,3 +260,27 @@ class SendEmailPayload(BaseModel):
 class MeetingProposalRequest(BaseModel):
     meeting_type: str
     emails: List[str]
+
+# --- kiss24 ----
+class Kiss24ContextBase(BaseModel):
+    id: UUID4
+    name: str
+
+    class Config:
+        from_attributes = True
+
+class Kiss24VulnTypeBase(BaseModel):
+    id: UUID4
+    name: str
+    contexts: List[Kiss24ContextBase] = [] # The Many-to-Many nested list!
+
+    class Config:
+        from_attributes = True
+
+#  Sync Endpoint Response Schema
+class SyncVulnTypesResponse(BaseModel):
+    status: str
+    message: str
+    contexts_synced: int
+    vuln_types_synced: int
+    associations_created: int

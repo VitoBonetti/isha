@@ -8,6 +8,7 @@ export interface User {
   name: string;
   role: 'admin' | 'pentester' | 'read_only';
   location_id: string;
+  has_kiss24_key?: boolean;
 }
 
 interface AppContextType {
@@ -19,6 +20,7 @@ interface AppContextType {
   showNotifications: boolean;
   setShowNotifications: (val: boolean) => void;
   markNotificationsRead: () => Promise<void>;
+  refreshUser: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -53,18 +55,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const fetchUser = async () => {
+    try {
+      const res = await axios.get('/api/users/me');
+      setCurrentUser(res.data);
+    } catch (err) {
+      setCurrentUser(null);
+      navigate('/login');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   useEffect(() => {
-    const fetchUser = async () => {
-      try {
-        const res = await axios.get('/api/users/me');
-        setCurrentUser(res.data);
-      } catch (err) {
-        setCurrentUser(null);
-        navigate('/login');
-      } finally {
-        setIsLoading(false);
-      }
-    };
     fetchUser();
   }, [navigate]);
 
@@ -124,7 +127,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   return (
     <AppContext.Provider value={{
-      currentUser, isLoading, handleLogout,
+      currentUser, isLoading, handleLogout, refreshUser: fetchUser,
       wsStatus, notifications, showNotifications, setShowNotifications, markNotificationsRead
     }}>
       {children}

@@ -19,3 +19,4 @@ from .notifications import Notifications
 from .histories import AssetHistory, TestHistory
 from .secret_notes import SecretNotes
 from .contacts import Contacts, CountryContacts, RawAssetContacts
+from .kiss24 import kiss24_vuln_context_association, Kiss24ContextType, Kiss24VulnTypes
