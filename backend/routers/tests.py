@@ -630,30 +630,25 @@ def get_all_tests(current_user: dict = Depends(get_current_user), cursor=Depends
 def get_test_details(test_id: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
     # 1. Fetch Test Base Details
     cursor.execute('''
-            SELECT t.id, t.name, t.service_lane_id, t.credits_per_week, 
-                   t.duration_weeks, t.stages::text as status, t.start_week, t.start_year, 
-                   t.is_tentative, t.kiss24, t.drive_folder_id, t.drive_folder_url,
-                   s.name as service_lane_name,
-                   s.auto_provision_workspace,
-                   EXISTS(SELECT 1 FROM secret_notes WHERE test_id = t.id) as has_secret,
-                   COALESCE((SELECT string_agg(DISTINCT u.name, ', ') FROM assignments a JOIN users u ON a.user_id = u.id WHERE a.test_id = t.id), 'Unassigned') as assigned_pentesters,
-
-                   -- Fetch the category dynamically from the underlying raw asset!
-                   ra.category_id,
-                   c.name as category_name
-
-            FROM tests t
-            LEFT JOIN services_lanes s ON t.service_lane_id = s.id
-
-            -- Join down to the raw_asset to get the category
-            LEFT JOIN test_assets ta ON t.id = ta.test_id
-            LEFT JOIN assets a ON ta.asset_id = a.id
-            LEFT JOIN raw_assets ra ON a.raw_asset_id = ra.id
-            LEFT JOIN service_categories c ON ra.category_id = c.id
-
-            WHERE t.id = %s
-            LIMIT 1
-        ''', (test_id,))
+                SELECT t.id, t.name, t.service_lane_id, t.credits_per_week, 
+                       t.duration_weeks, t.stages::text as status, t.start_week, t.start_year, 
+                       t.is_tentative, t.kiss24, t.drive_folder_id, t.drive_folder_url,
+                       s.name as service_lane_name, s.auto_provision_workspace,
+                       ct.kiss24_uuid as country_kiss24_uuid,
+                       EXISTS(SELECT 1 FROM secret_notes WHERE test_id = t.id) as has_secret,
+                       COALESCE((SELECT string_agg(DISTINCT u.name, ', ') FROM assignments a JOIN users u ON a.user_id = u.id WHERE a.test_id = t.id), 'Unassigned') as assigned_pentesters,
+                       ra.category_id,
+                       c.name as category_name
+                FROM tests t
+                LEFT JOIN services_lanes s ON t.service_lane_id = s.id
+                LEFT JOIN test_assets ta ON t.id = ta.test_id
+                LEFT JOIN assets a ON ta.asset_id = a.id
+                LEFT JOIN raw_assets ra ON a.raw_asset_id = ra.id
+                LEFT JOIN service_categories c ON ra.category_id = c.id
+                LEFT JOIN countries ct ON ra.country_id = ct.id
+                WHERE t.id = %s
+                LIMIT 1
+            ''', (test_id,))
     test_row = cursor.fetchone()
     if not test_row: raise HTTPException(status_code=404, detail="Test not found")
 
@@ -662,12 +657,12 @@ def get_test_details(test_id: str, current_user: dict = Depends(get_current_user
 
     # 2. Fetch Attached Assets
     cursor.execute('''
-        SELECT a.id as asset_id, a.raw_asset_id, r.name as asset_name, r.country_id
-        FROM test_assets ta
-        JOIN assets a ON ta.asset_id = a.id
-        JOIN raw_assets r ON a.raw_asset_id = r.id
-        WHERE ta.test_id = %s
-    ''', (test_id,))
+            SELECT a.id as asset_id, a.raw_asset_id, r.name as asset_name, r.country_id, r.kiss24_asset_id
+            FROM test_assets ta
+            JOIN assets a ON ta.asset_id = a.id
+            JOIN raw_assets r ON a.raw_asset_id = r.id
+            WHERE ta.test_id = %s
+        ''', (test_id,))
     assets_cols = [desc[0] for desc in cursor.description]
     assets_data = [dict(zip(assets_cols, row)) for row in cursor.fetchall()]
     test_data["assets"] = assets_data

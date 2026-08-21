@@ -18,12 +18,20 @@ def get_countries(current_user: dict = Depends(get_current_user), cursor = Depen
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Pentesters cannot access country data.")
 
     cursor.execute("""
-        SELECT c.id, c.code, c.name, c.is_active, c.region_id, r.name as region_name 
+        SELECT c.id, c.code, c.name, c.is_active, c.region_id, r.name as region_name, c.kiss24_uuid 
         FROM countries c 
         LEFT JOIN regions r ON c.region_id = r.id 
         ORDER BY c.code
     """)
-    return [{"id": r[0], "code": r[1], "name": r[2], "is_active": r[3], "region_id": r[4], "region_name": r[5]} for r in cursor.fetchall()]
+    return [{
+        "id": r[0],
+        "code": r[1],
+        "name": r[2],
+        "is_active": r[3],
+        "region_id": r[4],
+        "region_name": r[5],
+        "kiss24_uuid": r[6]
+    } for r in cursor.fetchall()]
 
 
 @router.post("/", summary="[Admin Only]")
@@ -32,8 +40,8 @@ def create_country(c: CountryBase, current_user: dict = Depends(require_admin), 
     new_country_id = str(uuid.uuid4())
     try:
         cursor.execute(
-            "INSERT INTO countries (id, code, name, region_id, is_active) VALUES (%s, %s, %s, %s, %s)",
-            (new_country_id, c.code, c.name, reg_id, c.is_active)
+            "INSERT INTO countries (id, code, name, region_id, is_active, kiss24_uuid) VALUES (%s, %s, %s, %s, %s, %s)",
+            (new_country_id, c.code, c.name, reg_id, c.is_active, c.kiss24_uuid)
         )
         cursor.connection.commit()
 
@@ -54,8 +62,8 @@ def create_country(c: CountryBase, current_user: dict = Depends(require_admin), 
 @router.put("/{country_id}", summary="[Admin Only]")
 def update_country(country_id: str, c: CountryBase, current_user: dict = Depends(require_admin), cursor = Depends(get_db_cursor)):
     cursor.execute(
-        "UPDATE countries SET code=%s, name=%s, region_id=%s, is_active=%s WHERE id=%s",
-        (c.code, c.name, c.region_id, c.is_active, country_id)
+        "UPDATE countries SET code=%s, name=%s, region_id=%s, is_active=%s, kiss24_uuid=%s WHERE id=%s",
+        (c.code, c.name, c.region_id, c.is_active, c.kiss24_uuid, country_id)
     )
 
     log_audit_event(

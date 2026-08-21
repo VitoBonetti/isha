@@ -5,12 +5,13 @@ import TopNav from "../components/TopNav";
 import SecureNoteModal from "../components/Modals/SecureNoteModal";
 import ConfirmModal from "../components/Modals/ConfirmModal";
 import toast, { Toaster } from "react-hot-toast";
-import { ChevronLeft, Save, ChevronDown, CalendarClock, CalendarCheck, ChevronRight, Database, Users, Shield, Code, MapPin, Server, Activity, Calendar, Edit2, FolderOpen, FolderPlus, Lock, LockOpen, Zap, Presentation, FileDown, CheckSquare, History, ListChecks, Mail, CheckCircle, CircleFadingPlus } from "lucide-react";
+import { ChevronLeft, Save, ChevronDown, CalendarClock, CalendarCheck, ChevronRight, Database, Users, Shield, Code, MapPin, Server, Activity, Calendar, Edit2, FolderOpen, FolderPlus, Lock, LockOpen, Zap, Presentation, FileDown, CheckSquare, History, ListChecks, Mail, CheckCircle, CircleFadingPlus, ExternalLink, Cable } from "lucide-react";
 import { useAppContext } from "../context/AppContext";
 import RequirementsModal from "../components/Modals/RequirementsModal";
 import IntroEmailModal from "../components/Modals/IntroEmailModal";
 import FinalEmailModal from "../components/Modals/FinalEmailModal";
 import MeetingParticipantsModal from "../components/Modals/MeetingParticipantsModal";
+import Kiss24ControlPanel from "../components/Kiss24ControlPanel";
 
 export default function TestDetailsView() {
   const { id } = useParams();
@@ -34,6 +35,9 @@ export default function TestDetailsView() {
   // Secure Vault States
   const [secretTarget, setSecretTarget] = useState<any>(null);
   const [secretConfirmOpen, setSecretConfirmOpen] = useState<any>(null);
+
+  // Kiss24 Control Panel
+  const [isKiss24PanelOpen, setIsKiss24PanelOpen] = useState(false);
 
   // Data States
   const [test, setTest] = useState<any>(null);
@@ -356,6 +360,13 @@ export default function TestDetailsView() {
 
                   {/* WORKSPACE & VAULT BUTTONS */}
                   <div className="flex items-center gap-2 mt-2 xl:mt-0">
+                    <button
+                      onClick={() => setIsKiss24PanelOpen(true)}
+                      className="px-3 py-1.5 text-indigo-600 bg-indigo-50 dark:bg-indigo-900/20 hover:bg-indigo-100 border border-indigo-200 dark:border-indigo-900/50 rounded-lg transition-colors flex items-center gap-2 text-xs font-bold"
+                      title="Open Keep Secure 24 Control Panel"
+                    >
+                      <Cable size={14} /> <span className="hidden sm:inline">KISS24 Panel</span>
+                    </button>
                     {test.auto_provision_workspace && (
                       <>
                         {test.drive_folder_url ? (
@@ -766,6 +777,12 @@ export default function TestDetailsView() {
         initialEmails={defaultEmails}
         onClose={() => setIsParticipantsModalOpen(false)}
         onConfirm={handleConfirmParticipants}
+      />
+      <Kiss24ControlPanel
+        isOpen={isKiss24PanelOpen}
+        onClose={() => setIsKiss24PanelOpen(false)}
+        test={test}
+        onRefresh={() => window.dispatchEvent(new Event('refresh_test_data'))}
       />
     </div>
   );

@@ -228,7 +228,7 @@ export default function SettingsView() {
   const [regionForm, setRegionForm] = useState(defaultRegionForm);
   const [editRegionId, setEditRegionId] = useState<string | null>(null);
 
-  const defaultCountryForm = { code: '', name: '', region_id: '', is_active: true };
+  const defaultCountryForm = { code: '', name: '', region_id: '', is_active: true, kiss24_uuid: '' };
   const [countryForm, setCountryForm] = useState(defaultCountryForm);
   const [editCountryId, setEditCountryId] = useState<string | null>(null);
 
@@ -956,6 +956,7 @@ export default function SettingsView() {
                         {regions?.map(r => <option key={r.id} value={r.id}>{r.name || r.regions}</option>)}
                       </select>
                     </label>
+                    <label className="text-sm font-bold text-slate-700 dark:text-zinc-300">Kiss24 UUID <input className={inputClasses} value={countryForm.kiss24_uuid} onChange={e => setCountryForm({...countryForm, kiss24_uuid: e.target.value})}  /></label>
                     <div className="col-span-1 md:col-span-2 pt-2 border-t border-slate-200 dark:border-zinc-800 px-1">
                       <Toggle checked={countryForm.is_active} onChange={(c) => setCountryForm({...countryForm, is_active: c})} label="Country is Active" />
                     </div>
@@ -1004,7 +1005,7 @@ export default function SettingsView() {
                           <div className="flex justify-end gap-2">
                             <button onClick={() => {
                               setEditCountryId(c.id);
-                              setCountryForm({ code: c.code, name: c.name, region_id: c.region_id || '', is_active: c.is_active });
+                              setCountryForm({ code: c.code, name: c.name, region_id: c.region_id || '', is_active: c.is_active, kiss24_uuid: c.kiss24_uuid || '' });
                               setShowForm('countries');
                             }} className="text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-500/10 p-2 rounded-lg transition-colors"><Edit2 size={18} /></button>
                             <button onClick={() => confirmDelete('/api/countries/', c.id, c.name)} className="text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 p-2 rounded-lg transition-colors"><Trash2 size={18} /></button>
@@ -1031,7 +1032,7 @@ export default function SettingsView() {
                       <div className="flex justify-end gap-2 mt-1">
                         <button onClick={() => {
                           setEditCountryId(c.id);
-                          setCountryForm({ code: c.code, name: c.name, region_id: c.region_id || '', is_active: c.is_active });
+                          setCountryForm({ code: c.code, name: c.name, region_id: c.region_id || '', is_active: c.is_active, kiss24_uuid: c.kiss24_uuid || '' });
                           setShowForm('countries');
                         }} className="text-slate-500 bg-slate-100 dark:bg-zinc-800 p-2.5 rounded-lg flex-1 flex justify-center"><Edit2 size={16} /></button>
                         <button onClick={() => confirmDelete('/api/countries/', c.id, c.name)} className="text-red-500 bg-red-50 dark:bg-red-900/20 p-2.5 rounded-lg flex-1 flex justify-center"><Trash2 size={16} /></button>

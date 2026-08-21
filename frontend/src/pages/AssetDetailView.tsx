@@ -4,7 +4,7 @@ import axios from "axios";
 import TopNav from "../components/TopNav";
 import ConfirmModal from "../components/Modals/ConfirmModal";
 import toast, { Toaster } from "react-hot-toast";
-import { ChevronLeft, Save, Trash2, ShieldAlert, FileText, Edit2, X, History, ChevronDown, ChevronRight, Clock, CheckCircle, HelpCircle, Database, RefreshCw, Users, Shield, Code, MapPin, Server, Cable, ExternalLink } from "lucide-react";
+import { ChevronLeft, Save, Trash2, ShieldAlert, FileText, Edit2, X, History, ChevronDown, ChevronRight, Clock, CheckCircle, HelpCircle, Database, RefreshCw, Shield, Code, MapPin, Server, ExternalLink } from "lucide-react";
 import { useAppContext } from "../context/AppContext";
 
 export default function AssetDetailView() {
@@ -50,7 +50,7 @@ export default function AssetDetailView() {
       axios.get('/api/services/'),
       axios.get('/api/board/categories/'),
       axios.get('/api/assets/types'),
-      axios.get(`/api/contacts/raw-asset/${id}`).catch(() => ({ data: [] })) // Safely fetch asset contacts
+      axios.get(`/api/contacts/raw-asset/${id}`).catch(() => ({ data: [] }))
     ]).then(([resAsset, resC, resS, resCat, resTypes, resAssetContacts]) => {
       setAssetTypes(resTypes.data);
       setAsset(resAsset.data);
@@ -80,7 +80,6 @@ export default function AssetDetailView() {
 
   const businessCritical = Math.min(9, (asset.confidentiality_rating || 0) + (asset.integrity_rating || 0) + (asset.availability_rating || 0));
 
-  // FILTER CATEGORIES: Must match Service Lane AND (Current Year OR Next Year)
   const filteredCategories = categories
     .filter(c => c.service_lane_id === asset.service_forecast_id && (c.goal_year === currentYear || c.goal_year === currentYear + 1))
     .sort((a, b) => (a.goal_year || 0) - (b.goal_year || 0));
@@ -115,6 +114,7 @@ export default function AssetDetailView() {
         category_id: asset.category_id === "" ? null : asset.category_id,
         snow_number: asset.snow_number || null,
         team_note: asset.team_note || null,
+        kiss24_asset_id: asset.kiss24_asset_id || null
       };
       await axios.put(`/api/assets/raw/${id}`, payload);
       const resAsset = await axios.get(`/api/assets/raw/${id}`);
@@ -220,18 +220,9 @@ export default function AssetDetailView() {
                     <span className="break-words">{asset.name}</span>
                   </h1>
                   { isAdmin && asset.kiss24_asset_id && (
-                    <>
-                      <button
-                        disabled
-                        title="Keep Secure Toggle Toolbar"
-                        className="px-3 py-1.5 text-blue-600 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 border border-blue-200 dark:border-blue-900/50 rounded-lg transition-colors flex items-center gap-2 text-xs font-bold"
-                      >
-                        <Cable size={14} /> <span className="hidden sm:inline">Kiss24 Toolbar</span>
-                      </button>
-                      <a href={`https://randstad.eu.vulnmanager.com/assets/${asset.kiss24_asset_id}/show`} target="_blank" rel="noopener noreferrer">
-                        <ExternalLink size={14} title="Keep Secure 24 link" />
-                      </a>
-                    </>
+                    <a href={`https://randstad.eu.vulnmanager.com/assets/${asset.kiss24_asset_id}/show`} target="_blank" rel="noopener noreferrer" className="ml-2 text-blue-500 hover:text-blue-600 transition-colors bg-blue-50 dark:bg-blue-900/30 p-1.5 rounded-lg border border-blue-200 dark:border-blue-900/50">
+                      <ExternalLink size={16} title="Keep Secure 24 link" />
+                    </a>
                   )}
                 </div>
                 <div className="text-slate-500 text-xs md:text-sm mt-2 flex flex-col gap-1.5">
@@ -261,6 +252,7 @@ export default function AssetDetailView() {
             </div>
 
             <form onSubmit={handleUpdate} className="space-y-6 md:space-y-8">
+              {/* --- CORRECTED FORM GRID --- */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 md:gap-6">
                 <div>
                   <SyncLabel label="Asset Name" />
@@ -290,35 +282,36 @@ export default function AssetDetailView() {
                 <div className="sm:col-span-2">
                   <SyncLabel label="Description" />
                   <textarea disabled={!isEditing} className={`${inputClasses} resize-none ${isEditing ? 'h-32' : 'h-auto min-h-[100px]'}`} value={asset.description || ""} onChange={e => setAsset({...asset, description: e.target.value})} />
-              </div>
-
-              <div className="sm:col-span-2">
-                <label className="text-sm font-bold text-slate-700 dark:text-zinc-300 mb-1 flex items-center gap-2 flex-wrap">
-                  Team Notes <span className="text-[10px] md:text-xs font-normal text-slate-400 bg-slate-100 dark:bg-zinc-800 px-2 py-0.5 rounded-full">(Never overwritten by Sync)</span>
-                </label>
-                <textarea disabled={!isEditing} placeholder="Add internal pentesting notes or context here..." className={`${inputClasses} resize-none ${isEditing ? 'h-32' : 'h-auto min-h-[100px]'}`} value={asset.team_note || ""} onChange={e => setAsset({...asset, team_note: e.target.value})} />
                 </div>
 
+                <div className="sm:col-span-2">
+                  <label className="text-sm font-bold text-slate-700 dark:text-zinc-300 mb-1 flex items-center gap-2 flex-wrap">
+                    Team Notes <span className="text-[10px] md:text-xs font-normal text-slate-400 bg-slate-100 dark:bg-zinc-800 px-2 py-0.5 rounded-full">(Never overwritten by Sync)</span>
+                  </label>
+                  <textarea disabled={!isEditing} placeholder="Add internal pentesting notes or context here..." className={`${inputClasses} resize-none ${isEditing ? 'h-32' : 'h-auto min-h-[100px]'}`} value={asset.team_note || ""} onChange={e => setAsset({...asset, team_note: e.target.value})} />
+                </div>
+
+                {/* Kiss24, Internet, and Duplicate layout perfectly aligned */}
                 <div className="sm:col-span-2 flex flex-col sm:flex-row gap-4 md:gap-6">
-                  <div>
+                  <div className="w-full sm:w-auto shrink-0">
                     <SyncLabel label="Facing Internet" />
-                    <label className={`flex items-center w-full sm:w-fit gap-3 p-3 rounded-lg transition-colors ${isEditing ? 'bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800/50' : 'bg-transparent'}`}>
+                    <label className={`flex items-center w-full gap-3 p-3 rounded-lg transition-colors ${isEditing ? 'bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800/50' : 'bg-transparent'}`}>
                       <input type="checkbox" disabled={!isEditing} className="h-4 w-4 rounded text-emerald-500 border-slate-300 disabled:opacity-70" checked={asset.facing_internet} onChange={e => setAsset({...asset, facing_internet: e.target.checked})} />
-                      <span className="text-sm font-bold text-slate-700 dark:text-zinc-300">Yes</span>
+                      <span className="text-sm font-bold text-slate-700 dark:text-zinc-300 pr-2">Yes</span>
                     </label>
                   </div>
-                  <div>
+                  <div className="w-full sm:w-auto shrink-0">
                     <label className="text-sm font-bold text-slate-700 dark:text-zinc-300 block mb-1">Allow Duplicates</label>
-                    <label className={`flex items-center w-full sm:w-fit gap-3 p-3 rounded-lg transition-colors ${isEditing ? 'bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800/50' : 'bg-transparent '}`}>
+                    <label className={`flex items-center w-full gap-3 p-3 rounded-lg transition-colors ${isEditing ? 'bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800/50' : 'bg-transparent '}`}>
                       <input type="checkbox" disabled={!isEditing} className="h-4 w-4 rounded text-blue-500 border-slate-300 disabled:opacity-70" checked={asset.duplicate_allowed || false} onChange={e => setAsset({...asset, duplicate_allowed: e.target.checked})} />
-                      <span className="text-sm font-bold text-slate-700 dark:text-zinc-300">Yes</span>
+                      <span className="text-sm font-bold text-slate-700 dark:text-zinc-300 pr-2">Yes</span>
                     </label>
                   </div>
-                  <div>
+                  <div className="w-full sm:flex-1 min-w-[200px]">
                     <div className="flex items-center gap-1.5 mb-1">
-                    <label className="text-sm font-bold text-slate-700 dark:text-zinc-300">Kiss24 UUID</label>
-                  </div>
-                  <input disabled={!isEditing} className={inputClasses} placeholder="123a45bc-6d7e-..." value={asset.kiss24_asset_id || ""} onChange={e => setAsset({...asset, kiss24_asset_id: e.target.value})} />
+                      <label className="text-sm font-bold text-slate-700 dark:text-zinc-300">Kiss24 UUID</label>
+                    </div>
+                    <input disabled={!isEditing} className={inputClasses} placeholder="123a45bc-6d7e-..." value={asset.kiss24_asset_id || ""} onChange={e => setAsset({...asset, kiss24_asset_id: e.target.value})} />
                   </div>
                 </div>
               </div>
@@ -357,7 +350,6 @@ export default function AssetDetailView() {
                   <label className="text-sm font-bold text-slate-700 dark:text-zinc-300">Forecast Category</label>
                   <select disabled={!isEditing || !asset.service_forecast_id} className={inputClasses} value={asset.category_id || ""} onChange={e => setAsset({...asset, category_id: e.target.value})}>
                     <option value="">-- None --</option>
-                    {/* CATEGORY LOGIC: Only show matching service lane AND year in (current, next) */}
                     {filteredCategories.map(c => (
                       <option key={c.id} value={c.id}>{c.name} - {c.goal_year || 'Not Set'}</option>
                     ))}
