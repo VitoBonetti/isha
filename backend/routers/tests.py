@@ -34,7 +34,7 @@ from utils.drive_manager import (
 )
 from utils.secret_manager import get_secret
 from utils.vuln_analysis import build_payload, run_cloud_run_analysis
-from utils.security_chipher import get_cipher
+from utils.security_cipher import get_cipher
 from presentations.presentation import generate_presentation
 from reports import osrgt_v3, pdf_gen
 

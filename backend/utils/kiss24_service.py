@@ -67,13 +67,23 @@ def map_organizations():
 
 
 # Create test
-def create_test(ouuid: str, body: dict):
+def create_test(ouuid: str, body: dict, user_api_key: str = None):
     endpoint = f"provider/tests/{ouuid}/create"
     url = f"{KISS_24_ENDPOINT}{endpoint}"
-    req = urllib.request.Request(url, data=json.dumps(body).encode("utf-8"), headers={"x-api-key": api_key(), "Content-Type": "application/json"})
+
+    # Use the user's personal key if provided, otherwise fallback to the system key
+    # key_to_use = user_api_key if user_api_key else api_key()
+
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(body).encode("utf-8"),
+        # headers={"x-api-key": key_to_use, "Content-Type": "application/json"}
+        headers={"x-api-key": user_api_key, "Content-Type": "application/json"}
+    )
+
     with urllib.request.urlopen(req) as res:
         if res.status == 200:
-            response_data =  json.loads(res.read())
+            response_data = json.loads(res.read())
             response_str = str(response_data)
             uuid_pattern = r'[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
             match = re.search(uuid_pattern, response_str)
@@ -82,7 +92,6 @@ def create_test(ouuid: str, body: dict):
             else:
                 return None
         return None
-
 
 # get test info
 def get_test_info(uuid: str):

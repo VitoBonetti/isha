@@ -52,23 +52,29 @@ export default function Kiss24ControlPanel({ isOpen, onClose, test, onRefresh }:
   const [liveData, setLiveData] = useState<any>(null);
   const [vulnsData, setVulnsData] = useState<any[] | null>(null);
 
-  if (!isOpen) return null;
-
   // 1. Identifiers
   const countryKiss24Uuid = test?.country_kiss24_uuid;
   const assetKiss24Id = test?.assets?.[0]?.kiss24_asset_id;
   const testKiss24Uuid = test?.kiss24;
   const serviceLaneName = test?.service_lane_name || 'Unknown Service';
 
-  // 2. Tab Unlocking Logic
-  const canAccessTests = !!countryKiss24Uuid && !!assetKiss24Id;
-  const canAccessVulns = canAccessTests && !!testKiss24Uuid;
+  // 2. Tab Unlocking Logic (Fixed)
+  const isKeyReady = currentUser?.has_kiss24_key && isKeyValid !== false;
+  const canAccessTests = !!countryKiss24Uuid && !!assetKiss24Id && isKeyReady;
+  const canAccessVulns = canAccessTests && !!testKiss24Uuid && isKeyReady;
+
+  useEffect(() => {
+    if (!canAccessTests && activeTab === 'tests') setActiveTab('identifiers');
+    if (!canAccessVulns && activeTab === 'vulnerabilities') setActiveTab('identifiers');
+  }, [canAccessTests, canAccessVulns, activeTab]);
+
+  if (!isOpen) return null;
 
   const handleTabSwitch = (tab: 'identifiers' | 'tests' | 'vulnerabilities') => {
     if (tab === 'tests' && !canAccessTests) return;
     if (tab === 'vulnerabilities' && !canAccessVulns) return;
     setActiveTab(tab);
-  };
+  }; // <--- Fixed missing brace here
 
   // --- ACTIONS ---
 

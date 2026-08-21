@@ -14,6 +14,7 @@ from utils.kiss24_service import (
     sync_vuln_type_kiss24,
     map_mario_user_kiss24_uuid
 )
+from utils.security_cipher import get_cipher
 from datetime import datetime
 
 router = APIRouter(prefix="/api/kiss24", tags=["Kiss24"])
@@ -379,16 +380,33 @@ def sync_user_kiss24_uuid(
 
 # Creation action
 @router.post("/{test_id}/create-test", status_code=status.HTTP_200_OK)
+# Creation action
+@router.post("/{test_id}/create-test", status_code=status.HTTP_200_OK)
 def create_kiss24_test(
         test_id: str,
         current_user: dict = Depends(get_current_user),
         cursor=Depends(get_db_cursor)
 ):
     """
-    Creates a new test in Keep Secure 24 and saves the returned UUID.
+    Creates a new test in Keep Secure 24 using the user's personal API Key.
     """
     try:
-        # 1. Fetch required data for payload
+        # fetch & Decrypt User's Personal API Key
+        cursor.execute("SELECT kiss24_api_key FROM users WHERE id = %s", (str(current_user["id"]),))
+        key_row = cursor.fetchone()
+
+        if not key_row or not key_row[0]:
+            raise HTTPException(status_code=400,
+                                detail="You must configure your personal Keep Secure 24 API key first.")
+
+        cipher = get_cipher()
+        try:
+            user_api_key = cipher.decrypt(key_row[0].encode('utf-8')).decode('utf-8')
+        except Exception:
+            raise HTTPException(status_code=400,
+                                detail="Failed to decrypt your personal API key. Please reset it in your profile.")
+
+        # fetch required data for payload
         cursor.execute("""
             SELECT t.name, t.start_year, t.start_week, t.kiss24,
                    sl.name as service_lane_name,
@@ -409,7 +427,7 @@ def create_kiss24_test(
 
         test_name, start_year, start_week, existing_kiss24, service_lane, country_uuid, asset_uuid = row
 
-        # 2. Block if already created or missing identifiers
+        # Block if already created or missing identifiers
         if existing_kiss24:
             raise HTTPException(status_code=400, detail="Test is already registered in Keep Secure 24.")
         if not country_uuid or not asset_uuid:
@@ -417,8 +435,7 @@ def create_kiss24_test(
         if not start_year or not start_week:
             raise HTTPException(status_code=400, detail="Test must be scheduled (Year and Week) before creation.")
 
-        # 3. Format Payload Data
-        # Calculate YYYY-MM-DD from ISO week and year
+        # Format Payload Data
         start_date = datetime.fromisocalendar(start_year, start_week, 1)
         start_date_str = start_date.strftime("%Y-%m-%d")
 
@@ -427,20 +444,20 @@ def create_kiss24_test(
         payload = {
             "details": "to do",
             "scheduled_start": start_date_str,
-            "auto_start": False,
+            "auto_start": True,
             "private": False,
             "light": False,
             "assets": [str(asset_uuid)],
             "name": full_test_name
         }
 
-        # 4. Fire to KISS24
-        new_test_uuid = create_test(str(country_uuid), payload)
+        # Fire to kiss24 with user key
+        new_test_uuid = create_test(str(country_uuid), payload, user_api_key)
 
         if not new_test_uuid:
-            raise HTTPException(status_code=500, detail="KISS24 API did not return a valid Test UUID.")
+            raise HTTPException(status_code=500,
+                                detail="KISS24 API did not return a valid Test UUID. Ensure your API key has creation permissions.")
 
-        # 5. Save to database
         cursor.execute("UPDATE tests SET kiss24 = %s WHERE id = %s", (new_test_uuid, test_id))
         cursor.connection.commit()
 
@@ -455,6 +472,8 @@ def create_kiss24_test(
 
         return {"status": "Success", "kiss24_uuid": new_test_uuid, "message": "Test successfully created in KISS24!"}
 
+    except HTTPException:
+        raise
     except Exception as e:
         cursor.connection.rollback()
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))

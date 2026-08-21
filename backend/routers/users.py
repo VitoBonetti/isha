@@ -8,7 +8,7 @@ from websockets_manager import manager
 from audit_logger import log_audit_event
 from utils.secret_manager import get_secret
 from utils.kiss24_service import verify_kiss24_api_key
-from utils.security_chipher import get_cipher
+from utils.security_cipher import get_cipher
 
 router = APIRouter(prefix="/api/users", tags=["Users"])
 
