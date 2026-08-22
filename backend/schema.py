@@ -284,3 +284,8 @@ class SyncVulnTypesResponse(BaseModel):
     contexts_synced: int
     vuln_types_synced: int
     associations_created: int
+
+class LuigiVulnCallback(BaseModel):
+    user_email: str
+    html: str
+    suggested_type: str

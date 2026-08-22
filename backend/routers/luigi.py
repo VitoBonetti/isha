@@ -5,9 +5,9 @@ from datetime import datetime, timedelta, timezone
 import json
 import requests
 import os
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, status
 from utils.secret_manager import get_secret
-from schema import SendEmailPayload, MeetingProposalRequest
+from schema import SendEmailPayload, MeetingProposalRequest, LuigiVulnCallback
 from database import get_db_cursor, db_cursor_context
 from routers.auth import get_current_user, require_admin, require_write_access
 from audit_logger import log_audit_event
@@ -348,7 +348,7 @@ def get_meeting_participants(test_id: str, current_user: dict = Depends(get_curr
     return {"emails": emails}
 
 
-# 2. UPDATED ENDPOINT: Send the custom list to Luigi
+# Send the custom list to Luigi
 @router.post("/{test_id}/request-meeting-proposals")
 def request_meeting_proposals(test_id: str, payload: MeetingProposalRequest,
                               current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
@@ -470,3 +470,38 @@ def book_meeting(test_id: str, payload: dict, current_user: dict = Depends(get_c
         cursor.connection.commit()
 
     return {"status": "Success", "link": luigi_result.get("data", {}).get("eventLink")}
+
+
+# Luigi Draft Vulnerabilities
+@router.post("/draft-vulnerability", status_code=status.HTTP_200_OK)
+def trigger_luigi_draft(payload: dict, current_user: dict = Depends(get_current_user)):
+
+    publisher = pubsub_v1.PublisherClient()
+
+    message_data = {
+        "task": "DRAFT_VULNERABILITY",
+        "note": payload.get("note"),
+        "severity": payload.get("severity"),
+        "user_email": current_user["email"]
+    }
+
+    data = json.dumps(message_data).encode("utf-8")
+    publisher.publish(PUBSUB_TOPIC_PATH, data)
+
+    return {"message": "Task dispatched to Luigi."}
+
+
+#  Webhook Callback (Called by Luigi)
+@router.post("/vuln-draft-callback", include_in_schema=False)
+def luigi_draft_callback(payload: LuigiVulnCallback, background_tasks: BackgroundTasks):
+    """Luigi hits this endpoint when the drafted HTML is ready."""
+    ws_message = {
+        "action": "VULN_DRAFT_READY",
+        "email": payload.user_email,
+        "html": payload.html,
+        "suggested_type": payload.suggested_type
+    }
+
+    # Broadcast to the user waiting in the frontend
+    background_tasks.add_task(manager.broadcast, json.dumps(ws_message))
+    return {"status": "success"}

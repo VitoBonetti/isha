@@ -106,4 +106,76 @@ async def pubsub_trigger(request: Request):
             print(f"🚨 Luigi error: {e}")
             return {"status": "error", "detail": str(e)}
 
+    elif task_type == "DRAFT_VULNERABILITY":
+        print(f"📝 Luigi drafting vulnerability for: {data.get('user_email')}")
+        try:
+            genai.configure(api_key=get_gemini_key())
+            model = genai.GenerativeModel('gemini-2.5-pro')
+
+            sys_prompt = f"""
+            You are an expert Cybersecurity Technical Writer. Your expertise is in clearly articulating complex security vulnerabilities, their potential impact, and actionable remediation steps for a technical audience.
+    
+            The pentester has provided a raw note and severity level.
+            Severity: {data.get('severity')}
+            Pentester Notes: {data.get('note')}
+    
+            CORE OBJECTIVE:
+            Generate four distinct sections for a penetration test report: 1. Description, 2. Impact, 3. Recommendation, and 4. Details & Steps to Reproduce.
+    
+            RULES & CONSTRAINTS:
+            - Description: Write a clear, technical explanation of the vulnerability. Reference the relevant CWE.
+            - Impact: Describe the potential technical impact.
+            - Recommendation: Actionable remediation steps based on general security best practices.
+            - Steps to Reproduce: Provide clear and detailed steps based on the pentester notes. Include HTTP requests if provided. Use <pre><code> for code blocks.
+            - DO NOT use bullet points or numbered lists within the generated Description, Impact, and Recommendation sections.
+            - Format EVERYTHING exactly like this HTML example structure:
+              <h1><span style="color:#2175d9"><strong>Description</strong></span></h1>
+              <p style="text-align: justify;"><span style="color:#000000">...</span></p>
+            - CRITICAL JSON RULE: Use SINGLE QUOTES `'` for all HTML attributes (e.g., <span style='color:#2175d9'>, <a href='...'>, <div style='...'>). DO NOT use unescaped double quotes inside HTML tags.
+            
+    
+            OUTPUT FORMAT:
+            You MUST return your response using EXACTLY these custom delimiters. Do NOT output JSON. Do NOT include markdown ticks.
+
+            [SUGGESTED_TYPE]
+            Write the CWE Name here (e.g., CWE-79: Improper Neutralization...)
+            [/SUGGESTED_TYPE]
+
+            [HTML_BODY]
+            Write the complete raw HTML code here.
+            [/HTML_BODY]
+            """
+
+            response = model.generate_content(sys_prompt)
+            raw_text = response.text.strip()
+
+            # Safely extract using Regex. DOTALL allows it to capture across multiple lines and code blocks
+            import re
+            type_match = re.search(r'\[SUGGESTED_TYPE\](.*?)\[/SUGGESTED_TYPE\]', raw_text, re.DOTALL | re.IGNORECASE)
+            html_match = re.search(r'\[HTML_BODY\](.*?)\[/HTML_BODY\]', raw_text, re.DOTALL | re.IGNORECASE)
+
+            suggested_type = type_match.group(1).strip() if type_match else "CWE-Unknown"
+            html_content = html_match.group(1).strip() if html_match else raw_text
+
+            # Send back to main backend webhook
+            url = f"{MAIN_BACKEND_URL}/api/luigi/vuln-draft-callback"
+            headers = {"Authorization": f"Bearer {get_iam_token()}"}
+
+            # Python's requests library safely converts this dict to bulletproof JSON
+            payload = {
+                "user_email": data.get("user_email"),
+                "html": html_content,
+                "suggested_type": suggested_type
+            }
+            print(payload["html"])
+            save_res = requests.post(url, json=payload, headers=headers)
+            save_res.raise_for_status()
+
+            print(f"✅ Luigi successfully drafted vulnerability for {data.get('user_email')}")
+            return {"status": "success"}
+
+        except Exception as e:
+            print(f"🚨 Luigi error drafting vuln: {e}")
+            return {"status": "error", "detail": str(e)}
+
     return {"status": "ignored", "detail": "Task type not supported"}

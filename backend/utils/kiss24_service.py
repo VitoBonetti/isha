@@ -4,6 +4,7 @@ import urllib.request
 import urllib.error
 import re
 from utils.secret_manager import get_secret
+from audit_logger import log_audit_event
 
 
 KISS_24_ENDPOINT = os.environ.get("KISS_24_ENDPOINT")
@@ -77,7 +78,6 @@ def create_test(ouuid: str, body: dict, user_api_key: str = None):
     req = urllib.request.Request(
         url,
         data=json.dumps(body).encode("utf-8"),
-        # headers={"x-api-key": key_to_use, "Content-Type": "application/json"}
         headers={"x-api-key": user_api_key, "Content-Type": "application/json"}
     )
 
@@ -290,3 +290,61 @@ def verify_kiss24_api_key(test_key: str):
         return False, str(e)
 
     return False, "Unknown Error"
+
+
+# Create Vuln
+def create_vulnerability(ouuid: str, body: dict, user_api_key: str = None):
+    endpoint = f"provider/vulnerabilities/{ouuid}/create"
+    url = f"{KISS_24_ENDPOINT}{endpoint}"
+
+    # key_to_use = user_api_key if user_api_key else api_key()
+
+    # json.dumps automatically escapes any inner quotes in string variables into \"
+    json_data = json.dumps(body).encode("utf-8")
+
+    log_audit_event(
+        user_id="SYSTEM",
+        role="SYSTEM",
+        action="KISS24_VULN_PAYLOAD",
+        resource_type="KISS24",
+        resource_id="CHECKING_PAYLOAD",
+        details=f"Vuln payload: {json_data}"
+    )
+
+
+    req = urllib.request.Request(
+        url,
+        data=json_data,
+        headers={"x-api-key": user_api_key, "Content-Type": "application/json"}
+    )
+    with urllib.request.urlopen(req) as res:
+        if res.status == 200:
+            response_data = json.loads(res.read())
+            response_str = str(response_data)
+            uuid_pattern = r'[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
+            match = re.search(uuid_pattern, response_str)
+            if match:
+                return match.group(0)
+    return None
+
+
+def upload_vulnerability_attachment(vuln_uuid: str, base64_data: str, filename: str, user_api_key: str = None):
+    endpoint = f"provider/vulnerabilities/{vuln_uuid}/attachment-base64"
+    url = f"{KISS_24_ENDPOINT}{endpoint}"
+
+    # key_to_use = user_api_key if user_api_key else api_key()
+    payload = {
+        "base64": base64_data,
+        "name": filename
+    }
+
+    req = urllib.request.Request(
+        url, data=json.dumps(payload).encode("utf-8"),
+        headers={"x-api-key": user_api_key, "Content-Type": "application/json"}
+    )
+    try:
+        with urllib.request.urlopen(req) as res:
+            return res.status == 200
+    except Exception as e:
+        print(f"Failed to upload attachment: {e}")
+        return False

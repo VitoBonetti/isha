@@ -2,11 +2,12 @@ import { useState, useRef, useEffect } from 'react';
 import axios from 'axios';
 import toast from 'react-hot-toast';
 import {
-  X, Cable, CheckCircle2, AlertCircle,
+  X, Cable, CheckCircle2, AlertCircle, BrainCircuit,
   Database, Activity, ShieldAlert, Lock, RefreshCw, Send, Check, DownloadCloud, Clock, User, ExternalLink, FingerprintPattern, TestTubeDiagonal, Bug
 } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
 import Kiss24KeyModal from './Modals/Kiss24KeyModal';
+import Kiss24CreateVulnModal from './Modals/Kiss24CreateVulnModal';
 
 interface Kiss24ControlPanelProps {
   isOpen: boolean;
@@ -35,6 +36,9 @@ export default function Kiss24ControlPanel({ isOpen, onClose, test, onRefresh }:
   // kiss24 key State
   const [isKeyValid, setIsKeyValid] = useState<boolean | null>(null);
   const [isValidatingKey, setIsValidatingKey] = useState(false);
+
+  // Vulns state
+  const [isCreateVulnModalOpen, setIsCreateVulnModalOpen] = useState(false);
 
   useEffect(() => {
     if (isOpen && currentUser?.has_kiss24_key) {
@@ -545,18 +549,26 @@ export default function Kiss24ControlPanel({ isOpen, onClose, test, onRefresh }:
             {/* TAB 3: VULNERABILITIES */}
             {activeTab === 'vulnerabilities' && (
               <div className="space-y-6 animate-in fade-in slide-in-from-right-4">
-                <div className="border-b border-slate-200 dark:border-zinc-800 pb-4 flex flex-col sm:flex-row justify-between sm:items-end gap-3 sm:gap-0">
+                <div className="border-b border-slate-200 dark:border-zinc-800 pb-4 flex flex-col sm:flex-row justify-between sm:items-end gap-4 sm:gap-0">
                   <div>
                     <h3 className="text-lg font-bold text-slate-900 dark:text-zinc-100">Vulnerabilities</h3>
-                    <p className="text-xs sm:text-sm text-slate-500 dark:text-zinc-400 mt-1">Review findings published to Keep Secure 24.</p>
+                    <p className="text-xs sm:text-sm text-slate-500 dark:text-zinc-400 mt-1">Review and publish findings to Keep Secure 24.</p>
                   </div>
-                  <button
-                    onClick={handleFetchVulns}
-                    disabled={isFetchingVulns}
-                    className="w-full sm:w-auto px-4 py-2.5 sm:py-2 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 text-blue-600 dark:text-blue-400 text-xs font-bold rounded-lg transition-colors flex justify-center items-center gap-2 border border-blue-200 dark:border-blue-900/50"
-                  >
-                    <RefreshCw size={14} className={isFetchingVulns ? "animate-spin" : ""} /> Sync Findings
-                  </button>
+                  <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+                    <button
+                      onClick={() => setIsCreateVulnModalOpen(true)}
+                      className="w-full sm:w-auto px-4 py-2.5 sm:py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg shadow-md transition-colors flex justify-center items-center gap-2"
+                    >
+                      <BrainCircuit size={14} /> Draft & Publish
+                    </button>
+                    <button
+                      onClick={handleFetchVulns}
+                      disabled={isFetchingVulns}
+                      className="w-full sm:w-auto px-4 py-2.5 sm:py-2 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 text-blue-600 dark:text-blue-400 text-xs font-bold rounded-lg transition-colors flex justify-center items-center gap-2 border border-blue-200 dark:border-blue-900/50"
+                    >
+                      <RefreshCw size={14} className={isFetchingVulns ? "animate-spin" : ""} /> Sync Findings
+                    </button>
+                  </div>
                 </div>
 
                 {!vulnsData && !isFetchingVulns && (
@@ -650,6 +662,12 @@ export default function Kiss24ControlPanel({ isOpen, onClose, test, onRefresh }:
         </div>
       </div>
       <Kiss24KeyModal isOpen={isKeyModalOpen} onClose={() => setIsKeyModalOpen(false)} />
+      <Kiss24CreateVulnModal
+        isOpen={isCreateVulnModalOpen}
+        testId={test.id}
+        onClose={() => setIsCreateVulnModalOpen(false)}
+        onSuccess={handleFetchVulns} // Automatically fetch the new vulns after publishing!
+      />
     </div>
   );
 }

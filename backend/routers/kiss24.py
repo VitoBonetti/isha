@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.testing.pickleable import User
 from database import get_db_cursor
 from routers.auth import get_current_user, require_admin
 from audit_logger import log_audit_event
-from sqlalchemy.testing.pickleable import User
 from utils.timeaware import aware_utcnow
 from utils.kiss24_service import (
     map_asset_onetrust_custom_field,
@@ -12,7 +12,7 @@ from utils.kiss24_service import (
     get_test_vulns_info,
     add_snowid_to_kiss24asset,
     sync_vuln_type_kiss24,
-    map_mario_user_kiss24_uuid
+    map_mario_user_kiss24_uuid, create_vulnerability, upload_vulnerability_attachment
 )
 from utils.security_cipher import get_cipher
 from datetime import datetime
@@ -380,8 +380,6 @@ def sync_user_kiss24_uuid(
 
 # Creation action
 @router.post("/{test_id}/create-test", status_code=status.HTTP_200_OK)
-# Creation action
-@router.post("/{test_id}/create-test", status_code=status.HTTP_200_OK)
 def create_kiss24_test(
         test_id: str,
         current_user: dict = Depends(get_current_user),
@@ -569,4 +567,113 @@ def get_kiss24_vulnerabilities(
         return vulns
 
     except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+# Vulns end point
+@router.get("/vuln-types", status_code=status.HTTP_200_OK)
+def get_kiss24_vuln_types_for_dropdown(current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+    cursor.execute("""
+        SELECT vt.id, vt.name, c.id, c.name
+        FROM kiss24_vuln_types vt
+        LEFT JOIN kiss24_vuln_context_association vca ON vt.id = vca.vuln_id
+        LEFT JOIN kiss24_context c ON vca.context_id = c.id
+        ORDER BY vt.name
+    """)
+
+    vuln_dict = {}
+    for vt_id, vt_name, c_id, c_name in cursor.fetchall():
+        vt_id_str = str(vt_id)
+        if vt_id_str not in vuln_dict:
+            vuln_dict[vt_id_str] = {"id": vt_id_str, "name": vt_name, "contexts": []}
+        if c_id:
+            vuln_dict[vt_id_str]["contexts"].append({"id": str(c_id), "name": c_name})
+
+    return list(vuln_dict.values())
+
+
+# 3. The Main Publishing Sequence
+@router.post("/{test_id}/vulnerabilities/publish", status_code=status.HTTP_200_OK)
+def publish_vulnerability(test_id: str, payload: dict, current_user: dict = Depends(get_current_user),
+                          cursor=Depends(get_db_cursor)):
+    try:
+        # 1. Decrypt user's API key
+        cursor.execute("SELECT kiss24_api_key FROM users WHERE id = %s", (str(current_user["id"]),))
+        key_row = cursor.fetchone()
+        if not key_row or not key_row[0]:
+            raise HTTPException(status_code=400, detail="Configure your personal Keep Secure 24 API key first.")
+        cipher = get_cipher()
+        user_api_key = cipher.decrypt(key_row[0].encode('utf-8')).decode('utf-8')
+
+        # 2. Get Test Identifiers
+        cursor.execute("""
+            SELECT t.kiss24, c.kiss24_uuid, ra.kiss24_asset_id
+            FROM tests t
+            LEFT JOIN test_assets ta ON t.id = ta.test_id
+            LEFT JOIN assets a ON ta.asset_id = a.id
+            LEFT JOIN raw_assets ra ON a.raw_asset_id = ra.id
+            LEFT JOIN countries c ON ra.country_id = c.id
+            WHERE t.id = %s LIMIT 1
+        """, (test_id,))
+        row = cursor.fetchone()
+
+        if not row or not row[0] or not row[1] or not row[2]:
+            raise HTTPException(status_code=400, detail="Test is missing required Keep Secure 24 UUIDs.")
+
+        test_uuid, country_uuid, asset_uuid = row
+
+        # 3. Map CVSS v4 based on Severity
+        cvss_map = {
+            "info": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:N/SC:N/SI:N/SA:N",
+            "low": "CVSS:4.0/AV:N/AC:H/AT:N/PR:L/UI:N/VC:L/VI:L/VA:L/SC:N/SI:N/SA:N",
+            "medium": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:L/VI:L/VA:L/SC:N/SI:N/SA:N",
+            "high": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:L/VA:L/SC:N/SI:N/SA:N",
+            "critical": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N"
+        }
+        severity_key = str(payload.get("severity", "info")).lower()
+        cvss_vector = cvss_map.get(severity_key, cvss_map["info"])
+
+        safe_html = str(payload.get("html", "")).replace('\n', '').replace('\r', '')
+
+        # 4. Build Create Payload
+        create_payload = {
+            "asset": str(asset_uuid),
+            "vulnerability_type": payload.get("vulnerability_type"),
+            "context": payload.get("context"),
+            "test": str(test_uuid),
+            "severity": severity_key,
+            "description": payload.get("title"),
+            "details": safe_html,
+            "ready_to_publish": True,
+            "cvss_vector": cvss_vector,
+            "authenticated": payload.get("authenticated", False)
+        }
+
+        # 5. Execute Creation
+        new_vuln_uuid = create_vulnerability(str(country_uuid), create_payload, user_api_key)
+        if not new_vuln_uuid:
+            raise HTTPException(status_code=500, detail="Failed to create vulnerability in Keep Secure 24.")
+
+        # 6. Upload Images sequentially
+        images = payload.get("images", [])
+        uploaded_count = 0
+        for img in images:
+            # img expects {"name": "file.png", "base64": "base64_string_without_prefix"}
+            success = upload_vulnerability_attachment(new_vuln_uuid, img["base64"], img["name"], user_api_key)
+            if success:
+                uploaded_count += 1
+
+        log_audit_event(
+            user_id=str(current_user["id"]),
+            role=current_user.get("role", "pentester"),
+            action="KISS24_VULN_PUBLISHED",
+            resource_type="KISS24",
+            resource_id=new_vuln_uuid,
+            details=f"Published {severity_key} Vuln. Images uploaded: {uploaded_count}/{len(images)}"
+        )
+
+        return {"status": "Success", "message": "Vulnerability Published!", "vuln_uuid": new_vuln_uuid}
+
+    except Exception as e:
+        cursor.connection.rollback()
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
