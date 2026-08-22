@@ -12,7 +12,10 @@ from utils.kiss24_service import (
     get_test_vulns_info,
     add_snowid_to_kiss24asset,
     sync_vuln_type_kiss24,
-    map_mario_user_kiss24_uuid, create_vulnerability, upload_vulnerability_attachment
+    map_mario_user_kiss24_uuid,
+    create_vulnerability,
+    upload_vulnerability_attachment,
+    get_custom_fields_choice_uuid
 )
 from utils.security_cipher import get_cipher
 from datetime import datetime
@@ -633,7 +636,32 @@ def publish_vulnerability(test_id: str, payload: dict, current_user: dict = Depe
         severity_key = str(payload.get("severity", "info")).lower()
         cvss_vector = cvss_map.get(severity_key, cvss_map["info"])
 
-        safe_html = str(payload.get("html", "")).replace('\n', '').replace('\r', '')
+        # Convert newlines to HTML break tags so the formatting survives, then strip the literal newlines so KISS24 doesn't crash
+        safe_html = str(payload.get("html", "")).replace('\n', '<br/>').replace('\r', '')
+
+        # country_uuid maps to the KISS24 'ouuid'
+        remediation_uuid = get_custom_fields_choice_uuid(str(country_uuid), "Remediation Effort",
+                                           payload.get("remediation_effort", "Minimal"))
+        verified_uuid = get_custom_fields_choice_uuid(str(country_uuid), "Is Verified?", "No")
+
+        # Build the custom fields array dynamically
+        custom_fields = [
+            {
+                "parent": "MITRE ID",
+                "text": payload.get("mitre_id", "")
+            }
+        ]
+        if remediation_uuid:
+            custom_fields.append({
+                "parent": "Remediation Effort",
+                "choices": remediation_uuid
+            })
+
+        if verified_uuid:
+            custom_fields.append({
+                "parent": "Is Verified?",
+                "choices": verified_uuid
+            })
 
         # 4. Build Create Payload
         create_payload = {
@@ -646,7 +674,8 @@ def publish_vulnerability(test_id: str, payload: dict, current_user: dict = Depe
             "details": safe_html,
             "ready_to_publish": True,
             "cvss_vector": cvss_vector,
-            "authenticated": payload.get("authenticated", False)
+            "authenticated": payload.get("authenticated", False),
+            "custom_fields": custom_fields
         }
 
         # 5. Execute Creation

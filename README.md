@@ -81,7 +81,7 @@ gcloud run deploy sherlock-worker \
   --service-account gcp-df-gostplanner-sbx-backend@df-gost-planner-sbx-57d9.iam.gserviceaccount.com \
   --vpc-connector projects/df-network-dta-51a0/locations/europe-west1/connectors/sva-df-sharedvpc-dta \
   --vpc-egress all-traffic \
-  --set-env-vars GCP_PROJECT_ID=df-gost-planner-sbx-57d9,LOCATION=europe-west1,DB_INSTANCE_NAME=gcp-df-gostplanner-sbx-db,POSTGRES_DB=gostplanner-sbx-db,IAM_SA_EMAIL=gcp-df-gostplanner-sbx-backend@df-gost-planner-sbx-57d9.iam.gserviceaccount.com,INTAKE_BUCKET_NAME=gcp-df-gostplanner-sbx-intake-artifacts-bucket,GEMINI_KEY_NAME=gcp-luigi-key,MAIN_BACKEND_URL=https://gostplannersbx.ddns.net,IAP_CLIENT_ID=114457953986-04hqpgf4i4ellvv51q84at2l26argjie.apps.googleusercontent.com
+  --set-env-vars GCP_PROJECT_ID=df-gost-planner-sbx-57d9,LOCATION=europe-west1,DB_INSTANCE_NAME=gcp-df-gostplanner-sbx-db,POSTGRES_DB=gostplanner-sbx-db,IAM_SA_EMAIL=gcp-df-gostplanner-sbx-backend@df-gost-planner-sbx-57d9.iam.gserviceaccount.com,INTAKE_BUCKET_NAME=gcp-df-gostplanner-sbx-intake-artifacts-bucket,LUIGI_SKILLS_BUCKET_NAME=gcp-df-gostplanner-sbx-luigi-skills,GEMINI_KEY_NAME=gcp-luigi-key,MAIN_BACKEND_URL=https://gostplannersbx.ddns.net,IAP_CLIENT_ID=114457953986-04hqpgf4i4ellvv51q84at2l26argjie.apps.googleusercontent.com
 ```
 
 #### 4. Create the pub/sub Subscriptions

@@ -292,6 +292,28 @@ def verify_kiss24_api_key(test_key: str):
     return False, "Unknown Error"
 
 
+# Custom field Dynamic Fetcher
+def get_custom_fields_choice_uuid(ouuid: str, field_name: str, choice_text: str):
+    """Dynamically fetches the specific choice UUID for a given organisation."""
+    page = 1
+    while True:
+        # We use your existing post() helper, filtering by the specific organisation
+        resp = post("custom-fields", {"organisations": [ouuid]}, page=page)
+
+        for item in resp.get("items", []):
+            if item.get("name", "").lower() == field_name.lower():
+                choices = item.get("choices", {}).get("enabled", {})
+                for c_uuid, c_text in choices.items():
+                    if str(c_text).lower() == str(choice_text).lower():
+                        return c_uuid  # Found the exact UUID for this tenant!
+
+        if not resp.get("_links", {}).get("next"):
+            break
+        page += 1
+
+    return None
+
+
 # Create Vuln
 def create_vulnerability(ouuid: str, body: dict, user_api_key: str = None):
     endpoint = f"provider/vulnerabilities/{ouuid}/create"
@@ -311,21 +333,27 @@ def create_vulnerability(ouuid: str, body: dict, user_api_key: str = None):
         details=f"Vuln payload: {json_data}"
     )
 
-
     req = urllib.request.Request(
         url,
         data=json_data,
         headers={"x-api-key": user_api_key, "Content-Type": "application/json"}
     )
-    with urllib.request.urlopen(req) as res:
-        if res.status == 200:
-            response_data = json.loads(res.read())
-            response_str = str(response_data)
-            uuid_pattern = r'[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
-            match = re.search(uuid_pattern, response_str)
-            if match:
-                return match.group(0)
-    return None
+    try:
+        with urllib.request.urlopen(req) as res:
+            if res.status == 200:
+                response_data = json.loads(res.read())
+                response_str = str(response_data)
+                uuid_pattern = r'[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
+                match = re.search(uuid_pattern, response_str)
+                if match:
+                    return match.group(0)
+        return None
+    except urllib.error.HTTPError as e:
+        # This explicitly reads the 400 error message from Keep Secure 24 and throws it!
+        err_body = e.read().decode('utf-8')
+        raise Exception(f"KISS24 Rejected Payload (HTTP {e.code}): {err_body}")
+    except Exception as e:
+        raise Exception(f"Connection Error: {str(e)}")
 
 
 def upload_vulnerability_attachment(vuln_uuid: str, base64_data: str, filename: str, user_api_key: str = None):

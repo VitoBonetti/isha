@@ -34,6 +34,8 @@ export default function Kiss24CreateVulnModal({ isOpen, testId, onClose, onSucce
   const [title, setTitle] = useState('');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [suggestedCwe, setSuggestedCwe] = useState('');
+  const [mitreId, setMitreId] = useState('');
+  const [remediationEffort, setRemediationEffort] = useState('Minimal');
 
   // Add a ref to track the active toast so the websocket can close it
   const draftToastId = useRef<string | null>(null);
@@ -50,9 +52,17 @@ export default function Kiss24CreateVulnModal({ isOpen, testId, onClose, onSucce
     if (!isOpen) {
       setStep(1);
       setNote('');
+      setSeverity('info'); // Reset to default severity
       setImages([]);
       setHtmlContent('');
       setShowPreview(false);
+      setSelectedType('');
+      setSelectedContext('');
+      setTitle('');
+      setSuggestedCwe('');
+      setIsAuthenticated(false);
+      setMitreId('');
+      setRemediationEffort('Minimal');
     }
   }, [isOpen]);
 
@@ -131,7 +141,9 @@ export default function Kiss24CreateVulnModal({ isOpen, testId, onClose, onSucce
         title,
         html: htmlContent,
         authenticated: isAuthenticated,
-        images
+        images,
+        mitre_id: mitreId,
+        remediation_effort: remediationEffort
       });
       toast.success("Vulnerability published successfully!", { id: toastId });
       onSuccess();
@@ -182,7 +194,7 @@ export default function Kiss24CreateVulnModal({ isOpen, testId, onClose, onSucce
           <div className="p-6 space-y-5 flex-1 overflow-y-auto">
             <div className="bg-indigo-50 dark:bg-indigo-900/10 border border-indigo-200 dark:border-indigo-900/30 p-4 rounded-xl flex gap-3 text-indigo-800 dark:text-indigo-300 text-sm shadow-sm">
               <AlertCircle size={20} className="shrink-0" />
-              <p>Provide a rough description and severity. Luigi will format it into a professional HTML report and map it to a CWE category.</p>
+              <p>Provide a rough description and severity. Luigi will format it into a  HTML report and map it to a CWE category Ready for be published on Sucks Secure 24.</p>
             </div>
 
             <div>
@@ -257,6 +269,20 @@ export default function Kiss24CreateVulnModal({ isOpen, testId, onClose, onSucce
               <div>
                 <label className="block text-xs font-bold text-slate-700 dark:text-zinc-300 mb-1.5">Finding Title</label>
                 <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} className="w-full p-2.5 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-lg text-xs outline-none focus:ring-2 focus:ring-indigo-500" />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-zinc-300 mb-1.5">MITRE ID (Optional)</label>
+                <input type="text" value={mitreId} onChange={(e) => setMitreId(e.target.value)} placeholder="e.g. T1190" className="w-full p-2.5 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-lg text-xs outline-none focus:ring-2 focus:ring-indigo-500" />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-zinc-300 mb-1.5">Remediation Effort</label>
+                <select value={remediationEffort} onChange={(e) => setRemediationEffort(e.target.value)} className="w-full p-2.5 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-lg text-xs outline-none focus:ring-2 focus:ring-indigo-500">
+                  <option value="Minimal">Minimal</option>
+                  <option value="Moderate">Moderate</option>
+                  <option value="Significant">Significant</option>
+                </select>
               </div>
 
               <div className="flex items-center justify-between p-3 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-lg">

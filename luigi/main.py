@@ -1,9 +1,10 @@
 import os
 import base64
 import json
+import re
 import requests
 from fastapi import FastAPI, Request, HTTPException
-from google.cloud import secretmanager
+from google.cloud import secretmanager, storage
 import google.generativeai as genai
 import google.auth.transport.requests
 import google.oauth2.id_token
@@ -15,6 +16,7 @@ PROJECT_ID = os.environ.get("GCP_PROJECT_ID")
 GEMINI_KEY_NAME = os.environ.get("GEMINI_KEY_NAME")
 MAIN_BACKEND_URL = os.environ.get("MAIN_BACKEND_URL")
 IAP_CLIENT_ID = os.environ.get("IAP_CLIENT_ID")
+LUIGI_SKILLS_BUCKET_NAME = os.environ.get("LUIGI_SKILLS_BUCKET_NAME")
 
 # --- Security: Fetch API Key ---
 def get_gemini_key():
@@ -30,6 +32,21 @@ def get_iam_token():
     req = google.auth.transport.requests.Request()
     return google.oauth2.id_token.fetch_id_token(req, IAP_CLIENT_ID)
 
+
+# --- Fetch Skill from GCS Bucket ---
+def get_skill_prompt(skill_name: str) -> str:
+    """Downloads the specific markdown skill file from the GCS bucket."""
+    try:
+        client = storage.Client()
+        bucket = client.bucket(LUIGI_SKILLS_BUCKET_NAME)
+        blob = bucket.blob(f"{skill_name}.md")
+
+        if not blob.exists():
+            raise Exception(f"Skill file '{skill_name}.md' not found in bucket '{LUIGI_SKILLS_BUCKET_NAME}'.")
+
+        return blob.download_as_text()
+    except Exception as e:
+        raise Exception(f"Failed to load skill from bucket: {str(e)}")
 
 # --- Main Logic Trigger ---
 @app.post("/")
@@ -106,71 +123,62 @@ async def pubsub_trigger(request: Request):
             print(f"🚨 Luigi error: {e}")
             return {"status": "error", "detail": str(e)}
 
+
     elif task_type == "DRAFT_VULNERABILITY":
-        print(f"📝 Luigi drafting vulnerability for: {data.get('user_email')}")
+        print(f"📝 Luigi dynamically drafting vulnerability for: {data.get('user_email')}")
         try:
+            # For now, we hardcode the skill name, but later you can pass it in the payload!
+            base_skill_markdown = get_skill_prompt(str(task_type))
+
+            # 2. Append the specific task data and strict formatting rules
+            sys_prompt = f"""
+                {base_skill_markdown}
+                =========================================
+                CURRENT TASK DATA:
+                Severity: {data.get('severity')}
+                Pentester Notes: {data.get('note')}
+                =========================================
+
+                STRICT SYSTEM ENFORCEMENT FOR OUTPUT:
+                You MUST return your response using EXACTLY these custom delimiters so the backend parser can read it. Do NOT output standard JSON. Do NOT wrap the output in markdown ticks.
+
+                [SUGGESTED_TYPE]
+                Write the CWE Name here (e.g., CWE-79: Improper Neutralization...)
+                [/SUGGESTED_TYPE]
+
+                [HTML_BODY]
+                Write the complete raw HTML code here, following the examples provided in the persona above.
+                [/HTML_BODY]
+                """
+
+            # 3. Configure AI & Generate
             genai.configure(api_key=get_gemini_key())
             model = genai.GenerativeModel('gemini-2.5-pro')
-
-            sys_prompt = f"""
-            You are an expert Cybersecurity Technical Writer. Your expertise is in clearly articulating complex security vulnerabilities, their potential impact, and actionable remediation steps for a technical audience.
-    
-            The pentester has provided a raw note and severity level.
-            Severity: {data.get('severity')}
-            Pentester Notes: {data.get('note')}
-    
-            CORE OBJECTIVE:
-            Generate four distinct sections for a penetration test report: 1. Description, 2. Impact, 3. Recommendation, and 4. Details & Steps to Reproduce.
-    
-            RULES & CONSTRAINTS:
-            - Description: Write a clear, technical explanation of the vulnerability. Reference the relevant CWE.
-            - Impact: Describe the potential technical impact.
-            - Recommendation: Actionable remediation steps based on general security best practices.
-            - Steps to Reproduce: Provide clear and detailed steps based on the pentester notes. Include HTTP requests if provided. Use <pre><code> for code blocks.
-            - DO NOT use bullet points or numbered lists within the generated Description, Impact, and Recommendation sections.
-            - Format EVERYTHING exactly like this HTML example structure:
-              <h1><span style="color:#2175d9"><strong>Description</strong></span></h1>
-              <p style="text-align: justify;"><span style="color:#000000">...</span></p>
-            - CRITICAL JSON RULE: Use SINGLE QUOTES `'` for all HTML attributes (e.g., <span style='color:#2175d9'>, <a href='...'>, <div style='...'>). DO NOT use unescaped double quotes inside HTML tags.
-            
-    
-            OUTPUT FORMAT:
-            You MUST return your response using EXACTLY these custom delimiters. Do NOT output JSON. Do NOT include markdown ticks.
-
-            [SUGGESTED_TYPE]
-            Write the CWE Name here (e.g., CWE-79: Improper Neutralization...)
-            [/SUGGESTED_TYPE]
-
-            [HTML_BODY]
-            Write the complete raw HTML code here.
-            [/HTML_BODY]
-            """
-
             response = model.generate_content(sys_prompt)
             raw_text = response.text.strip()
 
-            # Safely extract using Regex. DOTALL allows it to capture across multiple lines and code blocks
-            import re
+            # 4. Extract Custom Tags Safely
             type_match = re.search(r'\[SUGGESTED_TYPE\](.*?)\[/SUGGESTED_TYPE\]', raw_text, re.DOTALL | re.IGNORECASE)
             html_match = re.search(r'\[HTML_BODY\](.*?)\[/HTML_BODY\]', raw_text, re.DOTALL | re.IGNORECASE)
-
             suggested_type = type_match.group(1).strip() if type_match else "CWE-Unknown"
             html_content = html_match.group(1).strip() if html_match else raw_text
+            html_content = re.sub(r'^```[a-zA-Z]*\s*', '', html_content, flags=re.IGNORECASE)
+            html_content = re.sub(r'\s*```$', '', html_content)
+            html_content = html_content.strip()
+            html_content = re.sub(r"(?i)<h1>\s*<span\s+style=['\"]color:\s*#[0-9a-fA-F]+['\"]\s*>",
+                                  "<h1><span style='color:#2175d9'>", html_content)
 
-            # Send back to main backend webhook
+            # 5. Webhook Callback
             url = f"{MAIN_BACKEND_URL}/api/luigi/vuln-draft-callback"
             headers = {"Authorization": f"Bearer {get_iam_token()}"}
-
-            # Python's requests library safely converts this dict to bulletproof JSON
             payload = {
                 "user_email": data.get("user_email"),
                 "html": html_content,
                 "suggested_type": suggested_type
             }
-            print(payload["html"])
+
             save_res = requests.post(url, json=payload, headers=headers)
             save_res.raise_for_status()
-
             print(f"✅ Luigi successfully drafted vulnerability for {data.get('user_email')}")
             return {"status": "success"}
 
