@@ -6,6 +6,7 @@ import { useTheme } from './ThemeProvider';
 import ApiKeysModal from './Modals/ApiKeysModal';
 import MeetingProposalsModal from './Modals/MeetingProposalsModal';
 import Kiss24KeyModal from './Modals/Kiss24KeyModal';
+import E2EEKeyModal from './Modals/E2EEKeyModal';
 import {
   Sun, Moon, Laptop, LogOut, User as UserIcon, Bell,
   SprayCan, Snail, SunMoon, Fingerprint, Rabbit, Cat, Shell, Turtle, Radar, HandMetal, Drum, TentTree,
@@ -24,6 +25,7 @@ export default function TopNav() {
   const [isApiModalOpen, setIsApiModalOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isKiss24KeyModalOpen, setIsKiss24KeyModalOpen] = useState(false);
+  const [isE2EEModalOpen, setIsE2EEModalOpen] = useState(false);
 
   const themeRef = useRef<HTMLDivElement>(null);
   const userRef = useRef<HTMLDivElement>(null);
@@ -307,6 +309,9 @@ export default function TopNav() {
               <button onClick={() => { setIsUserOpen(false); setIsKiss24KeyModalOpen(true); }} className="w-full flex items-center px-4 py-2 text-sm text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors">
                 <Key className="mr-2 h-4 w-4" /> KISS24 API Key
               </button>
+              <button onClick={() => { setIsUserOpen(false); setIsE2EEModalOpen(true); }} className="w-full flex items-center px-4 py-2 text-sm text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors">
+               <Lock className="mr-2 h-4 w-4" /> Setup Secure Vault Keys
+              </button>
               <div className="h-px bg-slate-100 dark:bg-zinc-800 my-1"></div>
               <button onClick={handleLogout} className="w-full flex items-center px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors">
                 <LogOut className="mr-2 h-4 w-4" /> Log out
@@ -356,6 +361,7 @@ export default function TopNav() {
         }}
       />
       <Kiss24KeyModal isOpen={isKiss24KeyModalOpen} onClose={() => setIsKiss24KeyModalOpen(false)} />
+      <E2EEKeyModal isOpen={isE2EEModalOpen} onClose={() => setIsE2EEModalOpen(false)} />
     </>
   );
 }

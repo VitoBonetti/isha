@@ -1212,45 +1212,72 @@ def get_test_history(test_id: str, current_user: dict = Depends(get_current_user
 
 
 # --- Secure note ---
-@router.get("/{test_id}/secret", summary="Return the test secret", include_in_schema=False)
+@router.get("/{test_id}/secret", summary="Return the encrypted test secret", include_in_schema=False)
 def get_test_secret(test_id: str, current_user: dict = Depends(require_write_access), cursor=Depends(get_db_cursor)):
-    cursor.execute("SELECT encrypted_note FROM secret_notes WHERE test_id = %s", (test_id,))
-    row = cursor.fetchone()
-    if not row: return {"note": ""}
-    try:
-        cipher = get_cipher()
-        decrypted_note = cipher.decrypt(row[0].encode()).decode()
-        log_audit_event(str(current_user["id"]), current_user["name"], "SECRET_VIEWED", "TEST_SECRET", details=f"Viewed secure note for test {test_id}.")
-        return {"note": decrypted_note}
-    except Exception:
-        raise HTTPException(status_code=500, detail="Failed to decrypt the secure note.")
+    # 1. Get the encrypted note
+    cursor.execute("SELECT encrypted_data FROM secret_notes WHERE test_id = %s", (test_id,))
+    note_row = cursor.fetchone()
+    if not note_row: return {"exists": False}
+
+    # 2. Get the specific encrypted key for the requesting user
+    cursor.execute("SELECT encrypted_key FROM secret_note_access WHERE test_id = %s AND user_id = %s",
+                   (test_id, str(current_user["id"])))
+    key_row = cursor.fetchone()
+
+    # 3. Get the list of users who currently have access
+    cursor.execute("SELECT user_id FROM secret_note_access WHERE test_id = %s", (test_id,))
+    shared_with = [str(r[0]) for r in cursor.fetchall()]
+
+    log_audit_event(str(current_user["id"]), current_user["name"], "SECRET_FETCHED", "TEST_SECRET",
+                    details=f"Fetched encrypted secure note for test {test_id}.")
+
+    return {
+        "exists": True,
+        "encrypted_data": note_row[0],
+        "encrypted_key": key_row[0] if key_row else None,  # None means they aren't authorized!
+        "shared_with": shared_with
+    }
 
 
 @router.put("/{test_id}/secret", summary="Update the test secret", include_in_schema=False)
-def update_test_secret(test_id: str, payload: SecureNotePayload, background_tasks: BackgroundTasks,
+def update_test_secret(test_id: str, payload: dict, background_tasks: BackgroundTasks,
                        current_user: dict = Depends(require_write_access), cursor=Depends(get_db_cursor)):
-    cipher = get_cipher()
-    encrypted_note = cipher.encrypt(payload.note.encode()).decode()
+
+    # payload expects: { encrypted_data: "...", access_list: [{"user_id": "...", "encrypted_key": "..."}] }
+
+    # 1. Upsert the encrypted note
     cursor.execute('''
-        INSERT INTO secret_notes (test_id, encrypted_note, updated_at) 
+        INSERT INTO secret_notes (test_id, encrypted_data, updated_at) 
         VALUES (%s, %s, CURRENT_TIMESTAMP)
-        ON CONFLICT (test_id) DO UPDATE SET encrypted_note = EXCLUDED.encrypted_note, updated_at = CURRENT_TIMESTAMP
-    ''', (test_id, encrypted_note))
-    log_audit_event(str(current_user["id"]), current_user["name"], "SECRET_UPDATED", "TEST_SECRET", details=f"Updated secure note for test {test_id}.")
+        ON CONFLICT (test_id) DO UPDATE SET encrypted_data = EXCLUDED.encrypted_data, updated_at = CURRENT_TIMESTAMP
+    ''', (test_id, payload.get("encrypted_data")))
+
+    # 2. Wipe old access and insert the new access list
+    cursor.execute("DELETE FROM secret_note_access WHERE test_id = %s", (test_id,))
+    for access in payload.get("access_list", []):
+        cursor.execute('''
+            INSERT INTO secret_note_access (test_id, user_id, encrypted_key)
+            VALUES (%s, %s, %s)
+        ''', (test_id, access["user_id"], access["encrypted_key"]))
+
+    log_audit_event(str(current_user["id"]), current_user["name"], "SECRET_UPDATED", "TEST_SECRET",
+                    details=f"Updated E2EE secure note for test {test_id}.")
     cursor.connection.commit()
+
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
-    return {"message": "Secure note encrypted and saved."}
+    return {"message": "Secure note securely vaulted."}
 
 
 @router.delete("/{test_id}/secret", summary="[Admin Only] Delete the test secret", include_in_schema=False)
-def delete_test_secret(test_id: str, background_tasks: BackgroundTasks,
-                       current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+def delete_test_secret(test_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin),
+                       cursor=Depends(get_db_cursor)):
+    # Because of our ON DELETE CASCADE rule on the table, deleting the note automatically wipes the access_list table too!
     cursor.execute("DELETE FROM secret_notes WHERE test_id = %s", (test_id,))
-    log_audit_event(str(current_user["id"]), current_user["name"], "SECRET_DELETED", "TEST_SECRET", details=f"Deleted secure note for test {test_id}.")
+    log_audit_event(str(current_user["id"]), current_user["name"], "SECRET_DELETED", "TEST_SECRET",
+                    details=f"Deleted secure note for test {test_id}.")
     cursor.connection.commit()
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Secure note permanently deleted."}
-
 # --- Generation PPT ---
 @router.post("/{test_id}/presentation", summary="Create a new presentation")
 def trigger_presentation_generation(test_id: str, background_tasks: BackgroundTasks,

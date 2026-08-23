@@ -1,5 +1,5 @@
 import uuid
-from sqlalchemy import Column, String, Float, Integer, ForeignKey, DateTime, Boolean
+from sqlalchemy import Column, String, Float, Integer, ForeignKey, DateTime, Boolean, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from database import Base
@@ -22,6 +22,7 @@ class Users(Base):
     end_year = Column(Integer, nullable=True)
     kiss24_uuid = Column(String(100), nullable=True)
     kiss24_api_key = Column(String(255), unique=True, nullable=True)
+    public_key = Column(Text, nullable=True)
 
     # relationship
     locations = relationship("Locations", back_populates="users")

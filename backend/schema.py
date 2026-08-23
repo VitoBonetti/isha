@@ -289,3 +289,7 @@ class LuigiVulnCallback(BaseModel):
     user_email: str
     html: str
     suggested_type: str
+
+# public key
+class PublicKeyUpdate(BaseModel):
+    public_key: str

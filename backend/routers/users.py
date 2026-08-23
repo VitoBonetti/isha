@@ -3,7 +3,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, BackgroundTasks, status, HTTPException
 from database import get_db_cursor
 from routers.auth import get_current_user, require_admin
-from schema import UserCreate, UserBase, Kiss24KeyUpdate
+from schema import UserCreate, UserBase, Kiss24KeyUpdate, PublicKeyUpdate
 from websockets_manager import manager
 from audit_logger import log_audit_event
 from utils.secret_manager import get_secret
@@ -275,3 +275,44 @@ def mark_notifications_read(current_user: dict = Depends(get_current_user), curs
     cursor.execute("UPDATE notifications SET is_read = TRUE WHERE user_id = %s", (str(current_user['id']),))
     cursor.connection.commit()
     return {"message": "Notifications marked as read."}
+
+
+# public key
+@router.get("/public-keys", summary="Get all users with configured public keys", include_in_schema=False)
+def get_user_public_keys(current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+    """
+    Only fetch active users who have actually set up a public key
+    """
+    cursor.execute("SELECT id, name, public_key FROM users WHERE end_year IS NULL")
+
+    # Return them all, so the UI can show who is missing a key!
+    return [
+        {
+            "id": str(r[0]),
+            "name": r[1],
+            "public_key": r[2],
+            "has_key": r[2] is not None
+        } for r in cursor.fetchall()
+    ]
+
+
+@router.post("/me/public-key", summary="Securely store personal E2EE Public Key", include_in_schema=False)
+def update_my_public_key(payload: PublicKeyUpdate, current_user: dict = Depends(get_current_user),
+                         cursor=Depends(get_db_cursor)):
+    if "PRIVATE KEY" in payload.public_key.upper():
+        raise HTTPException(status_code=400,
+                            detail="WARNING: You pasted a PRIVATE key! Never share this. Please upload the PUBLIC key.")
+
+    cursor.execute("UPDATE users SET public_key = %s WHERE id = %s",
+                   (payload.public_key.strip(), str(current_user["id"])))
+    cursor.connection.commit()
+
+    log_audit_event(
+        user_id=str(current_user["id"]),
+        role=current_user.get("role", "pentester"),
+        action="E2EE_PUBLIC_KEY_UPDATED",
+        resource_type="USER",
+        resource_id=str(current_user["id"]),
+        details="User generated and vaulted a new E2EE Public Key."
+    )
+    return {"message": "Public Key successfully linked to your account."}
