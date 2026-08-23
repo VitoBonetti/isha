@@ -12,6 +12,9 @@ router = APIRouter(prefix="/api/services", tags=["Services"])
 
 @router.get("/")
 def get_services(year: int = Query(default_factory=lambda: datetime.now().year), current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+    """
+    Endpoint to get all services
+    """
     cursor.execute('''
         SELECT sl.id, sl.name, sl.max_concurrent_per_week, sl.theme_color, 
                 sl.default_credits, sl.default_duration_weeks, sl.display_order, sl.is_active,
@@ -36,6 +39,9 @@ def get_services(year: int = Query(default_factory=lambda: datetime.now().year),
 @router.post("/", summary="[Admin Only]")
 def create_service(s: ServiceLaneBase, year: int = Query(default_factory=lambda: datetime.now().year), background_tasks: BackgroundTasks = BackgroundTasks(),
                    current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    """
+    Admin Only Endpoint to create a new service
+    """
     new_service_id = str(uuid.uuid4())
     cursor.execute(
         '''INSERT INTO services_lanes 
@@ -80,6 +86,9 @@ def create_service(s: ServiceLaneBase, year: int = Query(default_factory=lambda:
 def update_service(service_id: str, s: ServiceLaneBase, year: int = Query(default_factory=lambda: datetime.now().year),
                    background_tasks: BackgroundTasks = BackgroundTasks(),
                    current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    """
+    Admin Only Endpoint to update a service
+    """
     cursor.execute(
         '''UPDATE services_lanes 
             SET name=%s, max_concurrent_per_week=%s, theme_color=%s,
@@ -115,6 +124,9 @@ def update_service(service_id: str, s: ServiceLaneBase, year: int = Query(defaul
 @router.delete("/{service_id}", summary="[Admin Only]")
 def delete_service(service_id: str, background_tasks: BackgroundTasks,
                    current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    """
+    Admin Only Endpoint to delete a service
+    """
 
     cursor.execute('DELETE FROM services_lanes WHERE id = %s', (service_id,))
     cursor.connection.commit()
@@ -134,7 +146,9 @@ def delete_service(service_id: str, background_tasks: BackgroundTasks,
 
 @router.get("/{service_id}/goals")
 def get_service_goals(service_id: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
-    """Fetches the complete ledger of yearly goals for a single Service Lane."""
+    """
+    Fetches the complete ledger of yearly goals for a single Service Lane.
+    """
     cursor.execute("""
         SELECT year, target_goal 
         FROM service_lane_goals 
@@ -148,7 +162,9 @@ def get_service_goals(service_id: str, current_user: dict = Depends(get_current_
 def set_service_goal(service_id: str, year: int = Query(...), target_goal: int = Query(...),
                      background_tasks: BackgroundTasks = BackgroundTasks(),
                      current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
-    """Upserts a specific year's goal into the ledger."""
+    """
+    Admin Only endpoint to Upserts a specific year's goal into the ledger.
+    """
     cursor.execute('''
         INSERT INTO service_lane_goals (id, service_lane_id, year, target_goal) 
         VALUES (%s, %s, %s, %s)
@@ -164,6 +180,9 @@ def set_service_goal(service_id: str, year: int = Query(...), target_goal: int =
 @router.post("/placeholders", response_model=PlaceholderResponse, summary="[Admin Only]")
 def create_placeholder(p: PlaceholderCreate, background_tasks: BackgroundTasks,
                        current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    """
+    Admin Only Endpoint to create a new placeholder
+    """
     new_placeholder_id = str(uuid.uuid4())
     default_credits = 2
 
@@ -195,6 +214,9 @@ def create_placeholder(p: PlaceholderCreate, background_tasks: BackgroundTasks,
 @router.delete("/placeholders/{placeholder_id}", summary="[Admin Only]")
 def delete_placeholder(placeholder_id: str, background_tasks: BackgroundTasks,
                        current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    """
+    Admin Only Endpoint to Delete a placeholder
+    """
 
     cursor.execute('DELETE FROM service_placeholders WHERE id = %s', (placeholder_id,))
     cursor.connection.commit()
@@ -219,6 +241,9 @@ def update_service_lane_templates(
         current_user: dict = Depends(require_admin),
         cursor=Depends(get_db_cursor)
 ):
+    """
+    Admin Only Endpoint to update service lane templates
+    """
     # Update the templates in the database
     cursor.execute("""
         UPDATE services_lanes

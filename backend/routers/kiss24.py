@@ -19,6 +19,8 @@ from utils.kiss24_service import (
 )
 from utils.security_cipher import get_cipher
 from datetime import datetime
+import re
+
 
 router = APIRouter(prefix="/api/kiss24", tags=["Kiss24"])
 
@@ -237,7 +239,7 @@ def sync_kiss24_vulnerability_types(
         cursor=Depends(get_db_cursor)
 ):
     """
-    Fetches Vulnerability Types and Contexts from Keep Secure 24 and
+    Admin-only endpoint to Fetches Vulnerability Types and Contexts from Keep Secure 24 and
     synchronizes them with the local database tables using a Many-to-Many architecture.
     """
     try:
@@ -325,7 +327,7 @@ def sync_user_kiss24_uuid(
         cursor=Depends(get_db_cursor)
 ):
     """
-    Fetch the active users' emails from the database and retrieve/update their kiss24 UUIDs.
+    Admin-only endpoint to Fetch the active users' emails from the database and retrieve/update their kiss24 UUIDs.
     """
     try:
         # fetch active user emails
@@ -574,8 +576,11 @@ def get_kiss24_vulnerabilities(
 
 
 # Vulns end point
-@router.get("/vuln-types", status_code=status.HTTP_200_OK)
+@router.get("/vuln-types", status_code=status.HTTP_200_OK, summary="[Service Endpoint]")
 def get_kiss24_vuln_types_for_dropdown(current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+    """
+    Service Endpoint that fetch the vuln types and context needed for Publish a vulnerability
+    """
     cursor.execute("""
         SELECT vt.id, vt.name, c.id, c.name
         FROM kiss24_vuln_types vt
@@ -596,7 +601,7 @@ def get_kiss24_vuln_types_for_dropdown(current_user: dict = Depends(get_current_
 
 
 # 3. The Main Publishing Sequence
-@router.post("/{test_id}/vulnerabilities/publish", status_code=status.HTTP_200_OK)
+@router.post("/{test_id}/vulnerabilities/publish", status_code=status.HTTP_200_OK, include_in_schema=False)
 def publish_vulnerability(test_id: str, payload: dict, current_user: dict = Depends(get_current_user),
                           cursor=Depends(get_db_cursor)):
     try:
@@ -637,12 +642,25 @@ def publish_vulnerability(test_id: str, payload: dict, current_user: dict = Depe
         cvss_vector = cvss_map.get(severity_key, cvss_map["info"])
 
         # Convert newlines to HTML break tags so the formatting survives, then strip the literal newlines so KISS24 doesn't crash
-        safe_html = str(payload.get("html", "")).replace('\n', '<br/>').replace('\r', '')
+        raw_html = str(payload.get("html", ""))
+
+        # helper to preserve code blocks: Converts \n to <br/> ONLY inside <pre> tags
+        def preserve_pre_newlines(match):
+            return match.group(0).replace('\n', '<br/>')
+
+        safe_html = re.sub(r'<pre.*?</pre>', preserve_pre_newlines, raw_html, flags=re.IGNORECASE | re.DOTALL)
+
+        # strip all remaining newlines so the Keep Secure 24 API doesn't crash with a 400 error
+        safe_html = safe_html.replace('\n', '').replace('\r', '')
+
+        # aggressive cleanup: Destroy any hallucinatory empty paragraphs or list items the AI generated
+        safe_html = re.sub(r'<p>\s*(?:&nbsp;|<br\s*/?>)*\s*</p>', '', safe_html, flags=re.IGNORECASE)
+        safe_html = re.sub(r'<li>\s*(?:&nbsp;|<br\s*/?>)*\s*</li>', '', safe_html, flags=re.IGNORECASE)
 
         # country_uuid maps to the KISS24 'ouuid'
         remediation_uuid = get_custom_fields_choice_uuid(str(country_uuid), "Remediation Effort",
                                            payload.get("remediation_effort", "Minimal"))
-        verified_uuid = get_custom_fields_choice_uuid(str(country_uuid), "Is Verified?", "No")
+        # verified_uuid = get_custom_fields_choice_uuid(str(country_uuid), "Is Verified?", "No")
 
         # Build the custom fields array dynamically
         custom_fields = [
@@ -657,11 +675,11 @@ def publish_vulnerability(test_id: str, payload: dict, current_user: dict = Depe
                 "choices": remediation_uuid
             })
 
-        if verified_uuid:
-            custom_fields.append({
-                "parent": "Is Verified?",
-                "choices": verified_uuid
-            })
+        # if verified_uuid:
+        #     custom_fields.append({
+        #         "parent": "Is Verified?",
+        #         "choices": verified_uuid
+        #     })
 
         # 4. Build Create Payload
         create_payload = {

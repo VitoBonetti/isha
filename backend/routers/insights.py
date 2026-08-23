@@ -9,6 +9,9 @@ router = APIRouter(prefix="/api/insights", tags=["Insights"])
 
 @router.get("/available-years", summary="[Admin Only]")
 def get_available_years(current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    """
+    Admin Only Endpoint to Get Available Years
+    """
     cursor.execute("""
         SELECT DISTINCT start_year 
         FROM tests 
@@ -24,6 +27,9 @@ def get_available_years(current_user: dict = Depends(require_admin), cursor=Depe
 @router.get("/", summary="[Admin Only]")
 def get_yearly_insights(year: Optional[int] = None, current_user: dict = Depends(require_admin),
                         cursor=Depends(get_db_cursor)):
+    """
+    Admin Only Endpoint to Get Yearly Insights
+    """
     if not year: year = datetime.now().year
 
     # --- DETERMINE PAST WEEKS FOR "WASTED" MATH ---

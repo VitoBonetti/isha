@@ -158,6 +158,22 @@ def rebalance_affected_assignments(cursor, start_date, end_date, user_id=None, l
 @router.get("/{year}/Q{quarter}")
 def get_quarterly_board(year: int, quarter: int, response: Response,
                         current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+    """
+    Get all the quarterly board information for a given year.
+    1. Services & Categories
+    2. Users (Pentesters) & Capacity Matrix
+    3. We pad the requested weeks to handle tests that spill over quarter/year boundaries in the UI modal
+    4. Add current quarter's weeks
+    5. Add 4 weeks BEFORE the quarter (handles backward spillover)
+    6. Add 8 weeks AFTER the quarter (handles long forward spillover)
+    7. Build the matrix: We key it by week number so the frontend modal can find it instantly
+    8. Map DB ENUM keys back to Frontend Strings
+    9. Tests (Backlog) - Force stages::text to prevent serialization errors
+    10. Tests (Scheduled) - Force stages::text to prevent serialization errors
+    11. Assignments
+    12. Events
+    13. Placeholders
+    """
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     weeks = list(get_quarter_weeks(quarter, year))
     weeks_in_prev_year = datetime(year - 1, 12, 28).isocalendar()[1]
@@ -334,7 +350,10 @@ def get_quarterly_board(year: int, quarter: int, response: Response,
 @router.get("/categories/")
 def get_categories(year: Optional[str] = None, current_user: dict = Depends(get_current_user),
                    cursor=Depends(get_db_cursor)):
-    """Fetches categories, cross-joined with their yearly goals."""
+    """
+    Fetches categories, cross-joined with their yearly goals.
+    Apply filter if a specific year is provided
+    """
     query = '''
         SELECT c.id, c.name, COALESCE(cg.target_goal, 0) as target_goal, 
                cg.year as goal_year, c.service_lane_id, s.name as service_lane_name 
@@ -360,6 +379,12 @@ def get_categories(year: Optional[str] = None, current_user: dict = Depends(get_
 @router.post("/categories/", summary="[Admin Only]")
 def create_category(cat: ServiceCategoryCreate, year: int = Query(...), current_user: dict = Depends(require_admin),
                     cursor=Depends(get_db_cursor)):
+    """
+    Admin-only endpoint to Creates a new category.
+    1. Ensure the Category Exists (or Create it)
+    2. Update its service lane mapping just in case
+    3. Upsert the Goal for the explicitly requested Year
+    """
     lane_id = str(cat.service_lane_id) if cat.service_lane_id else None
 
     # 1. Ensure the Category Exists (or Create it)
@@ -400,6 +425,12 @@ def update_category(cat_id: str, cat: ServiceCategoryBase,
                     background_tasks: BackgroundTasks = BackgroundTasks(),
                     current_user: dict = Depends(require_admin),
                     cursor=Depends(get_db_cursor)):
+    """
+    Admin-only endpoint to Updates a new category.
+    Safely convert UUID to string for psycopg2
+    1. Update the core Category details (Name & Service Lane mapping)
+    2. Upsert the Target Goal for the explicitly requested Year
+    """
     # Safely convert UUID to string for psycopg2
     lane_id = str(cat.service_lane_id) if cat.service_lane_id else None
 
@@ -431,6 +462,11 @@ def update_category(cat_id: str, cat: ServiceCategoryBase,
 @router.delete("/categories/{cat_id}", summary="[Admin Only]")
 def delete_category(cat_id: str, background_tasks: BackgroundTasks,
                     current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    """
+    Admin-only endpoint to Deletes a new category.
+    1. Delete the category
+    2. Catch safety Foreign Key constraint
+    """
     cursor.execute('SELECT name FROM service_categories WHERE id=%s', (cat_id,))
     row = cursor.fetchone()
 
@@ -466,6 +502,9 @@ def delete_category(cat_id: str, background_tasks: BackgroundTasks,
 @router.post("/events")
 def create_event(e: EventCreate, background_tasks: BackgroundTasks,
                  current_user: dict = Depends(require_write_access), cursor=Depends(get_db_cursor)):
+    """
+    Create a new event in the database.
+    """
     if current_user['role'] == 'pentester':
         if e.event_type in ['national_holiday', 'team_day']:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only Admins can create System-wide events.")
@@ -519,6 +558,9 @@ def create_event(e: EventCreate, background_tasks: BackgroundTasks,
 @router.put("/events/{event_id}")
 def update_event(event_id: str, e: EventBase, background_tasks: BackgroundTasks,
                  current_user: dict = Depends(require_write_access), cursor=Depends(get_db_cursor)):
+    """
+    Update an event in the database.
+    """
     # FIX: Safely convert UUID to string
     loc_id = str(e.location_id) if e.location_id else None
     e_type = e.event_type.value if hasattr(e.event_type, 'value') else e.event_type
@@ -549,6 +591,9 @@ def update_event(event_id: str, e: EventBase, background_tasks: BackgroundTasks,
 @router.delete("/events/{event_id}")
 def delete_event(event_id: str, background_tasks: BackgroundTasks,
                  current_user: dict = Depends(require_write_access), cursor=Depends(get_db_cursor)):
+    """
+    Delete an event in the database.
+    """
     if current_user['role'] == 'pentester':
         cursor.execute("SELECT user_id, event_type FROM events WHERE id = %s", (event_id,))
         row = cursor.fetchone()
@@ -575,6 +620,7 @@ def delete_event(event_id: str, background_tasks: BackgroundTasks,
 def wipe_system_data(background_tasks: BackgroundTasks,
                      current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     """
+    Admin-Only endpoint
     FACTORY RESET:
     Wipes all planning data (Tests, Assignments, Assets, Notifications, Categories, Regions, Countries).
     Preserves structural configurations (Users, Events, Locations).
@@ -617,7 +663,9 @@ def wipe_system_data(background_tasks: BackgroundTasks,
 
 @router.delete("/system/wipe-secrets", summary="[Admin Only]")
 def wipe_all_secrets(background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
-
+    """
+    Admin-Only endpoint to wipe the secret_notes
+    """
     cursor.execute("TRUNCATE TABLE secret_notes CASCADE;")
 
     log_audit_event(

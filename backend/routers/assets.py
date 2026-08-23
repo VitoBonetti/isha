@@ -14,6 +14,7 @@ from websockets_manager import manager
 from audit_logger import log_audit_event
 from utils.snow_sync import process_and_sync_snow_data, fetch_raw_snow_data
 
+
 router = APIRouter(prefix="/api/assets", tags=["Assets"])
 
 MAX_FILE_SIZE = 5 * 1024 * 1024  # 5 MB limit
@@ -22,6 +23,7 @@ ALLOWED_MIME_TYPES = {
     "application/vnd.ms-excel",
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 }
+
 
 #--- VALIDATIONS HELPERS ---
 def is_valid_file_signature(contents: bytes, filename: str) -> bool:
@@ -56,6 +58,9 @@ def sanitize_csv_injection(text: str) -> str:
 # --- ASSET TYPES DICTIONARY ---
 @router.get("/types")
 def get_asset_types(current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+    """
+    Get all asset types available in the database.
+    """
     cursor.execute("SELECT id, name FROM asset_types ORDER BY name ASC")
     columns = [col[0] for col in cursor.description]
     return [dict(zip(columns, row)) for row in cursor.fetchall()]
@@ -63,6 +68,9 @@ def get_asset_types(current_user: dict = Depends(get_current_user), cursor=Depen
 
 @router.post("/types/", summary="[Admin Only]")
 def create_asset_type(at: AssetTypeBase, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    """
+    Admin-only endpoint to Create a new asset type.
+    """
     new_id = str(uuid.uuid4())
     try:
         cursor.execute("INSERT INTO asset_types (id, name) VALUES (%s, %s)", (new_id, at.name))
@@ -85,6 +93,9 @@ def create_asset_type(at: AssetTypeBase, current_user: dict = Depends(require_ad
 
 @router.put("/types/{type_id}", summary="[Admin Only]")
 def update_asset_type(type_id: str, at: AssetTypeBase, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    """
+    Admin-only endpoint to Update an existing asset type.
+    """
     cursor.execute("UPDATE asset_types SET name=%s WHERE id=%s", (at.name, type_id))
 
     log_audit_event(
@@ -102,6 +113,11 @@ def update_asset_type(type_id: str, at: AssetTypeBase, current_user: dict = Depe
 
 @router.delete("/types/{type_id}", summary="[Admin Only]")
 def delete_asset_type(type_id: str, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    """
+    Admin-only endpoint to Delete an existing asset type.
+
+    WARNING: Because of CASCADE rules in DB, this will delete all associated Raw Assets.
+    """
     # Note: Because of CASCADE rules in DB, this will delete all associated Raw Assets.
     cursor.execute("DELETE FROM asset_types WHERE id = %s", (type_id,))
 
@@ -129,6 +145,9 @@ def get_raw_assets(
         sort_by: Optional[str] = "name", sort_dir: Optional[str] = "asc",
         current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)
 ):
+    """
+    Get all raw assets available in the database.
+    """
     offset = (page - 1) * limit
     params = []
     where_clauses = []
@@ -211,6 +230,9 @@ def insert_asset_history(cursor, raw_asset_id: str, user_id: str, action: str, d
 @router.post("/raw", summary="[Admin Only]")
 def create_manual_raw_asset(asset: RawAssetCreate, background_tasks: BackgroundTasks,
                             current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    """
+    Admin-only endpoint to Create Manual Raw Asset.
+    """
     c_id = str(asset.country_id) if asset.country_id else None
     s_id = str(asset.service_forecast_id) if asset.service_forecast_id else None
     cat_id = str(asset.category_id) if asset.category_id else None
@@ -251,6 +273,9 @@ def create_manual_raw_asset(asset: RawAssetCreate, background_tasks: BackgroundT
 
 @router.get("/raw/{raw_id}")
 def get_single_raw_asset(raw_id: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+    """
+    Endpoint to Get Raw Asset.
+    """
     cursor.execute("""
         SELECT r.id, r.name, r.description, r.business_critical, r.confidentiality_rating, 
             r.integrity_rating, r.availability_rating, r.country_id, r.service_forecast_id, 
@@ -301,6 +326,14 @@ def get_single_raw_asset(raw_id: str, current_user: dict = Depends(get_current_u
 @router.put("/raw/{raw_id}", summary="[Admin Only]")
 def update_raw_asset(raw_id: str, asset: RawAssetCreate, background_tasks: BackgroundTasks,
                      current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    """
+    Admin-only endpoint to Update Raw Asset.
+    1. Fetch the OLD state (including relational names via JOINs) and Unpack old state and handle NULLs gracefully
+    2. Fetch the NEW state names based on the submitted UUIDs
+    3. Perform the Database Update
+    4. Supercharged Diff Engine
+    5. Standardized Update Log
+    """
     # 1. Fetch the OLD state (including relational names via JOINs)
     cursor.execute("""
             SELECT r.name, r.facing_internet, r.duplicate_allowed, r.confidentiality_rating, r.integrity_rating, r.availability_rating,
@@ -410,6 +443,12 @@ def delete_raw_asset(
         current_user: dict = Depends(require_admin),
         cursor=Depends(get_db_cursor)
 ):
+    """
+    Admin-only endpoint to Removes a raw asset from the database.
+    1. Check if this raw asset has ANY completed tests via the active pool
+    2. SOFT DELETE - if completed_count > 0 (Archive the pool asset using array logic)
+    3. HARD DELETE - if completed_count = 0 (Safe to destroy)
+    """
     # 1. Check if this raw asset has ANY completed tests via the active pool
     cursor.execute('''
         SELECT COUNT(t.id) 
@@ -474,6 +513,13 @@ def restore_raw_asset(
         current_user: dict = Depends(require_admin),
         cursor=Depends(get_db_cursor)
 ):
+    """
+    Admin-only endpoint to Restores a raw asset from the database.
+    1. Fetch current archived years array
+    2. Remove the requested year from the array
+    3. Restore visibility and update array
+
+    """
     # 1. Fetch current archived years array
     cursor.execute("SELECT archived_years FROM assets WHERE raw_asset_id = %s", (str(raw_id),))
     row = cursor.fetchone()
@@ -516,6 +562,12 @@ def bulk_delete_raw_assets(
         current_user: dict = Depends(require_admin),
         cursor=Depends(get_db_cursor)
 ):
+    """
+    Admin only endpoint to bulk delete a raw asset from the database.
+    1. Check if these raw assets have ANY completed tests via the active pool
+    2. SOFT DELETE - if completed_count > 0 (Archive the pool asset using array logic)
+    3. HARD DELETE - if completed_count = 0 (Safe to destroy)
+    """
     deleted_count = 0
     archived_count = 0
 
@@ -762,6 +814,9 @@ async def import_assets(file: UploadFile = File(...), background_tasks: Backgrou
 @router.post("/promote", summary="[Admin Only]")
 def promote_raw_assets_to_pool(req: BulkAssetRequest, background_tasks: BackgroundTasks,
                                current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    """
+    Admin-only endpoint to promote raw assets to Active pool
+    """
     promoted = 0
     for raw_id in req.raw_asset_ids:
         cursor.execute("SELECT id FROM assets WHERE raw_asset_id = %s", (str(raw_id),))
@@ -802,6 +857,14 @@ def promote_raw_assets_to_pool(req: BulkAssetRequest, background_tasks: Backgrou
 @router.put("/bulk-service", summary="[Admin Only]")
 def bulk_update_service_lane(req: BulkServiceUpdateRequest, background_tasks: BackgroundTasks,
                              current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    """
+    Admin only endpoint to bulk update service lane
+    1. Fetch new service name for logging
+    2. Get raw_asset_id linked to this pool asset
+    3. Update the Active Pool record
+    4. Update the Source Raw record permanently
+    5.  Log it in the Asset's History
+    """
     service_id = str(req.service_lane_id)
 
     # Fetch new service name for logging
@@ -844,6 +907,9 @@ def bulk_update_service_lane(req: BulkServiceUpdateRequest, background_tasks: Ba
 # --- ACTIVE ASSET POOL ---
 @router.get("/")
 def get_active_asset_pool(year: Optional[int] = None, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+    """
+    Get active asset pool
+    """
     if current_user['role'] == 'pentester':
         raise HTTPException(status_code=403, detail="Pentesters cannot view the unassigned asset inventory.")
 
@@ -908,6 +974,9 @@ def get_active_asset_pool(year: Optional[int] = None, current_user: dict = Depen
 @router.delete("/{asset_id}", summary="[Admin Only]")
 def remove_from_active_pool(asset_id: str, year: int, background_tasks: BackgroundTasks,
                             current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    """
+    Admin-only endpoint. Delete asset from active pool
+    """
     cursor.execute("SELECT raw_asset_id, name, archived_years FROM assets WHERE id = %s", (asset_id,))
     row = cursor.fetchone()
     if not row:
@@ -1012,6 +1081,11 @@ def trigger_snow_sync(
         background_tasks: BackgroundTasks,
         current_user: dict = Depends(require_admin)
 ):
+    """
+    Admin-only endpoint to trigger snow sync.
+    1. Hand off ALL heavy lifting to FastAPI's background thread
+    2. Log that the admin initiated it
+    """
     # Hand off ALL heavy lifting to FastAPI's background thread
     background_tasks.add_task(
         full_background_sync_wrapper,

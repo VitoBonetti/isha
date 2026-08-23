@@ -36,6 +36,9 @@ def get_countries(current_user: dict = Depends(get_current_user), cursor = Depen
 
 @router.post("/", summary="[Admin Only]")
 def create_country(c: CountryBase, current_user: dict = Depends(require_admin), cursor = Depends(get_db_cursor)):
+    """
+    Admin Only Endpoint to Create Country
+    """
     reg_id = str(c.region_id) if c.region_id else None
     new_country_id = str(uuid.uuid4())
     try:
@@ -61,6 +64,9 @@ def create_country(c: CountryBase, current_user: dict = Depends(require_admin), 
 
 @router.put("/{country_id}", summary="[Admin Only]")
 def update_country(country_id: str, c: CountryBase, current_user: dict = Depends(require_admin), cursor = Depends(get_db_cursor)):
+    """
+    Admin Only Endpoint to Update Country
+    """
     cursor.execute(
         "UPDATE countries SET code=%s, name=%s, region_id=%s, is_active=%s, kiss24_uuid=%s WHERE id=%s",
         (c.code, c.name, c.region_id, c.is_active, c.kiss24_uuid, country_id)
@@ -80,6 +86,9 @@ def update_country(country_id: str, c: CountryBase, current_user: dict = Depends
 
 @router.delete("/{country_id}", summary="[Admin Only]")
 def delete_country(country_id: str, current_user: dict = Depends(require_admin), cursor = Depends(get_db_cursor)):
+    """
+    Admin Only Endpoint to Delete Country
+    """
     cursor.execute("DELETE FROM countries WHERE id = %s", (country_id,))
     cursor.connection.commit()
 
@@ -98,6 +107,9 @@ def delete_country(country_id: str, current_user: dict = Depends(require_admin),
 @router.get("/analytics", summary="[Admin Only]")
 def get_country_analytics(year: Optional[int] = None, current_user: dict = Depends(require_admin),
                           cursor=Depends(get_db_cursor)):
+    """
+    Admin Only Endpoint to Get Country Analytics
+    """
     if not year:
         year = datetime.now().year
 
@@ -139,6 +151,9 @@ def get_country_analytics(year: Optional[int] = None, current_user: dict = Depen
 
 @router.get("/available-years", summary="[Admin Only]")
 def get_available_years(current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    """
+    Admin Only Endpoint to Get Available Years
+    """
     cursor.execute("""
         SELECT DISTINCT start_year 
         FROM tests 
@@ -156,6 +171,9 @@ def get_dashboard_analytics(year: Optional[int] = None, country_id: Optional[str
                             region_id: Optional[str] = None, service_lane_id: Optional[str] = None,
                             current_user: dict = Depends(require_admin),
                             cursor=Depends(get_db_cursor)):
+    """
+    Admin Only Endpoint to Get Dashboard Analytics
+    """
     if not year:
         year = datetime.now().year
 

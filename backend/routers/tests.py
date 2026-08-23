@@ -568,6 +568,9 @@ def process_bulk_tests_background(asset_ids: List[UUID4], user_id: str, role: st
 @router.post("/", summary="[Admin Only] Create a new Test")
 def create_test(t: TestCreate, background_tasks: BackgroundTasks,
                 current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    """
+    Admin Only Endpoint to create a new Test
+    """
     new_test_id = str(uuid.uuid4())
 
     cursor.execute('''
@@ -600,6 +603,9 @@ def create_test(t: TestCreate, background_tasks: BackgroundTasks,
 
 @router.get("/", summary="Return all tests")
 def get_all_tests(current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+    """
+    Return all tests
+    """
     cursor.execute('''
         SELECT t.id, t.name, t.start_week, t.start_year, t.duration_weeks, t.stages::text as status,
             s.name as service_lane_name, s.is_active as is_service_active,
@@ -618,6 +624,15 @@ def get_all_tests(current_user: dict = Depends(get_current_user), cursor=Depends
 
 @router.get("/{test_id}", summary="Get Full Test Details & Contacts")
 def get_test_details(test_id: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+    """
+    Return test details
+    1. Fetch Test Base Details
+    2. Fetch Attached Assets
+    3. Extract IDs for contacts aggregation
+    4. Fetch Asset Contacts (Combined across all linked assets)
+    5. Fetch Country Contacts (Combined across all linked asset regions)
+    6. Fetch Test History
+    """
     # 1. Fetch Test Base Details
     cursor.execute('''
                 SELECT t.id, t.name, t.service_lane_id, t.credits_per_week, 
@@ -710,6 +725,12 @@ def get_test_details(test_id: str, current_user: dict = Depends(get_current_user
 @router.put("/{test_id}", summary="[Admin Only] Update a specific test")
 def update_test(test_id: str, t: TestBase, background_tasks: BackgroundTasks,
                 current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    """
+    Admin Only Endpoint to update a specific test
+    1. Fetch old data to see if we need to relocate the Google Drive folder
+    2. Update the test
+    3. Trigger Folder Relocation if a folder exists
+    """
     # 1. Fetch old data to see if we need to relocate the Google Drive folder
     cursor.execute('''
         SELECT t.drive_folder_id, s.name, c.name, t.start_year
@@ -784,6 +805,9 @@ def update_test(test_id: str, t: TestBase, background_tasks: BackgroundTasks,
 @router.delete("/{test_id}", summary="[Admin Only] Delete a specific test")
 def delete_test(test_id: str, background_tasks: BackgroundTasks,
                 current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    """
+    Admin Only Endpoint to delete a specific test
+    """
 
     # Fetch test name and drive_folder_id before deleting
     cursor.execute("SELECT name, drive_folder_id FROM tests WHERE id = %s", (test_id,))
@@ -818,6 +842,9 @@ def delete_test(test_id: str, background_tasks: BackgroundTasks,
 @router.post("/bulk", summary="[Admin Only] bulk creation of tests")
 def bulk_create_tests(req: BulkTestCreate, background_tasks: BackgroundTasks,
                       current_user: dict = Depends(require_admin)):
+    """
+    Admin Only Endpoint to bulk create new tests
+    """
     background_tasks.add_task(process_bulk_tests_background, req.asset_ids, str(current_user['id']), str(current_user['role']))
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": f"Generating {len(req.asset_ids)} tests from active pool."}
@@ -826,6 +853,9 @@ def bulk_create_tests(req: BulkTestCreate, background_tasks: BackgroundTasks,
 @router.post("/{test_id}/workspace", summary="[Admin Only] Create workspace on Google for each test")
 def provision_workspace_manually(test_id: str, background_tasks: BackgroundTasks,
                                  current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    """
+    Admin Only Endpoint to create new workspace on Google for each test
+    """
     # Fetch required metadata to create the folder path
     cursor.execute('''
         SELECT t.name, s.name, c.name, t.start_year
@@ -854,6 +884,9 @@ def provision_workspace_manually(test_id: str, background_tasks: BackgroundTasks
 @router.put("/{test_id}/tentative", summary="[Admin Only] Flag the test as Tentative")
 def toggle_tentative(test_id: str, background_tasks: BackgroundTasks,
                      current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    """
+    Admin Only Endpoint to toggle Tentative
+    """
     # Flips the boolean from True to False, or False to True
     cursor.execute("UPDATE tests SET is_tentative = NOT is_tentative WHERE id = %s", (test_id,))
 
@@ -872,6 +905,9 @@ def toggle_tentative(test_id: str, background_tasks: BackgroundTasks,
 @router.put("/{test_id}/schedule", summary="[Admin Only] Schedule a test")
 def schedule_test(test_id: str, schedule: TestSchedule, background_tasks: BackgroundTasks,
                   current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    """
+    Admin Only Endpoint to schedule a test
+    """
     # Fetch old schedule to see if the dates are actively shifting
     cursor.execute('SELECT start_week, start_year, name FROM tests WHERE id = %s', (test_id,))
     test_row = cursor.fetchone()
@@ -922,6 +958,9 @@ def schedule_test(test_id: str, schedule: TestSchedule, background_tasks: Backgr
 @router.put("/{test_id}/unschedule", summary="[Admin Only] Unschedule a test")
 def unschedule_test(test_id: str, background_tasks: BackgroundTasks,
                     current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    """
+    Admin Only Endpoint to unschedule a test
+    """
     cursor.execute('SELECT user_id FROM assignments WHERE test_id = %s', (test_id,))
     assigned_users = cursor.fetchall()
     cursor.execute("SELECT name FROM tests WHERE id = %s", (test_id,))
@@ -958,6 +997,9 @@ def unschedule_test(test_id: str, background_tasks: BackgroundTasks,
 @router.put("/{test_id}/complete", summary="[Admin Only] Flag a test as complete")
 def complete_test(test_id: str, background_tasks: BackgroundTasks,
                   current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    """
+    Admin Only Endpoint to complete a test
+    """
     cursor.execute("UPDATE tests SET stages = 'COMPLETED' WHERE id = %s", (test_id,))
 
     log_test_history(cursor, test_id, current_user['id'], "COMPLETED", "Test successfully marked as completed.")
@@ -972,6 +1014,9 @@ def complete_test(test_id: str, background_tasks: BackgroundTasks,
 @router.put("/{test_id}/unable", summary="[Admin Only] Flag a test as unable")
 def mark_test_unable(test_id: str, background_tasks: BackgroundTasks,
                      current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    """
+    Admin Only Endpoint to mark a test as unable
+    """
     #  original test details
     cursor.execute('SELECT name, service_lane_id, credits_per_week, duration_weeks FROM tests WHERE id = %s',
                    (test_id,))
@@ -1017,6 +1062,9 @@ def mark_test_unable(test_id: str, background_tasks: BackgroundTasks,
 @router.put("/{test_id}/unstop", summary="[Admin Only] Roll back a unable test to normal")
 def unstop_test(test_id: str, background_tasks: BackgroundTasks,
                 current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    """
+    Admin Only Endpoint to roll back a unable test to normal
+    """
 
     cursor.execute("SELECT name FROM tests WHERE id = %s AND stages = 'STOPPED'", (test_id,))
     row = cursor.fetchone()
@@ -1062,6 +1110,9 @@ def unstop_test(test_id: str, background_tasks: BackgroundTasks,
 @router.put("/{test_id}/uncomplete", summary="[Admin Only] Make un-completing a test cleaner on the backend")
 def uncomplete_test(test_id: str, background_tasks: BackgroundTasks,
                     current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    """
+    Admin Only Endpoint to make un-completing a test cleaner on the backend
+    """
     cursor.execute("UPDATE tests SET stages = 'SCHEDULED' WHERE id = %s", (test_id,))
     log_test_history(cursor, test_id, current_user['id'], "UNCOMPLETED", "Test reverted to Scheduled.")
     cursor.connection.commit()
@@ -1073,6 +1124,9 @@ def uncomplete_test(test_id: str, background_tasks: BackgroundTasks,
 @router.post("/assignments", summary="[Admin Only] Assigne a test to a pentester")
 def create_assignment(assign: AssignmentCreate, background_tasks: BackgroundTasks,
                       current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    """
+    Admin Only Endpoint to create a new pentester assignment
+    """
     cursor.execute('''
         SELECT a.id FROM assignments a
         WHERE a.user_id = %s AND a.week_number = %s AND a.year = %s AND a.test_id = %s
@@ -1114,6 +1168,10 @@ def create_assignment(assign: AssignmentCreate, background_tasks: BackgroundTask
 @router.delete("/assignments/{test_id}/{user_id}", summary="[Admin Only] Remove pentester from assigned test")
 def remove_assignment(test_id: str, user_id: str, background_tasks: BackgroundTasks,
                       current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    """
+    Admin Only Endpoint to remove a pentester from assigned test
+    """
+
     cursor.execute("SELECT name FROM tests WHERE id = %s", (test_id,))
     test_row = cursor.fetchone()
 
@@ -1137,8 +1195,11 @@ def remove_assignment(test_id: str, user_id: str, background_tasks: BackgroundTa
 
 
 # ---  History Test ---
-@router.get("/{test_id}/history", summary="REturn the test history")
+@router.get("/{test_id}/history", summary="Return the test history")
 def get_test_history(test_id: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+    """
+    Endpoint to get test history
+    """
     cursor.execute('''
         SELECT th.id, th.action, th.details, th.timestamp, u.name as user_name
         FROM test_history th
@@ -1151,7 +1212,7 @@ def get_test_history(test_id: str, current_user: dict = Depends(get_current_user
 
 
 # --- Secure note ---
-@router.get("/{test_id}/secret", summary="Return the test secret")
+@router.get("/{test_id}/secret", summary="Return the test secret", include_in_schema=False)
 def get_test_secret(test_id: str, current_user: dict = Depends(require_write_access), cursor=Depends(get_db_cursor)):
     cursor.execute("SELECT encrypted_note FROM secret_notes WHERE test_id = %s", (test_id,))
     row = cursor.fetchone()
@@ -1165,7 +1226,7 @@ def get_test_secret(test_id: str, current_user: dict = Depends(require_write_acc
         raise HTTPException(status_code=500, detail="Failed to decrypt the secure note.")
 
 
-@router.put("/{test_id}/secret", summary="Update the test secret")
+@router.put("/{test_id}/secret", summary="Update the test secret", include_in_schema=False)
 def update_test_secret(test_id: str, payload: SecureNotePayload, background_tasks: BackgroundTasks,
                        current_user: dict = Depends(require_write_access), cursor=Depends(get_db_cursor)):
     cipher = get_cipher()
@@ -1181,7 +1242,7 @@ def update_test_secret(test_id: str, payload: SecureNotePayload, background_task
     return {"message": "Secure note encrypted and saved."}
 
 
-@router.delete("/{test_id}/secret", summary="[Admin Only] Delete the test secret")
+@router.delete("/{test_id}/secret", summary="[Admin Only] Delete the test secret", include_in_schema=False)
 def delete_test_secret(test_id: str, background_tasks: BackgroundTasks,
                        current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     cursor.execute("DELETE FROM secret_notes WHERE test_id = %s", (test_id,))
@@ -1194,6 +1255,9 @@ def delete_test_secret(test_id: str, background_tasks: BackgroundTasks,
 @router.post("/{test_id}/presentation", summary="Create a new presentation")
 def trigger_presentation_generation(test_id: str, background_tasks: BackgroundTasks,
                                     current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+    """
+    Endpoint to create a new presentation
+    """
     if current_user.get('role') == 'read_only':
         raise HTTPException(status_code=403, detail="Read-only users cannot trigger generation.")
 
@@ -1269,7 +1333,9 @@ def trigger_presentation_generation(test_id: str, background_tasks: BackgroundTa
 @router.post("/{test_id}/report", summary="Generate PDF report")
 def trigger_report_generation(test_id: str, background_tasks: BackgroundTasks,
                               current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
-    """API Endpoint to trigger the background report generation."""
+    """
+    API Endpoint to trigger the background report generation.
+    """
 
     if current_user.get('role') == 'read_only':
         raise HTTPException(status_code=403, detail="Read-only users cannot trigger generation.")
@@ -1320,7 +1386,9 @@ def trigger_report_generation(test_id: str, background_tasks: BackgroundTasks,
 # --- Vulne analysis ---
 @router.get("/{test_id}/analysis", response_model=TestAnalysisResponse, summary="Get Analysis report")
 def get_test_analysis(test_id: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
-    """Check if an analysis exists and retrieve it."""
+    """
+    Check if an analysis exists and retrieve it.
+    """
     cursor.execute("SELECT status, analysis_text, timestamp FROM test_analyses WHERE test_id = %s", (test_id,))
     row = cursor.fetchone()
     if not row:
@@ -1336,7 +1404,9 @@ def get_test_analysis(test_id: str, current_user: dict = Depends(get_current_use
 @router.post("/{test_id}/analysis", summary="Perform vulnerabilities analysis")
 def trigger_test_analysis(test_id: str, background_tasks: BackgroundTasks,
                           current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
-    """Creates a PENDING record and triggers the background generator."""
+    """
+    Creates a PENDING record and triggers the background generator.
+    """
     if current_user.get('role') == 'read_only':
         raise HTTPException(status_code=403, detail="Read-only users cannot trigger generation.")
 
@@ -1366,7 +1436,7 @@ def trigger_test_analysis(test_id: str, background_tasks: BackgroundTasks,
 
 
 # -- Milestones ---
-@router.get("/{test_id}/milestones", summary="Get Milestones test")
+@router.get("/{test_id}/milestones", summary="Get Milestones test", include_in_schema=False)
 def get_milestones(test_id: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
     cursor.execute("SELECT step_name, is_completed FROM test_milestones WHERE test_id = %s", (test_id,))
     # Return a simple dictionary: {"Information Email Sent": true, "Intake Meeting Planned": false}
@@ -1375,7 +1445,9 @@ def get_milestones(test_id: str, current_user: dict = Depends(get_current_user),
 
 @router.put("/{test_id}/milestones", summary="Update Milestones test")
 def update_milestone(test_id: str, payload: MilestoneUpdate, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
-    # UPSERT logic: Insert it, or if it exists, update the boolean
+    """
+    UPSERT logic: Insert it, or if it exists, update the boolean
+    """
     cursor.execute("""
         INSERT INTO test_milestones (id, test_id, step_name, is_completed) 
         VALUES (gen_random_uuid(), %s, %s, %s)

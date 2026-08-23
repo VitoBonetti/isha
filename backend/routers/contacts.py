@@ -29,8 +29,11 @@ def upsert_global_contact(cursor, email: str, full_name: str = None) -> str:
 
 
 # --- ENDPOINTS ---
-@router.get("/", summary="[Admin Only] Get All Global Contacts")
+@router.get("/", summary="Get All Global Contacts")
 def get_all_contacts(current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    """
+    Endpoint to Get All Global Contacts
+    """
     # This query fetches all contacts and aggregates their country and asset mappings into JSON arrays
     cursor.execute("""
         SELECT 
@@ -65,6 +68,9 @@ def get_all_contacts(current_user: dict = Depends(require_admin), cursor=Depends
 
 @router.post("/sync", summary="[Admin Only] Create/Edit Contact & Mappings")
 def sync_full_contact(payload: ContactSyncPayload, background_tasks: BackgroundTasks = BackgroundTasks(), current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    """
+    Admin Only Endpoint to Sync Full Contacts, Create/Edit Contact & Mappings
+    """
     contact_id = upsert_global_contact(cursor, payload.email, payload.full_name)
 
     # Sync Countries
@@ -108,6 +114,9 @@ def sync_full_contact(payload: ContactSyncPayload, background_tasks: BackgroundT
 
 @router.delete("/global/{contact_id}", summary="[Admin Only] Hard Delete Global Contact")
 def delete_global_contact(contact_id: str, background_tasks: BackgroundTasks = BackgroundTasks(), current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    """
+    Admin Only Endpoint to Delete Global Contact
+    """
     cursor.execute("DELETE FROM contacts WHERE id = %s", (contact_id,))
     cursor.connection.commit()
 
@@ -126,6 +135,9 @@ def delete_global_contact(contact_id: str, background_tasks: BackgroundTasks = B
 
 @router.get("/raw-asset/{raw_asset_id}", summary="Get Asset Contacts")
 def get_asset_contacts(raw_asset_id: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+    """
+    Endpoint to Get Asset Contacts
+    """
     cursor.execute("""
         SELECT c.id as contact_id, rac.id as mapping_id, c.email, c.full_name, 
                rac.is_stakeholder, rac.is_developer
@@ -140,6 +152,9 @@ def get_asset_contacts(raw_asset_id: str, current_user: dict = Depends(get_curre
 
 @router.get("/country/{country_id}", summary="Get Country Contacts")
 def get_country_contacts(country_id: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+    """
+    Endpoint to Get Country Contacts
+    """
     cursor.execute("""
         SELECT c.id as contact_id, cc.id as mapping_id, c.email, c.full_name, 
                cc.is_stakeholder, cc.is_developer

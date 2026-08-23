@@ -144,6 +144,11 @@ def require_write_access(current_user: dict = Depends(get_current_user)):
 
 @router.post("/logout")
 def logout(background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user)):
+    """
+    Log the user out of the current session
+    1. We still want to announce the user left via websockets
+    2. send the required Google IAP logout URL back to the React frontend.
+    """
     # 1. We still want to announce the user left via websockets
     background_tasks.add_task(
         manager.broadcast,
@@ -169,8 +174,9 @@ def logout(background_tasks: BackgroundTasks, current_user: dict = Depends(get_c
 # --- 2. SESSION & API KEY MANAGEMENT ---
 @router.get("/keys")
 def list_api_keys(global_view: bool = False, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
-    """Lists API keys. Admins see all keys, regular users see only their own."""
-
+    """
+    Lists API keys. Admins see all keys, regular users see only their own.
+    """
     if global_view and current_user['role'] == 'admin':
         cursor.execute("""
             SELECT ak.id, ak.name as key_name, ak.prefix, ak.created_at, u.name as owner_name, u.email as owner_email
@@ -192,7 +198,10 @@ def list_api_keys(global_view: bool = False, current_user: dict = Depends(get_cu
 
 @router.post("/keys")
 def create_api_key(req: ApiKeyCreate, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
-    """Generates a new API Key. The raw key is ONLY returned once."""
+    """
+    Generates a new API Key. The raw key is ONLY returned once.
+    Generate a cryptographically secure string (e.g. isha_abc123xyz...)
+    """
     # Generate a cryptographically secure string (e.g. isha_abc123xyz...)
     raw_key = "isha_" + secrets.token_urlsafe(32)
     prefix = raw_key[:10]
@@ -226,7 +235,9 @@ def create_api_key(req: ApiKeyCreate, current_user: dict = Depends(get_current_u
 
 @router.delete("/keys/{key_id}")
 def revoke_api_key(key_id: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
-    """Deletes an API key. Admins can delete any key, users can only delete their own."""
+    """
+    Deletes an API key. Admins can delete any key, users can only delete their own.
+    """
     if current_user['role'] == 'admin':
         cursor.execute("DELETE FROM api_keys WHERE id = %s", (key_id,))
         log_audit_event(

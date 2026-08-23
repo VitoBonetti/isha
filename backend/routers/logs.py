@@ -10,7 +10,9 @@ router = APIRouter(prefix="/api/system/logs", tags=["System Logs"])
 
 @router.get("/", summary="[Admin Only]")
 def get_recent_logs(current_user: dict = Depends(require_admin)):
-    """Queries BigQuery for the 100 most recent logs for the UI terminal."""
+    """
+    Admin Only endpoint to Queries BigQuery for the 100 most recent logs for the UI terminal.
+    """
     client = get_bq_client()
     if not client: return []
 
@@ -35,7 +37,9 @@ def get_recent_logs(current_user: dict = Depends(require_admin)):
 
 @router.get("/download/csv", summary="[Admin Only]")
 def download_logs_csv(current_user: dict = Depends(require_admin)):
-    """Generates a dynamic CSV file of ALL logs from BigQuery."""
+    """
+    Admin Only endpoint to Generates a dynamic CSV file of ALL logs from BigQuery.
+    """
     client = get_bq_client()
     if not client: raise HTTPException(status_code=500, detail="BigQuery not configured.")
 
@@ -66,7 +70,9 @@ def download_logs_csv(current_user: dict = Depends(require_admin)):
 
 @router.delete("/clear", summary="[Admin Only]")
 def clear_all_logs(current_user: dict = Depends(require_admin)):
-    """Deletes all data from the BigQuery table."""
+    """
+    Admin Only endpoint to Deletes all data from the BigQuery table.
+    """
     client = get_bq_client()
     if not client: raise HTTPException(status_code=500, detail="BigQuery not configured.")
 

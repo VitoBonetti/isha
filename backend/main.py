@@ -44,7 +44,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Isha Core API",
     description="Backend engine for pentest planning and asset management.",
-    version="1.2.0",
+    version="1.3.1",
     swagger_ui_parameters={"defaultModelsExpandDepth": -1},
     lifespan=lifespan,
     docs_url="/api/docs",
@@ -220,6 +220,7 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
             details=f"Method: {request.method} | Error: {str(exc.detail)}"
         )
     return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
+
 
 #  Automatically log full system crashes (500)
 @app.exception_handler(Exception)

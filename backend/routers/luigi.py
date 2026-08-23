@@ -21,8 +21,16 @@ LUIGI_MIDDLEWARE_KEY_NAME = get_secret(os.environ.get("LUIGI_MIDDLEWARE_KEY_NAME
 PUBSUB_TOPIC_PATH = os.environ.get("PUBSUB_TOPIC_PATH")
 
 # Intro email
-@router.get("/{test_id}/draft-intro-email")
-def draft_intro_email(test_id: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+@router.get("/{test_id}/draft-intro-email", summary="[Admin Only]")
+def draft_intro_email(test_id: str, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    """
+    Admin Only Endpoint to Draft Intro Email
+    1. Fetch Test, Asset, Country, and Service data using the correct junction tables
+    2. Fetch Pentesters using the correct Assignments table
+    3. Calculate the start date (Monday of the given week/year)
+    4. Fetch the REAL Contacts! (Using the CountryContacts junction)
+    5. Populate Template
+    """
     # 1. Fetch Test, Asset, Country, and Service data using the correct junction tables
     cursor.execute("""
             SELECT t.name, t.start_week, t.start_year,
@@ -110,9 +118,12 @@ def draft_intro_email(test_id: str, current_user: dict = Depends(get_current_use
     }
 
 
-@router.post("/{test_id}/send-intro-email")
-def send_intro_email(test_id: str, payload: SendEmailPayload, current_user: dict = Depends(get_current_user),
+@router.post("/{test_id}/send-intro-email", summary="[Admin Only]")
+def send_intro_email(test_id: str, payload: SendEmailPayload, current_user: dict = Depends(require_admin),
                      cursor=Depends(get_db_cursor)):
+    """
+    Admin Only Endpoint to Send Intro Email
+    """
 
     if not payload.to and not payload.cc:
         raise HTTPException(status_code=400, detail="At least one recipient (To or CC) is required.")
@@ -160,6 +171,13 @@ def send_intro_email(test_id: str, payload: SendEmailPayload, current_user: dict
 # Final email
 @router.get("/{test_id}/draft-final-email")
 def draft_final_email(test_id: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+    """
+    Endpoint to Draft Final Email
+    1. Fetch Test, Asset, Country, Service data, AND kiss24
+    2. Fetch Pentesters (Names AND Emails)
+    3. Fetch the REAL Contacts
+    4. Populate Template (You can add more specific final email placeholders later!)
+    """
     # 1. Fetch Test, Asset, Country, Service data, AND kiss24
     cursor.execute("""
         SELECT t.name, t.start_week, t.start_year, t.kiss24,
@@ -238,6 +256,9 @@ def draft_final_email(test_id: str, current_user: dict = Depends(get_current_use
 @router.post("/{test_id}/send-final-email")
 def send_final_email(test_id: str, payload: SendEmailPayload, current_user: dict = Depends(get_current_user),
                      cursor=Depends(get_db_cursor)):
+    """
+    Endpoint to Send Final Email
+    """
     if not payload.to and not payload.cc:
         raise HTTPException(status_code=400, detail="At least one recipient (To or CC) is required.")
 
@@ -319,6 +340,9 @@ def send_final_email(test_id: str, payload: SendEmailPayload, current_user: dict
 @router.get("/{test_id}/meeting-participants")
 def get_meeting_participants(test_id: str, current_user: dict = Depends(get_current_user),
                              cursor=Depends(get_db_cursor)):
+    """
+    Endpoint to Get Meeting Participants
+    """
     # Get Pentesters
     cursor.execute("SELECT u.email FROM assignments a JOIN users u ON a.user_id = u.id WHERE a.test_id = %s",
                    (test_id,))
@@ -352,6 +376,14 @@ def get_meeting_participants(test_id: str, current_user: dict = Depends(get_curr
 @router.post("/{test_id}/request-meeting-proposals")
 def request_meeting_proposals(test_id: str, payload: MeetingProposalRequest,
                               current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+    """
+    Endpoint to Request Meeting Proposals to Luigi
+    Use the emails sent from the React modal!
+    1. Fetch test dates, duration, and test name
+    2. Calculate the Strict Time Boundaries
+    3. Ask Apps Script for the Calendars using the strict boundaries
+    4. Drop the data into Pub/Sub for the Luigi Worker
+    """
     meeting_type = payload.meeting_type
     emails = payload.emails  # Use the emails sent from the React modal!
 
@@ -419,7 +451,7 @@ def request_meeting_proposals(test_id: str, payload: MeetingProposalRequest,
 
 
 # Luigi  will call this when it's done thinking!
-@router.post("/save-meeting-proposals")
+@router.post("/save-meeting-proposals", include_in_schema=False)
 async def receive_meeting_proposals(payload: dict):
     # payload contains the test_id, user_email, and the AI's proposed slots
     user_email = payload.get("user_email")
@@ -442,6 +474,9 @@ async def receive_meeting_proposals(payload: dict):
 @router.post("/{test_id}/book-meeting")
 def book_meeting(test_id: str, payload: dict, current_user: dict = Depends(get_current_user),
                  cursor=Depends(get_db_cursor)):
+    """
+    Endpoint to book a meeting
+    """
     # Payload expects: summary, description, emails, startTime, endTime, meeting_type
     luigi_payload = {
         "secret_key": LUIGI_MIDDLEWARE_KEY_NAME,

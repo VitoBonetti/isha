@@ -11,12 +11,18 @@ router = APIRouter(prefix="/api/locations", tags=["Locations"])
 
 @router.get("/")
 def get_locations(current_user: dict = Depends(get_current_user), cursor = Depends(get_db_cursor)):
+    """
+    Endpoint to Get Locations
+    """
     cursor.execute("SELECT id, name, is_active FROM locations ORDER BY name")
     return [{"id": r[0], "name": r[1], "is_active": r[2]} for r in cursor.fetchall()]
 
 
 @router.post("/", summary="[Admin Only]")
 def create_location(loc: LocationBase, current_user: dict = Depends(require_admin), cursor = Depends(get_db_cursor)):
+    """
+    Admin Only Endpoint to Create Location
+    """
     new_location_id = str(uuid.uuid4())
     try:
         cursor.execute("INSERT INTO locations (id, name, is_active) VALUES (%s, %s, %s)", (new_location_id, loc.name, loc.is_active))
@@ -39,6 +45,9 @@ def create_location(loc: LocationBase, current_user: dict = Depends(require_admi
 
 @router.put("/{loc_id}", summary="[Admin Only]")
 def update_location(loc_id: str, loc: LocationBase, current_user: dict = Depends(require_admin), cursor = Depends(get_db_cursor)):
+    """
+    Admin Only Endpoint to Update Location
+    """
     cursor.execute("UPDATE locations SET name=%s, is_active=%s WHERE id=%s", (loc.name, loc.is_active, loc_id))
     cursor.connection.commit()
 
@@ -56,6 +65,9 @@ def update_location(loc_id: str, loc: LocationBase, current_user: dict = Depends
 
 @router.delete("/{loc_id}", summary="[Admin Only]")
 def delete_location(loc_id: str, current_user: dict = Depends(require_admin), cursor = Depends(get_db_cursor)):
+    """
+    Admin Only Endpoint to Delete Location
+    """
     cursor.execute("DELETE FROM locations WHERE id = %s", (loc_id,))
     cursor.connection.commit()
 

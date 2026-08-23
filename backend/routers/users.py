@@ -13,7 +13,7 @@ from utils.security_cipher import get_cipher
 router = APIRouter(prefix="/api/users", tags=["Users"])
 
 
-@router.get("/system/status", include_in_schema=False)
+@router.get("/system/status")
 def check_system_status(current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     # Simply checks if the board has been initialized at least once
     cursor.execute("SELECT COUNT(*) FROM users")
@@ -30,6 +30,9 @@ def get_system_time(current_user: dict = Depends(get_current_user)):
 
 @router.get("/", summary="[Admin Only]")
 def get_all_users(current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    """
+    Admin Only Endpoint to get all users
+    """
     cursor.execute("""
         SELECT id, email, name, role, base_capacity, start_week, start_year, end_week, end_year, location_id, kiss24_uuid, kiss24_api_key   
         FROM users ORDER BY name
@@ -48,6 +51,9 @@ def get_all_users(current_user: dict = Depends(require_admin), cursor=Depends(ge
 @router.post("/", summary="[Admin Only]")
 def create_user(u: UserCreate, background_tasks: BackgroundTasks,
                 current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    """
+    Admin Only Endpoint to create new user
+    """
     if u.role.value == 'read_only':
         u.base_capacity = 0.0
 
@@ -83,8 +89,9 @@ def delete_user(user_id: str, background_tasks: BackgroundTasks,
                 current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     """
     SMART DELETE:
-    If the user has no historical assignments or events (e.g., a fake/test user), we hard-delete them.
-    If they have history, we soft-delete them by setting their end_year and end_week to today to preserve board data.
+
+    - If the user has no historical assignments or events (e.g., a fake/test user), we hard-delete them.
+    - If they have history, we soft-delete them by setting their end_year and end_week to today to preserve board data.
     """
     cursor.execute("SELECT COUNT(*) FROM assignments WHERE user_id = %s", (user_id,))
     assign_count = cursor.fetchone()[0]
@@ -126,6 +133,11 @@ def delete_user(user_id: str, background_tasks: BackgroundTasks,
 @router.put("/{user_id}", summary="[Admin Only]")
 def update_user(user_id: str, u: UserBase, background_tasks: BackgroundTasks,
                 current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    """
+    Admin Only Endpoint to update a user.
+
+    On role change any Isha API keys are revoked.
+    """
     if u.role == 'read_only':
         u.base_capacity = 0.0
 
@@ -176,6 +188,9 @@ def update_user(user_id: str, u: UserBase, background_tasks: BackgroundTasks,
 @router.post("/me/kiss24-key", summary="Securely store personal KISS24 API Key")
 def update_my_kiss24_key(payload: Kiss24KeyUpdate, current_user: dict = Depends(get_current_user),
                          cursor=Depends(get_db_cursor)):
+    """
+    Securely store personal Kiss24 API Key.
+    """
     clean_key = payload.api_key.strip()
 
     is_valid, msg = verify_kiss24_api_key(clean_key)
@@ -201,6 +216,9 @@ def update_my_kiss24_key(payload: Kiss24KeyUpdate, current_user: dict = Depends(
 
 @router.get("/me/kiss24-key/validate", summary="Check if stored key is still valid")
 def validate_stored_kiss24_key(current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+    """
+    Validate stored Kiss24 key is still valid.
+    """
     cursor.execute("SELECT kiss24_api_key FROM users WHERE id = %s", (str(current_user["id"]),))
     row = cursor.fetchone()
 
@@ -232,6 +250,9 @@ def get_my_profile(current_user: dict = Depends(get_current_user), cursor=Depend
 # --- NOTIFICATIONS RESTORED ---
 @router.get("/me/notifications")
 def get_my_notifications(current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+    """
+    Get all notifications for current user.
+    """
     # FIX: Account for is_read being NULL, and cast the UUID to string!
     cursor.execute("""
         SELECT id, message, type, created_at 
@@ -247,6 +268,9 @@ def get_my_notifications(current_user: dict = Depends(get_current_user), cursor=
 
 @router.put("/me/notifications/read")
 def mark_notifications_read(current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+    """
+    Mark notifications for current user.
+    """
     # FIX: Cast the UUID to string
     cursor.execute("UPDATE notifications SET is_read = TRUE WHERE user_id = %s", (str(current_user['id']),))
     cursor.connection.commit()

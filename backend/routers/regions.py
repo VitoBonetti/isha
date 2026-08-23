@@ -15,6 +15,9 @@ class RegionBase(BaseModel):
 
 @router.get("/")
 def get_regions(current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+    """
+    Endpoint to get all regions
+    """
     if current_user.get('role') == 'pentester':
         raise HTTPException(status_code=403, detail="Pentesters cannot access region data.")
 
@@ -24,7 +27,9 @@ def get_regions(current_user: dict = Depends(get_current_user), cursor=Depends(g
 
 @router.post("/", summary="[Admin Only]")
 def create_region(r: RegionBase, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
-
+    """
+    Admin Only Endpoint to create a new region
+    """
     new_region_id = str(uuid.uuid4())
     try:
         cursor.execute(
@@ -51,6 +56,9 @@ def create_region(r: RegionBase, current_user: dict = Depends(require_admin), cu
 @router.put("/{region_id}", summary="[Admin Only]")
 def update_region(region_id: str, r: RegionBase, current_user: dict = Depends(require_admin),
                   cursor=Depends(get_db_cursor)):
+    """
+    Admin Only Endpoint to update a region
+    """
     cursor.execute("UPDATE regions SET name=%s, is_active=%s WHERE id=%s", (r.name, r.is_active, region_id))
     cursor.connection.commit()
 
@@ -68,6 +76,9 @@ def update_region(region_id: str, r: RegionBase, current_user: dict = Depends(re
 
 @router.delete("/{region_id}", summary="[Admin Only]")
 def delete_region(region_id: str, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    """
+    Admin Only Endpoint to delete a region
+    """
     cursor.execute("DELETE FROM regions WHERE id = %s", (region_id,))
     cursor.connection.commit()
 
