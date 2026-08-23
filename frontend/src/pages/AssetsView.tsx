@@ -4,7 +4,7 @@ import axios from "axios";
 import TopNav from "../components/TopNav";
 import ConfirmModal from "../components/Modals/ConfirmModal";
 import toast, { Toaster } from "react-hot-toast";
-import { Search, Filter, ArrowBigRightDash, Server, ChevronDown, Activity, Layers, ChevronsUpDown, ChevronUp, RefreshCw } from "lucide-react";
+import { Search, Filter, ArrowBigRightDash, Server, ChevronDown, Activity, Layers, ChevronsUpDown, ChevronUp, RefreshCw, Link2 } from "lucide-react";
 
 interface PoolAsset {
   id: string;
@@ -67,7 +67,7 @@ export default function AssetsView() {
     isOpen: boolean;
     title: string;
     message: string;
-    action: 'generate' | 'remove' | null;
+    action: 'generate' | 'remove' | 'combine' | null;
     targetId?: string;
     confirmText?: string;
     variant?: 'danger' | 'warning' | 'info' | 'secure';
@@ -145,7 +145,41 @@ export default function AssetsView() {
       } catch (error) {
         toast.error("Failed to remove asset");
       }
+    } else if (confirmModal.action === 'combine') {
+      if (selectedAssets.length === 0) return;
+
+      // 1. Get all selected asset objects
+      const selectedAssetObjects = assets.filter(a => selectedAssets.includes(a.id));
+
+      // 2. Extract Service Lane info (Validation guarantees they are all the same)
+      const serviceName = selectedAssetObjects[0].service_name;
+      const serviceObj = services.find(s => s.name === serviceName);
+
+      // 3. Construct the merged Test Name
+      const testName = selectedAssetObjects.map(a => a.name).join(" & ");
+
+      // 4. Build the payload for the existing single-test endpoint
+      const payload = {
+        name: testName,
+        service_lane_id: serviceObj.id,
+        credits_per_week: serviceObj.default_credits || 2.0,
+        duration_weeks: serviceObj.default_duration_weeks || 1,
+        asset_ids: selectedAssets
+      };
+
+      const toastId = toast.loading("Combining assets into a single test...");
+      try {
+        await axios.post("/api/tests/", payload);
+        toast.dismiss(toastId);
+        toast.success(`Successfully combined ${selectedAssets.length} assets into one test!`);
+        setSelectedAssets([]);
+        fetchPoolAssets();
+      } catch (error) {
+        toast.dismiss(toastId);
+        toast.error("Failed to combine assets into a single test.");
+      }
     }
+
     setConfirmModal({ ...confirmModal, isOpen: false });
   };
 
@@ -441,6 +475,42 @@ export default function AssetsView() {
                       className="w-full flex items-center gap-2 px-4 py-2.5 text-sm font-bold hover:bg-slate-50 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300 transition-colors"
                     >
                       <Layers size={16} className="text-purple-500" /> Set Service Lane
+                    </button>
+                    <div className="h-px bg-slate-100 dark:bg-zinc-800 my-0.5"></div>
+                    <button
+                      onClick={() => {
+                        setShowBulkActions(false);
+                        const selectedAssetObjects = assets.filter(a => selectedAssets.includes(a.id));
+
+                        // Check 1: Missing Service Lanes
+                        const missingLanes = selectedAssetObjects.filter(a => !a.service_name);
+                        if (missingLanes.length > 0) {
+                          toast.error(`${missingLanes.length} selected assets are missing a Service Lane!`);
+                          return;
+                        }
+
+                        // Check 2: Mixed Service Lanes
+                        const serviceNames = new Set(selectedAssetObjects.map(a => a.service_name));
+                        if (serviceNames.size > 1) {
+                          toast.error("All selected assets must belong to the SAME Service Lane to be combined.");
+                          return;
+                        }
+
+                        // Validation passed: calculate the merged name for the prompt
+                        const testName = selectedAssetObjects.map(a => a.name).join(" & ");
+
+                        setConfirmModal({
+                          isOpen: true,
+                          action: 'combine',
+                          title: "Combine into Single Test",
+                          message: `Are you sure you want to combine these ${selectedAssets.length} assets into a single test named "${testName}"?`,
+                          confirmText: "Combine Assets",
+                          variant: "info"
+                        });
+                      }}
+                      className="w-full flex items-center gap-2 px-4 py-2.5 text-sm font-bold hover:bg-slate-50 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300 transition-colors"
+                    >
+                      <Link2 size={16} className="text-emerald-500" /> Combine into Single Test
                     </button>
                   </div>
                 )}

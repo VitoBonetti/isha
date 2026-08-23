@@ -219,7 +219,10 @@ export default function Kiss24ControlPanel({ isOpen, onClose, test, onRefresh }:
   };
 
   return (
-    <div className="fixed inset-0 z-[120] overflow-hidden bg-black/40 backdrop-blur-xs animate-in fade-in duration-200">
+    <div
+      className="fixed inset-0 z-[120] overflow-hidden bg-black/40 backdrop-blur-xs animate-in fade-in duration-200"
+      onClick={onClose}
+    >
       <div className="absolute inset-y-0 right-0 w-full sm:w-[500px] md:w-[600px] lg:w-[700px] flex" onClick={(e) => e.stopPropagation()}>
         <div className="w-full h-full bg-white dark:bg-zinc-950 border-l border-slate-200 dark:border-zinc-800 shadow-2xl flex flex-col">
 
@@ -521,11 +524,11 @@ export default function Kiss24ControlPanel({ isOpen, onClose, test, onRefresh }:
 
                           <div className="pt-3 border-t border-slate-100 dark:border-zinc-800/50">
                             <span className="text-[9px] sm:text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1 flex items-center gap-1"><Clock size={12}/> Scheduled For</span>
-                            <span className="text-xs sm:text-sm text-slate-800 dark:text-zinc-200">{liveData.scheduled_date || 'N/A'}</span>
+                            <span className="text-xs sm:text-sm text-slate-800 dark:text-zinc-200">{liveData.scheduled_date || '-'}</span>
                           </div>
                           <div className="pt-3 border-t border-slate-100 dark:border-zinc-800/50">
                             <span className="text-[9px] sm:text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1 flex items-center gap-1"><User size={12}/> Requested By</span>
-                            <span className="text-xs sm:text-sm text-slate-800 dark:text-zinc-200 block truncate" title={liveData.requested_by_email}>{liveData.requested_by_email || 'N/A'}</span>
+                            <span className="text-xs sm:text-sm text-slate-800 dark:text-zinc-200 block truncate" title={liveData.requested_by_email}>{liveData.requested_by_email || '-'}</span>
                             <span className="text-[9px] sm:text-[10px] text-slate-400 block mt-0.5">{liveData.requested_at}</span>
                           </div>
                           <div className="pt-3 border-t border-slate-100 dark:border-zinc-800/50">
@@ -625,10 +628,18 @@ export default function Kiss24ControlPanel({ isOpen, onClose, test, onRefresh }:
 
                         <div className="p-3 bg-slate-50 dark:bg-zinc-950/50 flex flex-col sm:flex-row sm:items-center justify-between gap-1 sm:gap-2 text-[10px] sm:text-xs text-slate-500 dark:text-zinc-400">
                           <div className="flex items-center gap-1.5">
-                            <span className="font-medium">Published:</span> {vuln.published_at || 'Unknown'}
+                            <span className="font-medium">Created:</span> {vuln.created_at || '-'}
                           </div>
                           <div className="flex items-center gap-1.5">
-                            <span className="font-medium">By:</span> {vuln.published_by_name || 'System'}
+                            <span className="font-medium">By:</span> {vuln.created_by_name || '-'}
+                          </div>
+                        </div>
+                        <div className="p-3 bg-slate-50 dark:bg-zinc-950/50 flex flex-col sm:flex-row sm:items-center justify-between gap-1 sm:gap-2 text-[10px] sm:text-xs text-slate-500 dark:text-zinc-400">
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-medium">Published:</span> {vuln.published_at || '-'}
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-medium">By:</span> {vuln.published_by_name || '-'}
                           </div>
                         </div>
 

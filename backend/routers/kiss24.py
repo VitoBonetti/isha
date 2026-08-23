@@ -565,6 +565,8 @@ def get_kiss24_vulnerabilities(
                 "description": item.get("description"),
                 "state": item.get("state"),
                 "severity": item.get("severity"),
+                "created_at": item.get("created_at"),
+                "created_by_name": (item.get("created_by") or {}).get("name"),
                 "published_at": item.get("published_at"),
                 "published_by_name": (item.get("published_by") or {}).get("name")
             })

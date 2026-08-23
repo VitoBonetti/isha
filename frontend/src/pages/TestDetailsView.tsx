@@ -360,13 +360,6 @@ export default function TestDetailsView() {
 
                   {/* WORKSPACE & VAULT BUTTONS */}
                   <div className="flex items-center gap-2 mt-2 xl:mt-0">
-                    <button
-                      onClick={() => setIsKiss24PanelOpen(true)}
-                      className="px-3 py-1.5 text-indigo-600 bg-indigo-50 dark:bg-indigo-900/20 hover:bg-indigo-100 border border-indigo-200 dark:border-indigo-900/50 rounded-lg transition-colors flex items-center gap-2 text-xs font-bold"
-                      title="Open Keep Secure 24 Control Panel"
-                    >
-                      <Cable size={14} /> <span className="hidden sm:inline">KISS24 Panel</span>
-                    </button>
                     {test.auto_provision_workspace && (
                       <>
                         {test.drive_folder_url ? (
@@ -509,20 +502,48 @@ export default function TestDetailsView() {
 
           {/* RIGHT COLUMN: Action Menu & Accordions (1/3 width) */}
           <div className="w-full lg:w-1/3 flex flex-col gap-4">
-
+            {/* --- KISS24 INTEGRATION WIDGET --- */}
+            <button
+              onClick={() => setIsKiss24PanelOpen(true)}
+              className="w-full flex items-center justify-between p-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-2xl shadow-md transition-all outline-none group"
+            >
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-white/20 rounded-xl shadow-sm">
+                  <Cable size={20} className="text-white" />
+                </div>
+                <div className="text-left">
+                  <h3 className="font-extrabold text-sm md:text-base tracking-wide">Keep Secure 24</h3>
+                  <p className="text-[10px] md:text-xs text-blue-100 font-medium mt-0.5">Manage Vulns & Sync Platform</p>
+                </div>
+              </div>
+              <div className="p-2 bg-white/10 rounded-full group-hover:bg-white/20 transition-colors">
+                <ChevronRight size={18} className="text-white" />
+              </div>
+            </button>
+            {/* ------------------------------------------ */}
             {/* ACTION MENU (Report Generators) */}
             {test.auto_provision_workspace && !isReadOnly && (
               <div className="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-2xl p-4 md:p-5 shadow-sm mb-2">
 
                 {/* 5-Column Grid for Square Buttons */}
                 <div className="grid grid-cols-8 gap-2 md:gap-3">
-                  <button
-                    onClick={(e) => { e.stopPropagation(); setIsIntroEmailOpen(true); }}
-                    title="Send Intro Email"
-                    className="aspect-square flex flex-col items-center justify-center gap-1 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/40 text-blue-600 dark:text-blue-400 rounded-xl transition-colors border border-blue-200 dark:border-blue-900/30 p-2 shadow-sm"
-                  >
-                    <Mail size={16} className="shrink-0" />
-                  </button>
+                  {isAdmin ? (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setIsIntroEmailOpen(true); }}
+                      title="Send Intro Email"
+                      className="aspect-square flex flex-col items-center justify-center gap-1 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/40 text-blue-600 dark:text-blue-400 rounded-xl transition-colors border border-blue-200 dark:border-blue-900/30 p-2 shadow-sm"
+                    >
+                      <Mail size={16} className="shrink-0" />
+                    </button>
+                  ) : (
+                    <button
+                      disabled
+                      title="Send Intro Email (Admin Only)"
+                      className="aspect-square flex flex-col items-center justify-center gap-1 bg-slate-100 dark:bg-zinc-800/50 text-slate-400 dark:text-zinc-600 rounded-xl border border-slate-200 dark:border-zinc-800 p-2 shadow-sm cursor-not-allowed opacity-70"
+                    >
+                      <CircleFadingPlus size={16} className="shrink-0" />
+                    </button>
+                  )}
                   <button
                     onClick={(e) => { e.stopPropagation(); handleOpenParticipants('Intake Meeting Planned'); }}
                     title="Schedule Intake Meeting"
