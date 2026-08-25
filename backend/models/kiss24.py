@@ -1,8 +1,9 @@
 import uuid
-from sqlalchemy import Column, String, ForeignKey, Table
+from sqlalchemy import Column, String, ForeignKey, Table, Boolean, Text, DateTime
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from database import Base
+from utils.timeaware import aware_utcnow
 
 
 # Association Table for the Many-to-Many relationship
@@ -40,3 +41,18 @@ class Kiss24VulnTypes(Base):
         secondary=kiss24_vuln_context_association,
         back_populates="kiss24_vuln_types"
     )
+
+
+class Kiss24ValidatingVulns(Base):
+    __tablename__ = "kiss24_validating_vulns"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    validating_team = Column(String(50), nullable=False)
+    need_credentials = Column(Boolean, nullable=False, default=False)
+    need_vpn = Column(Boolean, nullable=False, default=False)
+    other_issue = Column(Text, nullable=True)
+    note = Column(Text, nullable=True)
+    action_taken = Column(Text, nullable=True)
+    ai_suggestion = Column(Text, nullable=True)
+    updated_at = Column(DateTime(timezone=True), nullable=True)
+    updated_by_name = Column(String(100), nullable=True)

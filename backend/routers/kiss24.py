@@ -1,9 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from __future__ import annotations
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.testing.pickleable import User
+from google.cloud import pubsub_v1, storage
 from database import get_db_cursor
 from routers.auth import get_current_user, require_admin
 from audit_logger import log_audit_event
 from utils.timeaware import aware_utcnow
+from utils.secret_manager import get_secret
 from utils.kiss24_service import (
     map_asset_onetrust_custom_field,
     map_organizations,
@@ -15,15 +18,24 @@ from utils.kiss24_service import (
     map_mario_user_kiss24_uuid,
     create_vulnerability,
     upload_vulnerability_attachment,
-    get_custom_fields_choice_uuid
+    get_custom_fields_choice_uuid,
+    fetch_validating_vulnerabilities,
+    fetch_validation_info
 )
 from utils.security_cipher import get_cipher
 from datetime import datetime
 import re
+import os
+import requests
+import json
 
 
 router = APIRouter(prefix="/api/kiss24", tags=["Kiss24"])
 
+KISS_24_TEMP_BUCKET = os.environ.get("KISS_24_TEMP_BUCKET")
+PUBSUB_TOPIC_PATH = os.environ.get("PUBSUB_TOPIC_PATH")
+KISS_24_ENDPOINT = os.environ.get("KISS_24_ENDPOINT")
+KISS_24_API_KEY_NAME = os.environ.get("KISS_24_API_KEY_NAME")
 
 @router.post("/sync-org-ids", status_code=status.HTTP_200_OK, summary="[Admin Only]")
 def sync_kiss24_org_ids(
@@ -602,7 +614,7 @@ def get_kiss24_vuln_types_for_dropdown(current_user: dict = Depends(get_current_
     return list(vuln_dict.values())
 
 
-# 3. The Main Publishing Sequence
+# The Main Publishing Sequence
 @router.post("/{test_id}/vulnerabilities/publish", status_code=status.HTTP_200_OK, include_in_schema=False)
 def publish_vulnerability(test_id: str, payload: dict, current_user: dict = Depends(get_current_user),
                           cursor=Depends(get_db_cursor)):
@@ -726,3 +738,198 @@ def publish_vulnerability(test_id: str, payload: dict, current_user: dict = Depe
     except Exception as e:
         cursor.connection.rollback()
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+# Validating endpoint
+@router.get("/validating-vulns", summary="Get Cached Validating Vulns (Instant)")
+def get_validating_vulns(current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+    """Fast local endpoint - loads directly from PostgreSQL in milliseconds."""
+    cursor.execute("""
+        SELECT uuid, validating_team, need_credentials, need_vpn, other_issue, note, action_taken, ai_suggestion, updated_at, updated_by_name
+        FROM kiss24_validating_vulns
+        ORDER BY updated_at DESC NULLS LAST
+    """)
+    rows = cursor.fetchall()
+
+    return [{
+        "uuid": str(r[0]),
+        "validating_team": r[1],
+        "need_credentials": r[2],
+        "need_vpn": r[3],
+        "other_issue": r[4] or "",
+        "note": r[5] or "",
+        "action_taken": r[6] or "",
+        "ai_suggestion": r[7] or "",
+        "updated_at": r[8],
+        "updated_by_name": r[9] or "N/A"
+    } for r in rows]
+
+
+@router.post("/validating-vulns/sync", summary="Reconcile & Sync with KISS24")
+def sync_validating_vulns(current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+    """Fetches live KISS24 data and reconciles with local PostgreSQL."""
+    try:
+        live_vulns = fetch_validating_vulnerabilities()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    live_uuids = {str(v["uuid"]): v for v in live_vulns}
+
+    # Fetch local records
+    cursor.execute(
+        "SELECT uuid, validating_team, need_credentials, need_vpn, other_issue, note, action_taken, ai_suggestion, updated_at, updated_by_name FROM kiss24_validating_vulns")
+    db_rows = cursor.fetchall()
+    db_map = {str(r[0]): r for r in db_rows}
+
+    to_delete = set(db_map.keys()) - set(live_uuids.keys())
+    to_insert = set(live_uuids.keys()) - set(db_map.keys())
+
+    # 1. Delete vulns that are no longer in 'Validating' state
+    if to_delete:
+        format_strings = ','.join(['%s'] * len(to_delete))
+        cursor.execute(f"DELETE FROM kiss24_validating_vulns WHERE uuid IN ({format_strings})", tuple(to_delete))
+
+    # 2. Insert new 'Validating' vulns
+    for uid in to_insert:
+        vuln = live_uuids[uid]
+        creator_email = (vuln.get("created_by") or {}).get("email", "")
+        team = "DevoTeam" if creator_email.endswith("@devoteam.com") else "Gost"
+
+        cursor.execute("""
+            INSERT INTO kiss24_validating_vulns (uuid, validating_team)
+            VALUES (%s, %s)
+        """, (uid, team))
+
+        db_map[uid] = (uid, team, False, False, "", "", "", "", None, "System")
+
+    cursor.connection.commit()
+
+    # 3. Build merged dataset for UI
+    merged_results = []
+    for uid, live_data in live_uuids.items():
+        local_data = db_map.get(uid)
+        if local_data:
+            merged_results.append({
+                "uuid": uid,
+                "id": live_data.get("id"),
+                "description": live_data.get("description"),
+                "severity": live_data.get("severity"),
+                "sub_state": live_data.get("sub_state", ""),
+                "vuln_type": (live_data.get("vulnerability_type") or {}).get("name", "Unknown"),
+                "test_id": (live_data.get("test") or {}).get("id", "Unknown"),
+                "organization": (live_data.get("organisation") or {}).get("name", "Unknown"),
+                "asset": (live_data.get("asset") or {}).get("name", "Unknown"),
+                "validating_team": local_data[1],
+                "need_credentials": local_data[2],
+                "need_vpn": local_data[3],
+                "other_issue": local_data[4] or "",
+                "note": local_data[5] or "",
+                "action_taken": local_data[6] or "",
+                "ai_suggestion": local_data[7] or "",
+                "updated_at": local_data[8],
+                "updated_by_name": local_data[9] or "N/A"
+            })
+
+    return merged_results
+
+
+@router.put("/validating-vulns/{uuid}", summary="Update Local Vuln Info")
+def update_validating_vuln(uuid: str, payload: dict, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+    cursor.execute("""
+        UPDATE kiss24_validating_vulns
+        SET need_credentials = %s, need_vpn = %s, other_issue = %s, note = %s, action_taken = %s, updated_at = NOW(), updated_by_name = %s
+        WHERE uuid = %s
+    """, (
+        payload.get("need_credentials", False),
+        payload.get("need_vpn", False),
+        payload.get("other_issue", ""),
+        payload.get("note", ""),
+        payload.get("action_taken", ""),
+        current_user["name"],
+        uuid
+    ))
+    cursor.connection.commit()
+    return {"message": "Updated successfully"}
+
+
+# Validate fix with Luigi
+def upload_attachment_to_gcs(att_uuid: str, file_name: str, vuln_uuid: str, bucket) -> str | None:
+    """Helper to stream a file from KISS24 straight to GCS and return the URI."""
+    try:
+        headers = {"x-api-key": get_secret(KISS_24_API_KEY_NAME), "Content-Type": "application/json"}
+        resp = requests.get(f"{KISS_24_ENDPOINT}attachments/{att_uuid}", headers=headers)
+
+        if resp.status_code == 200:
+            blob_name = f"{vuln_uuid}/{att_uuid}_{file_name}"
+            blob = bucket.blob(blob_name)
+            blob.upload_from_string(resp.content)
+            return f"gs://{KISS_24_TEMP_BUCKET}/{blob_name}"
+        else:
+            log_audit_event("SYSTEM", "SYSTEM", "KISS24_GCS_UPLOAD", "GCS", "N/A",
+                            f"Failed to download attachment {att_uuid}. KISS24 Status: {resp.status_code}")
+    except Exception as e:
+        log_audit_event("SYSTEM", "SYSTEM", "KISS24_GCS_UPLOAD_ERROR", "GCS", "N/A",
+                        f"Crash during GCS upload for {file_name}: {str(e)}")
+
+    return None
+
+
+def trigger_luigi_verification_pipeline(vuln_uuid: str):
+    """Background task to prep the JSON payload and alert Luigi."""
+    try:
+        # 1. Get the cleaned JSON payload
+        vuln_data = fetch_validation_info(vuln_uuid)
+        if not vuln_data:
+            log_audit_event("SYSTEM", "SYSTEM", "LUIGI_PIPELINE_ABORT", "PIPELINE", "N/A",
+                            f"fetch_validation_info returned empty for {vuln_uuid}.")
+            return
+
+        log_audit_event("SYSTEM", "SYSTEM", "LUIGI_PIPELINE_GCS_INIT", "PIPELINE", "N/A",
+                        f"Initializing GCS Client for bucket: {KISS_24_TEMP_BUCKET}")
+
+        storage_client = storage.Client()
+        bucket = storage_client.bucket(KISS_24_TEMP_BUCKET)
+        gcs_uris_to_cleanup = []
+
+        # 2. Process root vulnerability attachments
+        for att in vuln_data.get("downloaded_attachments", []):
+            gcs_uri = upload_attachment_to_gcs(att["uuid"], att["name"], vuln_uuid, bucket)
+            att["gcs_uri"] = gcs_uri
+            if gcs_uri: gcs_uris_to_cleanup.append(gcs_uri)
+
+        # 3. Process comment attachments
+        for comment in vuln_data.get("fetched_comments", []):
+            for c_att in comment.get("downloaded_attachments", []):
+                gcs_uri = upload_attachment_to_gcs(c_att["uuid"], c_att["name"], vuln_uuid, bucket)
+                c_att["gcs_uri"] = gcs_uri
+                if gcs_uri: gcs_uris_to_cleanup.append(gcs_uri)
+
+        log_audit_event("SYSTEM", "SYSTEM", "LUIGI_PIPELINE_PUBSUB", "PIPELINE", "N/A",
+                        f"Publishing {len(gcs_uris_to_cleanup)} attachments to Pub/Sub: {PUBSUB_TOPIC_PATH}")
+
+        # 4. Ship to Pub/Sub
+        publisher = pubsub_v1.PublisherClient()
+        payload = {
+            "task": "VERIFY_VULN",
+            "vuln_uuid": vuln_uuid,
+            "vuln_data": vuln_data,
+            "cleanup_uris": gcs_uris_to_cleanup
+        }
+
+        # future.result() forces the background task to wait for Google to confirm the message!
+        future = publisher.publish(PUBSUB_TOPIC_PATH, json.dumps(payload).encode("utf-8"))
+        message_id = future.result()
+
+        log_audit_event("SYSTEM", "SYSTEM", "LUIGI_PIPELINE_SUCCESS", "PIPELINE", "N/A",
+                        f"Message successfully published to Luigi! ID: {message_id}")
+
+    except Exception as e:
+        # THIS will catch the crash and show you exactly what broke (Auth, Env Vars, etc.)
+        log_audit_event("SYSTEM", "SYSTEM", "LUIGI_PIPELINE_CRASH", "PIPELINE", "N/A",
+                        f"Pipeline CRASHED for {vuln_uuid}: {str(e)}")
+
+
+@router.post("/validating-vulns/{uuid}/analyze", include_in_schema=False)
+def start_ai_analysis(uuid: str, background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user)):
+    background_tasks.add_task(trigger_luigi_verification_pipeline, uuid)
+    return {"message": "Luigi pipeline started"}

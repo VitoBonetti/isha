@@ -183,6 +183,7 @@ export default function TopNav() {
         <Link to="/planner" className={navClass("/planner")}>Planner</Link>
         <Link to="/calendar" className={navClass("/calendar")}>Holidays</Link>
         <Link to="/tests" className={navClass("/tests")}>Tests</Link>
+        <Link to="/validating" className={navClass("/validating")}>Validation</Link>
 
         {currentUser?.role === 'admin' && (
           <div className="relative" ref={settingsRef}>
@@ -330,6 +331,7 @@ export default function TopNav() {
           <Link to="/planner" className={mobileNavClass("/planner")}>Planner</Link>
           <Link to="/calendar" className={mobileNavClass("/calendar")}>Holidays</Link>
           <Link to="/tests" className={mobileNavClass("/tests")}>Tests</Link>
+          <Link to="/validating" className={mobileNavClass("/validating")}>Validation</Link>
 
           {currentUser?.role === 'admin' && (
             <>

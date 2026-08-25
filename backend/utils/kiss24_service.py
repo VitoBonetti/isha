@@ -376,3 +376,169 @@ def upload_vulnerability_attachment(vuln_uuid: str, base64_data: str, filename: 
     except Exception as e:
         print(f"Failed to upload attachment: {e}")
         return False
+
+
+# fetchs validating vulns
+def fetch_validating_vulnerabilities():
+    """Fetches all vulns in 'Validating' state using the system API key with explicit timeouts."""
+    all_items = []
+    page = 1
+    while True:
+        payload = {"states": ["Validating"]}
+        url = f"{KISS_24_ENDPOINT}vulnerabilities?page={page}"
+        data = json.dumps(payload).encode("utf-8")
+
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers={"x-api-key": api_key(), "Content-Type": "application/json"}
+        )
+
+        try:
+            # Set a strict 15-second timeout to prevent hanging threads
+            with urllib.request.urlopen(req, timeout=15) as res:
+                resp = json.loads(res.read())
+                items = resp.get("items", [])
+
+                for item in items:
+                    if item.get("sub_state") != "Unable to Retest":
+                        all_items.append(item)
+
+                # Check pagination bounds
+                total_pages = resp.get("page_count", 1)
+                if page >= total_pages or not items or not resp.get("_links", {}).get("next"):
+                    break
+                page += 1
+
+        except urllib.error.HTTPError as e:
+            err_body = e.read().decode('utf-8')
+            raise Exception(f"KISS24 Error (HTTP {e.code}): {err_body}")
+        except Exception as e:
+            raise Exception(f"Failed to connect to Keep Secure 24: {str(e)}")
+
+    return all_items
+
+
+# Complete info and low vulnerabilities workflow
+def fetch_validation_info(uuid: str):
+    """
+    Fetches a single vulnerability, strips out useless metadata to save AI tokens,
+    filters for actual developer comments, and structures all attachments perfectly.
+    """
+    pop_out_list = [
+        "original_severity", "overdue", "base_score", "temporal_score", "environmental_score",
+        "reopened_count", "due_date", "auto_unpark_at", "review_date_park", "sub_state", "ready_to_publish",
+        "jira_issue", "due_date_by", "assignee", "test", "organisation", "asset_groups", "tags",
+        "fields", "attachments", "comments", "created_at", "created_by", "last_modified_at", "last_modified_by",
+        "published_at", "published_by", "opened_at", "opened_by", "closed_at", "closed_by", "validating_at",
+        "validating_by", "last_reopened", "parked_at", "parked_by", "assigned_at", "assigned_by"
+    ]
+    log_audit_event(
+        user_id="SYSTEM",
+        role="SYSTEM",
+        action="KISS24_GET_ISSUE_TO_VALIDATE",
+        resource_type="VALIDATE",
+        resource_id="N/A",
+        details=f"[AI-VERIFY] Step 1: Fetching KISS24 details for vuln {uuid}.",
+    )
+
+    try:
+        # 1. Fetch Vulnerability (API expects a list of UUIDs)
+        resp = post("vulnerabilities", {"uuid": [uuid]})
+        items = resp.get("items", [])
+        if not items:
+            log_audit_event(
+                user_id="SYSTEM",
+                role="SYSTEM",
+                action="ERROR_KISS24_GET_ISSUE_TO_VALIDATE",
+                resource_type="VALIDATE",
+                resource_id="N/A",
+                details=f"[AI-VERIFY] ERROR: KISS24 returned 0 items for UUID: {uuid}. Raw response: {resp}.",
+            )
+            return None
+
+        item = items[0]
+
+        # 2. Clean out useless fields for the AI
+        for field in pop_out_list:
+            item.pop(field, None)
+
+        vuln_uuid = item.get("uuid")
+        item["downloaded_attachments"] = []
+        item["fetched_comments"] = []
+        log_audit_event(
+            user_id="SYSTEM",
+            role="SYSTEM",
+            action="KISS24_GET_ISSUE_TO_VALIDATE_FETCHING_ATTACHMENTS",
+            resource_type="VALIDATE",
+            resource_id="N/A",
+            details=f"[AI-VERIFY] Step 2: Fetching direct attachments for {vuln_uuid}.",
+        )
+
+        # 3. Fetch Direct Vulnerability Attachments
+        att_resp = post("attachments", {"vulnerabilities": [vuln_uuid]})
+        for att in att_resp.get("items", []):
+            item["downloaded_attachments"].append({
+                "uuid": att.get("uuid"),
+                "name": att.get("name"),
+                "type": "Vulnerability"
+            })
+        log_audit_event(
+            user_id="SYSTEM",
+            role="SYSTEM",
+            action="KISS24_GET_ISSUE_TO_VALIDATE_FETCH_COMMENTS",
+            resource_type="VALIDATE",
+            resource_id="N/A",
+            details=f"[AI-VERIFY] Step 3: Fetching comments for {vuln_uuid}.",
+        )
+
+        # 4. Fetch Comments
+        comm_resp = post("comments", {"vulnerabilities": [vuln_uuid]})
+        for comm in comm_resp.get("items", []):
+
+            # FILTER: We only care about human comments, not system state changes!
+            if comm.get("comment_type") == "Comment":
+
+                # Keep only what Luigi needs to read
+                clean_comm = {
+                    "uuid": comm.get("uuid"),
+                    "comment": comm.get("comment"),
+                    "created_at": comm.get("created_at"),
+                    "created_by": comm.get("created_by"),
+                    "downloaded_attachments": []
+                }
+
+                # 5. Fetch Comment Attachments (Only if total > 0)
+                if int(comm.get("attachments", {}).get("total", 0)) > 0:
+                    c_att_resp = post("attachments", {"comments": [comm.get("uuid")]})
+                    for c_att in c_att_resp.get("items", []):
+                        clean_comm["downloaded_attachments"].append({
+                            "uuid": c_att.get("uuid"),
+                            "name": c_att.get("name"),
+                            "type": "Comment"
+                        })
+
+                item["fetched_comments"].append(clean_comm)
+        log_audit_event(
+            user_id="SYSTEM",
+            role="SYSTEM",
+            action="KISS24_GET_ISSUE_TO_VALIDATE_COMMENTS",
+            resource_type="VALIDATE",
+            resource_id="N/A",
+            details=f"[AI-VERIFY] Success: Extracted {len(item['fetched_comments'])} comments..",
+        )
+        return item
+
+    except Exception as e:
+        log_audit_event(
+            user_id="SYSTEM",
+            role="SYSTEM",
+            action="ERROR_KISS24_GET_ISSUE_TO_VALIDATE",
+            resource_type="VALIDATE",
+            resource_id="N/A",
+            details=f"[AI-VERIFY] CRITICAL CRASH while fetching info for {uuid}: {e}.",
+        )
+        return None
+
+
+

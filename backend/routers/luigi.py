@@ -1,11 +1,11 @@
 import google.auth
 from google.auth.transport.requests import Request
-from google.cloud import pubsub_v1
+from google.cloud import pubsub_v1, storage
 from datetime import datetime, timedelta, timezone
 import json
 import requests
 import os
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, status
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, status, Request as FastAPIRequest
 from utils.secret_manager import get_secret
 from schema import SendEmailPayload, MeetingProposalRequest, LuigiVulnCallback
 from database import get_db_cursor, db_cursor_context
@@ -20,7 +20,50 @@ WEB_APP_URL = os.environ.get("LUIGI_MIDDLEWARE_CONTACTS_URL")
 LUIGI_MIDDLEWARE_KEY_NAME = get_secret(os.environ.get("LUIGI_MIDDLEWARE_KEY_NAME"))
 PUBSUB_TOPIC_PATH = os.environ.get("PUBSUB_TOPIC_PATH")
 
-# Intro email
+
+def verify_luigi_token(request: FastAPIRequest):
+    """
+    Enforces that Luigi's callbacks are authenticated.
+    When behind GCP IAP, the original Authorization header is stripped,
+    and IAP injects 'x-goog-iap-jwt-assertion' after successful authentication.
+    """
+    # 1. Check for the header injected by GCP IAP (Production)
+    iap_jwt = request.headers.get("x-goog-iap-jwt-assertion")
+
+    # 2. Fallback to standard Authorization header (Local Development)
+    auth_header = request.headers.get("Authorization")
+
+    if not iap_jwt and not (auth_header and auth_header.startswith("Bearer ")):
+        raise HTTPException(
+            status_code=401,
+            detail="Missing IAP Assertion or IAM Bearer Token (Blocked by Backend)"
+        )
+
+    # Return whichever token was used so the route can proceed
+    return iap_jwt or auth_header.split(" ")[1]
+
+
+# --- Helper function for GCS Cleanup ---
+def cleanup_temp_evidence(uris: list):
+    if not uris:
+        return
+    try:
+        storage_client = storage.Client()
+        for uri in uris:
+            parts = uri.replace("gs://", "").split("/", 1)
+            if len(parts) == 2:
+                bucket = storage_client.bucket(parts[0])
+                blob = bucket.blob(parts[1])
+                if blob.exists():
+                    blob.delete()
+                    print(f"🗑️ Cleaned up temp file: {uri}")
+    except Exception as e:
+        print(f"🚨 Failed to clean up temp bucket: {e}")
+
+
+# ==========================================
+# --- 1. INTRO EMAIL ENDPOINTS ---
+# ==========================================
 @router.get("/{test_id}/draft-intro-email", summary="[Admin Only]")
 def draft_intro_email(test_id: str, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     """
@@ -168,7 +211,9 @@ def send_intro_email(test_id: str, payload: SendEmailPayload, current_user: dict
     return {"status": "Success"}
 
 
-# Final email
+# ==========================================
+# --- 2. FINAL EMAIL ENDPOINTS ---
+# ==========================================
 @router.get("/{test_id}/draft-final-email")
 def draft_final_email(test_id: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
     """
@@ -372,7 +417,9 @@ def get_meeting_participants(test_id: str, current_user: dict = Depends(get_curr
     return {"emails": emails}
 
 
-# Send the custom list to Luigi
+# ==========================================
+# --- 3. MEETING SCHEDULING ENDPOINTS ---
+# ==========================================
 @router.post("/{test_id}/request-meeting-proposals")
 def request_meeting_proposals(test_id: str, payload: MeetingProposalRequest,
                               current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
@@ -452,7 +499,7 @@ def request_meeting_proposals(test_id: str, payload: MeetingProposalRequest,
 
 # Luigi  will call this when it's done thinking!
 @router.post("/save-meeting-proposals", include_in_schema=False)
-async def receive_meeting_proposals(payload: dict):
+async def receive_meeting_proposals(payload: dict, token: str = Depends(verify_luigi_token)):
     # payload contains the test_id, user_email, and the AI's proposed slots
     user_email = payload.get("user_email")
 
@@ -507,7 +554,9 @@ def book_meeting(test_id: str, payload: dict, current_user: dict = Depends(get_c
     return {"status": "Success", "link": luigi_result.get("data", {}).get("eventLink")}
 
 
-# Luigi Draft Vulnerabilities
+# ==========================================
+# --- 4. VULNERABILITY DRAFTING ---
+# ==========================================
 @router.post("/draft-vulnerability", status_code=status.HTTP_200_OK)
 def trigger_luigi_draft(payload: dict, current_user: dict = Depends(get_current_user)):
 
@@ -528,7 +577,7 @@ def trigger_luigi_draft(payload: dict, current_user: dict = Depends(get_current_
 
 #  Webhook Callback (Called by Luigi)
 @router.post("/vuln-draft-callback", include_in_schema=False)
-def luigi_draft_callback(payload: LuigiVulnCallback, background_tasks: BackgroundTasks):
+def luigi_draft_callback(payload: LuigiVulnCallback, background_tasks: BackgroundTasks, token: str = Depends(verify_luigi_token)):
     """Luigi hits this endpoint when the drafted HTML is ready."""
     ws_message = {
         "action": "VULN_DRAFT_READY",
@@ -540,3 +589,37 @@ def luigi_draft_callback(payload: LuigiVulnCallback, background_tasks: Backgroun
     # Broadcast to the user waiting in the frontend
     background_tasks.add_task(manager.broadcast, json.dumps(ws_message))
     return {"status": "success"}
+
+
+# ==========================================
+# --- 5. VALIDATION QUEUE ---
+# ==========================================
+@router.post("/validation-callback", summary="Webhook for Luigi's Validation Verdict", include_in_schema=False)
+async def luigi_validation_callback(
+        payload: dict,
+        background_tasks: BackgroundTasks,
+        cursor=Depends(get_db_cursor),
+        token: str = Depends(verify_luigi_token)  # <--- ENFORCING LUIGI AUTHENTICATION!
+):
+    vuln_uuid = payload.get("vuln_uuid")
+    ai_suggestion = payload.get("ai_suggestion")
+    gcs_uris = payload.get("gcs_uris", [])
+
+    if not vuln_uuid or not ai_suggestion:
+        return {"status": "Error", "message": "Missing required fields"}
+
+    # 1. Save Luigi's verdict to the DB
+    cursor.execute("""
+        UPDATE kiss24_validating_vulns 
+        SET ai_suggestion = %s, updated_at = NOW(), updated_by_name = 'Luigi (AI)'
+        WHERE uuid = %s
+    """, (ai_suggestion, vuln_uuid))
+    cursor.connection.commit()
+
+    # 2. Cleanup evidence files securely in the background
+    background_tasks.add_task(cleanup_temp_evidence, gcs_uris)
+
+    # 3. Broadcast to the frontend to STOP the spinning wand and show the result!
+    await manager.broadcast(json.dumps({"action": "REFRESH_BOARD"}))
+
+    return {"status": "Success"}

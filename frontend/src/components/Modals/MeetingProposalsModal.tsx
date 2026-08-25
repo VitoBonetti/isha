@@ -23,9 +23,20 @@ export default function MeetingProposalsModal({ isOpen, testId, testName, propos
     setIsBooking(true);
     const slot = proposalData.proposals[selectedSlot];
 
+    let dynamicDescription = "";
+    const typeLower = proposalData.meeting_type.toLowerCase();
+
+    if (typeLower.includes('intake')) {
+      dynamicDescription = "The goals of this call are to explain the pentesting process, allow the testers to gain a functional understanding of the application, and verify accessibility.";
+    } else if (typeLower.includes('finding') || typeLower.includes('restitution')) {
+      dynamicDescription = "The goals of this call are to walk through the identified vulnerabilities, discuss remediation strategies, and address any technical questions regarding the pentest findings.";
+    } else {
+      dynamicDescription = `Discussion regarding the pentest: ${testName}`;
+    }
+
     const payload = {
       summary: `${proposalData.meeting_type.replace(' Planned', '')}: ${testName}`,
-      description: `Automated calendar invite scheduled by Luigi.\n\nAI Notes: ${slot.description}`,
+      description: dynamicDescription,
       emails: proposalData.emails,
       startTime: slot.start_time,
       endTime: slot.end_time,

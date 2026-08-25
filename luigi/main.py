@@ -2,6 +2,7 @@ import os
 import base64
 import json
 import re
+import uuid
 import requests
 from fastapi import FastAPI, Request, HTTPException
 from google.cloud import secretmanager, storage
@@ -39,7 +40,7 @@ def get_skill_prompt(skill_name: str) -> str:
     try:
         client = storage.Client()
         bucket = client.bucket(LUIGI_SKILLS_BUCKET_NAME)
-        blob = bucket.blob(f"{skill_name}.md")
+        blob = bucket.blob(f"{skill_name}/{skill_name}.md")
 
         if not blob.exists():
             raise Exception(f"Skill file '{skill_name}.md' not found in bucket '{LUIGI_SKILLS_BUCKET_NAME}'.")
@@ -47,6 +48,42 @@ def get_skill_prompt(skill_name: str) -> str:
         return blob.download_as_text()
     except Exception as e:
         raise Exception(f"Failed to load skill from bucket: {str(e)}")
+
+
+# --- Subagent: Vision Summarizer ---
+def sub_luigi_vision(gcs_uri: str, specific_question: str) -> str:
+    """
+    Analyzes an evidence image from Google Cloud Storage to verify specific technical claims.
+
+    Args:
+        gcs_uri: The Google Cloud Storage URI of the image (e.g., gs://bucket/path/to/image.png).
+        specific_question: A highly specific question about what to look for in the image to verify the fix.
+    """
+    print(f"👀 Tool Called: Inspecting {gcs_uri} for '{specific_question}'")
+    try:
+        storage_client = storage.Client()
+        parts = gcs_uri.replace("gs://", "").split("/", 1)
+        bucket = storage_client.bucket(parts[0])
+        blob = bucket.blob(parts[1])
+
+        # Use a random UUID to prevent collisions if multiple tools run concurrently
+        temp_file_path = f"/tmp/{uuid.uuid4().hex}_{parts[1].split('/')[-1]}"
+        blob.download_to_filename(temp_file_path)
+
+        g_file = genai.upload_file(temp_file_path)
+
+        vision_model = genai.GenerativeModel('gemini-2.5-pro')
+        response = vision_model.generate_content([specific_question, g_file])
+        analysis = response.text.strip()
+
+        genai.delete_file(g_file.name)
+        if os.path.exists(temp_file_path):
+            os.remove(temp_file_path)
+
+        return analysis
+    except Exception as e:
+        return f"Failed to analyze image: {str(e)}"
+
 
 # --- Main Logic Trigger ---
 @app.post("/")
@@ -185,5 +222,51 @@ async def pubsub_trigger(request: Request):
         except Exception as e:
             print(f"🚨 Luigi error drafting vuln: {e}")
             return {"status": "error", "detail": str(e)}
+
+
+    elif task_type == "VERIFY_VULN":
+        print(f"🤖 Luigi starting agentic verification for: {data.get('vuln_uuid')}")
+
+        try:
+            genai.configure(api_key=get_gemini_key())
+            vuln_data = data.get("vuln_data")
+            skill_instructions = get_skill_prompt("VERIFY_VULN")
+
+            # 1. Initialize Main Luigi with the Vision Tool!
+            main_model = genai.GenerativeModel(
+                model_name='gemini-2.5-pro',
+                tools=[sub_luigi_vision]
+            )
+
+            # 2. Start an automated chat loop
+            chat = main_model.start_chat(enable_automatic_function_calling=True)
+
+            sys_prompt = f"""
+                {skill_instructions}
+                JSON TIMELINE:
+                {json.dumps(vuln_data, indent=2)}
+                """
+
+            # 3. Send the prompt. Luigi will pause, call the tool if needed, read the result, and finish!
+            response = chat.send_message(sys_prompt)
+            final_verdict = response.text.strip()
+
+            # 4. Callback to Mario
+            url = f"{MAIN_BACKEND_URL}/api/luigi/validation-callback"
+            headers = {"Authorization": f"Bearer {get_iam_token()}"}
+            payload = {
+                "vuln_uuid": data.get("vuln_uuid"),
+                "ai_suggestion": final_verdict,
+                "gcs_uris": data.get("cleanup_uris", [])
+            }
+
+            requests.post(url, json=payload, headers=headers).raise_for_status()
+            print(f"✅ Luigi verification complete for {data.get('vuln_uuid')}")
+            return {"status": "success"}
+
+        except Exception as e:
+            print(f"🚨 Luigi error: {e}")
+            return {"status": "error", "detail": str(e)}
+
 
     return {"status": "ignored", "detail": "Task type not supported"}
