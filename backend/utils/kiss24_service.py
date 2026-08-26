@@ -2,13 +2,17 @@ import json
 import os
 import urllib.request
 import urllib.error
+import requests
 import re
+from datetime import datetime, timedelta, timezone
 from utils.secret_manager import get_secret
 from audit_logger import log_audit_event
 
 
 KISS_24_ENDPOINT = os.environ.get("KISS_24_ENDPOINT")
 KISS_24_API_KEY_NAME = os.environ.get("KISS_24_API_KEY_NAME")
+CUTOFF_DATE = datetime(2026, 5, 1, tzinfo=timezone.utc)
+
 
 # --- Keep Secure 24 helper ---
 def api_key():
@@ -27,6 +31,9 @@ def post(endpoint, body=None, page=None):
         return json.loads(res.read())
 
 
+# ==========================================
+# ---  1. SYSTEM/KISS24 MAPPING SYSTEMS  ---
+# ==========================================
 # Onetrust/UUID asset Map
 def map_asset_onetrust_custom_field():
     map = {}
@@ -65,76 +72,6 @@ def map_organizations():
             break
         page += 1
     return map
-
-
-# Create test
-def create_test(ouuid: str, body: dict, user_api_key: str = None):
-    endpoint = f"provider/tests/{ouuid}/create"
-    url = f"{KISS_24_ENDPOINT}{endpoint}"
-
-    # Use the user's personal key if provided, otherwise fallback to the system key
-    # key_to_use = user_api_key if user_api_key else api_key()
-
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(body).encode("utf-8"),
-        headers={"x-api-key": user_api_key, "Content-Type": "application/json"}
-    )
-
-    with urllib.request.urlopen(req) as res:
-        if res.status == 200:
-            response_data = json.loads(res.read())
-            response_str = str(response_data)
-            uuid_pattern = r'[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
-            match = re.search(uuid_pattern, response_str)
-            if match:
-                return match.group(0)
-            else:
-                return None
-        return None
-
-# get test info
-def get_test_info(uuid: str):
-    endpoint = "tests"
-    url = f"{KISS_24_ENDPOINT}{endpoint}"
-    payload = {"uuid": [uuid]}
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"x-api-key": api_key(), "Content-Type": "application/json"}
-    )
-    try:
-        with urllib.request.urlopen(req) as res:
-            if res.status == 200:
-                response_data = json.loads(res.read())
-                return response_data
-            else:
-                return None
-    except Exception as e:
-        print(f"Failed to fetch test info from KISS24: {e}")
-        return None
-
-
-# Get test vulnerabilities
-def get_test_vulns_info(test_uuid: str):
-    endpoint = "vulnerabilities"
-    url = f"{KISS_24_ENDPOINT}{endpoint}"
-    payload = {"tests": [test_uuid]}
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"x-api-key": api_key(), "Content-Type": "application/json"}
-    )
-    try:
-        with urllib.request.urlopen(req) as res:
-            if res.status == 200:
-                response_data = json.loads(res.read())
-                return response_data
-            else:
-                return None
-    except Exception as e:
-        print(f"Failed to fetch vuln information from KISS24 for test {test_uuid}: {e}")
-        return None
 
 
 # map user and uuid
@@ -262,34 +199,51 @@ def sync_vuln_type_kiss24():
     return map_type, map_context
 
 
-# Check User Api by using Server Health check
-def verify_kiss24_api_key(test_key: str):
-    """
-    Hits the KISS24 health endpoint to verify if a specific API key is valid.
-    Returns (True, "Ok") if valid, or (False, "Error Message") if invalid.
-    """
-    url = f"{KISS_24_ENDPOINT}health"
-
-    # Using POST with an empty JSON body as required by KISS24
+# ==========================================
+# ---  2. TEST/KISS24 SYNC DATA          ---
+# ==========================================
+# get test info
+def get_test_info(uuid: str):
+    endpoint = "tests"
+    url = f"{KISS_24_ENDPOINT}{endpoint}"
+    payload = {"uuid": [uuid]}
     req = urllib.request.Request(
         url,
-        data=b"{}",
-        headers={"x-api-key": test_key, "Content-Type": "application/json"},
-        method="POST"
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"x-api-key": api_key(), "Content-Type": "application/json"}
     )
-
     try:
         with urllib.request.urlopen(req) as res:
             if res.status == 200:
-                return True, "Ok"
-    except urllib.error.HTTPError as e:
-        if e.code == 403:
-            return False, "Invalid API Key"
-        return False, f"HTTP Error: {e.code}"
+                response_data = json.loads(res.read())
+                return response_data
+            else:
+                return None
     except Exception as e:
-        return False, str(e)
+        print(f"Failed to fetch test info from KISS24: {e}")
+        return None
 
-    return False, "Unknown Error"
+
+# Get test vulnerabilities
+def get_test_vulns_info(test_uuid: str):
+    endpoint = "vulnerabilities"
+    url = f"{KISS_24_ENDPOINT}{endpoint}"
+    payload = {"tests": [test_uuid]}
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"x-api-key": api_key(), "Content-Type": "application/json"}
+    )
+    try:
+        with urllib.request.urlopen(req) as res:
+            if res.status == 200:
+                response_data = json.loads(res.read())
+                return response_data
+            else:
+                return None
+    except Exception as e:
+        print(f"Failed to fetch vuln information from KISS24 for test {test_uuid}: {e}")
+        return None
 
 
 # Custom field Dynamic Fetcher
@@ -312,6 +266,36 @@ def get_custom_fields_choice_uuid(ouuid: str, field_name: str, choice_text: str)
         page += 1
 
     return None
+
+
+# ==========================================
+# ---  3. TEST-VULN CREATION ON KISS24   ---
+# ==========================================
+# Create test
+def create_test(ouuid: str, body: dict, user_api_key: str = None):
+    endpoint = f"provider/tests/{ouuid}/create"
+    url = f"{KISS_24_ENDPOINT}{endpoint}"
+
+    # Use the user's personal key if provided, otherwise fallback to the system key
+    # key_to_use = user_api_key if user_api_key else api_key()
+
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(body).encode("utf-8"),
+        headers={"x-api-key": user_api_key, "Content-Type": "application/json"}
+    )
+
+    with urllib.request.urlopen(req) as res:
+        if res.status == 200:
+            response_data = json.loads(res.read())
+            response_str = str(response_data)
+            uuid_pattern = r'[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
+            match = re.search(uuid_pattern, response_str)
+            if match:
+                return match.group(0)
+            else:
+                return None
+        return None
 
 
 # Create Vuln
@@ -378,6 +362,9 @@ def upload_vulnerability_attachment(vuln_uuid: str, base64_data: str, filename: 
         return False
 
 
+# ==========================================
+# ---  4. VALIDATIONS                    ---
+# ==========================================
 # fetchs validating vulns
 def fetch_validating_vulnerabilities():
     """Fetches all vulns in 'Validating' state using the system API key with explicit timeouts."""
@@ -539,6 +526,172 @@ def fetch_validation_info(uuid: str):
             details=f"[AI-VERIFY] CRITICAL CRASH while fetching info for {uuid}: {e}.",
         )
         return None
+
+
+# ==========================================
+# ---  5. REPORTING                      ---
+# ==========================================
+def fetch_all_kiss24(endpoint: str, api_key: str, payload: dict = None):
+    """Helper to fetch all paginated results from KISS24 with safe JSON parsing."""
+    if payload is None: payload = {}
+
+    # CRITICAL FIX: Ensure no newlines exist in the API key header
+    headers = {'x-api-key': api_key.strip(), 'Content-Type': 'application/json'}
+    items = []
+    page = 1
+
+    with requests.Session() as session:
+        while True:
+            url = f"{KISS_24_ENDPOINT}{endpoint}"
+            response = session.post(url, headers=headers, params={'page': page}, json=payload, timeout=30)
+
+            if not response.ok:
+                if response.status_code == 400 and "Invalid Page Number" in response.text:
+                    break
+                else:
+                    raise ValueError(f"API Error on {endpoint}. Status: {response.status_code}, Body: {response.text}")
+
+            # CRITICAL FIX: Catch non-JSON HTML pages returned by WAFs
+            try:
+                data = response.json()
+            except Exception:
+                raise ValueError(
+                    f"Invalid JSON returned from {url}. Status: {response.status_code}. Raw Body: {response.text[:300]}")
+
+            items.extend(data.get('items', []))
+
+            page_count = int(data.get('page_count', 1))
+            if page >= page_count: break
+            page += 1
+
+    return items
+
+
+def get_vuln_fields_map(vuln_uuids: list, api_key: str):
+    """Fetches custom fields for vulnerabilities in chunks."""
+    vuln_fields_map = {}
+    if not vuln_uuids: return vuln_fields_map
+
+    chunk_size = 20
+    for i in range(0, len(vuln_uuids), chunk_size):
+        chunk = vuln_uuids[i:i + chunk_size]
+        fields_data = fetch_all_kiss24('fields', api_key, {"vulnerabilities": chunk})
+
+        for item in fields_data:
+            v_uuid = item.get('entity', {}).get('uuid')
+            if v_uuid:
+                if v_uuid not in vuln_fields_map:
+                    vuln_fields_map[v_uuid] = []
+                vuln_fields_map[v_uuid].append(item)
+
+    return vuln_fields_map
+
+
+def _is_field_populated(field_obj):
+    val = field_obj.get('value')
+    if val is None: return False
+    if isinstance(val, list): return len(val) > 0
+    if isinstance(val, str): return bool(val.strip())
+    return True
+
+
+def validate_kiss24_findings(vulns: list, vuln_fields_map: dict, report_type: int, api_key: str):
+    """Validates contexts and MITRE ID fields, returning a list of violations."""
+    invalid_findings = []
+    context_cache = {}
+
+    for vuln in vulns:
+        vuln_uuid = vuln['uuid']
+        reasons = []
+
+        if report_type == 1:
+            ctx_name = vuln.get('context', {}).get('name', '')
+            if not ctx_name:
+                vt_uuid = vuln.get('vulnerability_type', {}).get('uuid')
+                if vt_uuid:
+                    if vt_uuid not in context_cache:
+                        ctxs = fetch_all_kiss24('provider/contexts', api_key,
+                                                {"vulnerability_types": [vt_uuid]})
+                        context_cache[vt_uuid] = ctxs[0].get('name', '') if ctxs else ''
+                    ctx_name = context_cache[vt_uuid]
+
+            if not ctx_name.startswith("[Adv Sim]"):
+                reasons.append(f"Context '{ctx_name}' does not start with '[Adv Sim]'")
+
+            mitre_filled = False
+            for field in vuln_fields_map.get(vuln_uuid, []):
+                if field.get('custom_field', {}).get('name') == 'MITRE ID':
+                    if _is_field_populated(field): mitre_filled = True
+                    break
+            if not mitre_filled:
+                reasons.append("MITRE ID custom field is empty or missing")
+
+        created_at_str = vuln.get('created_at') or vuln.get('published_at', '')
+        try:
+            created_date = datetime.fromisoformat(created_at_str.replace('Z', '+00:00'))
+            if created_date.tzinfo is None:
+                created_date = created_date.replace(tzinfo=timezone.utc)
+        except (ValueError, TypeError):
+            created_date = datetime.now(timezone.utc)
+
+        if created_date > CUTOFF_DATE:
+            effort_filled = False
+            for field in vuln_fields_map.get(vuln_uuid, []):
+                if field.get('custom_field', {}).get('name') == 'Remediation Effort':
+                    if _is_field_populated(field): effort_filled = True
+                    break
+            if not effort_filled:
+                reasons.append("Remediation Effort custom field is missing (Required for new vulns)")
+
+        if reasons:
+            invalid_findings.append({
+                "vuln_uuid": vuln_uuid,
+                "reasons": reasons
+            })
+
+    return invalid_findings
+
+
+def get_report_type_id(display_order: int) -> int:
+    """Maps the service lane's display_order to the report type expected by osrgt_v3."""
+    if display_order == 1:
+        return 1  # Adversary Simulation
+    elif display_order == 2:
+        return 3  # White Box
+    else:
+        return 2  # Black/Grey Box
+
+# ==========================================
+# ---  6. HEALTH CHECK                   ---
+# ==========================================
+# Check User Api by using Server Health check
+def verify_kiss24_api_key(test_key: str):
+    """
+    Hits the KISS24 health endpoint to verify if a specific API key is valid.
+    Returns (True, "Ok") if valid, or (False, "Error Message") if invalid.
+    """
+    url = f"{KISS_24_ENDPOINT}health"
+
+    # Using POST with an empty JSON body as required by KISS24
+    req = urllib.request.Request(
+        url,
+        data=b"{}",
+        headers={"x-api-key": test_key, "Content-Type": "application/json"},
+        method="POST"
+    )
+
+    try:
+        with urllib.request.urlopen(req) as res:
+            if res.status == 200:
+                return True, "Ok"
+    except urllib.error.HTTPError as e:
+        if e.code == 403:
+            return False, "Invalid API Key"
+        return False, f"HTTP Error: {e.code}"
+    except Exception as e:
+        return False, str(e)
+
+    return False, "Unknown Error"
 
 
 

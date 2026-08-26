@@ -10,3 +10,5 @@ build/
 README.md
 TODO.md
 .venv/
+
+/wiki

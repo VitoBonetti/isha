@@ -3,7 +3,7 @@ import axios from 'axios';
 import toast from 'react-hot-toast';
 import {
   X, Cable, CheckCircle2, AlertCircle, BrainCircuit,
-  Database, Activity, ShieldAlert, Lock, RefreshCw, Send, Check, DownloadCloud, Clock, User, ExternalLink, FingerprintPattern, TestTubeDiagonal, Bug
+  Database, Activity, ShieldAlert, Lock, RefreshCw, Send, Check, DownloadCloud, Clock, User, ExternalLink, FingerprintPattern, TestTubeDiagonal, Bug, FileDown
 } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
 import Kiss24KeyModal from './Modals/Kiss24KeyModal';
@@ -33,12 +33,20 @@ export default function Kiss24ControlPanel({ isOpen, onClose, test, onRefresh }:
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isKeyModalOpen, setIsKeyModalOpen] = useState(false);
 
+  // Vuln report generation
+  const [isGeneratingReport, setIsGeneratingReport] = useState(false);
+  const [selectedVulns, setSelectedVulns] = useState<Set<string>>(new Set());
+
   // kiss24 key State
   const [isKeyValid, setIsKeyValid] = useState<boolean | null>(null);
   const [isValidatingKey, setIsValidatingKey] = useState(false);
 
   // Vulns state
   const [isCreateVulnModalOpen, setIsCreateVulnModalOpen] = useState(false);
+
+  // Data States
+  const [liveData, setLiveData] = useState<any>(null);
+  const [vulnsData, setVulnsData] = useState<any[] | null>(null);
 
   useEffect(() => {
     if (isOpen && currentUser?.has_kiss24_key) {
@@ -51,10 +59,6 @@ export default function Kiss24ControlPanel({ isOpen, onClose, test, onRefresh }:
       setIsKeyValid(false);
     }
   }, [isOpen, currentUser?.has_kiss24_key]);
-
-  // Data States
-  const [liveData, setLiveData] = useState<any>(null);
-  const [vulnsData, setVulnsData] = useState<any[] | null>(null);
 
   // 1. Identifiers
   const countryKiss24Uuid = test?.country_kiss24_uuid;
@@ -78,7 +82,7 @@ export default function Kiss24ControlPanel({ isOpen, onClose, test, onRefresh }:
     if (tab === 'tests' && !canAccessTests) return;
     if (tab === 'vulnerabilities' && !canAccessVulns) return;
     setActiveTab(tab);
-  }; // <--- Fixed missing brace here
+  };
 
   // --- ACTIONS ---
 
@@ -191,6 +195,37 @@ export default function Kiss24ControlPanel({ isOpen, onClose, test, onRefresh }:
       toast.error(e.response?.data?.detail || "Failed to fetch vulnerabilities.", { id: toastId });
     } finally {
       setIsFetchingVulns(false);
+    }
+  };
+
+  const toggleVulnSelection = (uuid: string) => {
+    const newSet = new Set(selectedVulns);
+    if (newSet.has(uuid)) newSet.delete(uuid);
+    else newSet.add(uuid);
+    setSelectedVulns(newSet);
+  };
+
+  const toggleAllVulns = () => {
+    if (!vulnsData) return;
+    if (selectedVulns.size === vulnsData.length) {
+      setSelectedVulns(new Set());
+    } else {
+      setSelectedVulns(new Set(vulnsData.map((v: any) => v.uuid)));
+    }
+  };
+
+  const handleGenerateVulnReports = async (uuids: string[]) => {
+    if (uuids.length === 0) return;
+    setIsGeneratingReport(true);
+    const toastId = toast.loading(`Queuing ${uuids.length} report(s) for generation...`);
+    try {
+      await axios.post(`/api/tests/${test.id}/vulnerabilities/report`, { vuln_uuids: uuids });
+      toast.success(`${uuids.length} report(s) generation started!`, { id: toastId });
+      setSelectedVulns(new Set()); // Clear selection after successful dispatch
+    } catch (e: any) {
+      toast.error(e.response?.data?.detail || "Failed to generate report(s).", { id: toastId });
+    } finally {
+      setIsGeneratingReport(false);
     }
   };
 
@@ -574,6 +609,32 @@ export default function Kiss24ControlPanel({ isOpen, onClose, test, onRefresh }:
                   </div>
                 </div>
 
+                {/* --- BULK ACTIONS BAR --- */}
+                {vulnsData && vulnsData.length > 0 && (
+                  <div className="flex items-center justify-between p-3 bg-slate-50 dark:bg-zinc-900/50 border border-slate-200 dark:border-zinc-800 rounded-xl">
+                    <label className="flex items-center gap-3 cursor-pointer group">
+                      <input
+                        type="checkbox"
+                        checked={selectedVulns.size === vulnsData.length}
+                        onChange={toggleAllVulns}
+                        className="w-4 h-4 rounded text-indigo-600 border-slate-300 focus:ring-indigo-500 cursor-pointer"
+                      />
+                      <span className="text-xs font-bold text-slate-700 dark:text-zinc-300 select-none group-hover:text-indigo-600 transition-colors">
+                        Select All
+                      </span>
+                    </label>
+                    {selectedVulns.size > 0 && (
+                      <button
+                        onClick={() => handleGenerateVulnReports(Array.from(selectedVulns))}
+                        disabled={isGeneratingReport}
+                        className="px-3 py-1.5 bg-indigo-100 hover:bg-indigo-200 dark:bg-indigo-900/30 dark:hover:bg-indigo-900/50 text-indigo-700 dark:text-indigo-400 text-xs font-bold rounded-lg transition-colors flex items-center gap-2"
+                      >
+                        <FileDown size={14} /> Generate {selectedVulns.size} Report(s)
+                      </button>
+                    )}
+                  </div>
+                )}
+
                 {!vulnsData && !isFetchingVulns && (
                   <div className="p-6 sm:p-10 border-2 border-dashed border-slate-200 dark:border-zinc-800 rounded-2xl flex flex-col items-center justify-center text-center bg-slate-50/50 dark:bg-zinc-900/20">
                     <ShieldAlert size={32} className="text-slate-400 mb-3 sm:mb-4" />
@@ -595,51 +656,64 @@ export default function Kiss24ControlPanel({ isOpen, onClose, test, onRefresh }:
                 {vulnsData && vulnsData.length > 0 && (
                   <div className="space-y-4">
                     {vulnsData.map((vuln: any) => (
-                      <div key={vuln.uuid} className="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-xl shadow-sm overflow-hidden flex flex-col hover:border-blue-300 dark:hover:border-blue-700/50 transition-colors">
+                      <div key={vuln.uuid} className={`bg-white dark:bg-zinc-900 border ${selectedVulns.has(vuln.uuid) ? 'border-indigo-400 dark:border-indigo-600 ring-1 ring-indigo-400 dark:ring-indigo-600' : 'border-slate-200 dark:border-zinc-800'} rounded-xl shadow-sm overflow-hidden flex flex-col transition-all`}>
 
                         <div className="p-3 sm:p-4 border-b border-slate-100 dark:border-zinc-800/50 flex flex-col sm:flex-row justify-between items-start gap-3 sm:gap-4">
-                          <div className="flex-1 min-w-0 w-full">
-                            <div className="flex items-center flex-wrap gap-2 mb-2">
-                              <span className="font-mono text-[10px] sm:text-xs font-bold text-slate-500 dark:text-zinc-400 bg-slate-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded">
-                                {vuln.id}
-                              </span>
-                              <span className={`px-2 py-0.5 rounded text-[9px] sm:text-[10px] font-extrabold uppercase tracking-wider border ${getSeverityColor(vuln.severity)}`}>
-                                {vuln.severity}
-                              </span>
-                              <span className={`px-2 py-0.5 rounded text-[9px] sm:text-[10px] font-extrabold uppercase tracking-wider border ${vuln.state === 'Closed' || vuln.state === 'Resolved' ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-900/50' : 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-zinc-800 dark:text-zinc-400 dark:border-zinc-700'}`}>
-                                State: {vuln.state}
-                              </span>
+
+                          <div className="flex items-start gap-3 w-full">
+                            {/* Individual Checkbox */}
+                            <input
+                              type="checkbox"
+                              checked={selectedVulns.has(vuln.uuid)}
+                              onChange={() => toggleVulnSelection(vuln.uuid)}
+                              className="mt-1 shrink-0 w-4 h-4 rounded text-indigo-600 border-slate-300 focus:ring-indigo-500 cursor-pointer"
+                            />
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center flex-wrap gap-2 mb-2">
+                                <span className="font-mono text-[10px] sm:text-xs font-bold text-slate-500 dark:text-zinc-400 bg-slate-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded">
+                                  {vuln.id}
+                                </span>
+                                <span className={`px-2 py-0.5 rounded text-[9px] sm:text-[10px] font-extrabold uppercase tracking-wider border ${getSeverityColor(vuln.severity)}`}>
+                                  {vuln.severity}
+                                </span>
+                                <span className={`px-2 py-0.5 rounded text-[9px] sm:text-[10px] font-extrabold uppercase tracking-wider border ${vuln.state === 'Closed' || vuln.state === 'Resolved' ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-900/50' : 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-zinc-800 dark:text-zinc-400 dark:border-zinc-700'}`}>
+                                  State: {vuln.state}
+                                </span>
+                              </div>
+                              <h4 className="font-bold text-xs sm:text-sm text-slate-900 dark:text-zinc-100 leading-snug">
+                                {vuln.description}
+                              </h4>
                             </div>
-                            <h4 className="font-bold text-xs sm:text-sm text-slate-900 dark:text-zinc-100 leading-snug">
-                              {vuln.description}
-                            </h4>
                           </div>
 
-                          <a
-                            href={`https://randstad.eu.vulnmanager.com/vulnerabilities/${vuln.uuid}/show`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="shrink-0 w-full sm:w-auto flex justify-center p-2 text-blue-600 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/40 rounded-lg transition-colors"
-                            title="Open in Keep Secure 24"
-                          >
-                            <ExternalLink size={16} /> <span className="sm:hidden ml-2 text-xs font-bold">View Finding</span>
-                          </a>
+                          {/* Actions Area */}
+                          <div className="flex shrink-0 w-full sm:w-auto gap-2">
+                            <button
+                              onClick={() => handleGenerateVulnReports([vuln.uuid])}
+                              disabled={isGeneratingReport}
+                              className="flex-1 sm:flex-none flex justify-center p-2 text-indigo-600 bg-indigo-50 dark:bg-indigo-900/20 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 rounded-lg transition-colors"
+                              title="Generate PDF for this Vulnerability"
+                            >
+                              <FileDown size={16} /> <span className="sm:hidden ml-2 text-xs font-bold">Generate PDF</span>
+                            </button>
+                            <a
+                              href={`https://randstad.eu.vulnmanager.com/vulnerabilities/${vuln.uuid}/show`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex-1 sm:flex-none flex justify-center p-2 text-blue-600 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/40 rounded-lg transition-colors"
+                              title="Open in Keep Secure 24"
+                            >
+                              <ExternalLink size={16} /> <span className="sm:hidden ml-2 text-xs font-bold">View Finding</span>
+                            </a>
+                          </div>
                         </div>
 
                         <div className="p-3 bg-slate-50 dark:bg-zinc-950/50 flex flex-col sm:flex-row sm:items-center justify-between gap-1 sm:gap-2 text-[10px] sm:text-xs text-slate-500 dark:text-zinc-400">
                           <div className="flex items-center gap-1.5">
-                            <span className="font-medium">Created:</span> {vuln.created_at || '-'}
+                            <span className="font-medium">Created:</span> {vuln.created_at || '-'} <span className="font-medium ml-2">By:</span> {vuln.created_by_name || '-'}
                           </div>
                           <div className="flex items-center gap-1.5">
-                            <span className="font-medium">By:</span> {vuln.created_by_name || '-'}
-                          </div>
-                        </div>
-                        <div className="p-3 bg-slate-50 dark:bg-zinc-950/50 flex flex-col sm:flex-row sm:items-center justify-between gap-1 sm:gap-2 text-[10px] sm:text-xs text-slate-500 dark:text-zinc-400">
-                          <div className="flex items-center gap-1.5">
-                            <span className="font-medium">Published:</span> {vuln.published_at || '-'}
-                          </div>
-                          <div className="flex items-center gap-1.5">
-                            <span className="font-medium">By:</span> {vuln.published_by_name || '-'}
+                            <span className="font-medium">Published:</span> {vuln.published_at || '-'} <span className="font-medium ml-2">By:</span> {vuln.published_by_name || '-'}
                           </div>
                         </div>
 
@@ -649,7 +723,6 @@ export default function Kiss24ControlPanel({ isOpen, onClose, test, onRefresh }:
                 )}
               </div>
             )}
-
           </div>
 
           {/* FOOTER */}

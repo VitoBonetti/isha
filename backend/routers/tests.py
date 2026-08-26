@@ -37,6 +37,7 @@ from utils.vuln_analysis import build_payload, run_cloud_run_analysis
 from utils.security_cipher import get_cipher
 from presentations.presentation import generate_presentation
 from reports import osrgt_v3, pdf_gen
+from utils.kiss24_service import validate_kiss24_findings, get_vuln_fields_map, fetch_all_kiss24, get_report_type_id
 
 
 router = APIRouter(prefix="/api/tests", tags=["Tests & Assignments"])
@@ -53,7 +54,6 @@ FRONTEND_TO_DB_STAGES = {
 }
 
 KISS24_BASE_URL = str(os.environ.get("KISS_24_ENDPOINT"))
-CUTOFF_DATE = datetime(2026, 5, 1, tzinfo=timezone.utc)
 BASE_URL = str(os.environ.get("FRONTEND_URL"))
 
 
@@ -88,128 +88,7 @@ def log_test_history(cursor, test_id: str, user_id: str, action: str, details: s
         ''', (new_asset_hist_id, str(raw_asset_id), str(user_id) if user_id else None, action, asset_details))
 
 
-# --- HELPER: report generations ---
-def fetch_all_kiss24(endpoint: str, api_key: str, payload: dict = None):
-    """Helper to fetch all paginated results from KISS24 with safe JSON parsing."""
-    if payload is None: payload = {}
-
-    # CRITICAL FIX: Ensure no newlines exist in the API key header
-    headers = {'x-api-key': api_key.strip(), 'Content-Type': 'application/json'}
-    items = []
-    page = 1
-
-    with requests.Session() as session:
-        while True:
-            url = f"{KISS24_BASE_URL}{endpoint}"
-            response = session.post(url, headers=headers, params={'page': page}, json=payload, timeout=30)
-
-            if not response.ok:
-                if response.status_code == 400 and "Invalid Page Number" in response.text:
-                    break
-                else:
-                    raise ValueError(f"API Error on {endpoint}. Status: {response.status_code}, Body: {response.text}")
-
-            # CRITICAL FIX: Catch non-JSON HTML pages returned by WAFs
-            try:
-                data = response.json()
-            except Exception:
-                raise ValueError(
-                    f"Invalid JSON returned from {url}. Status: {response.status_code}. Raw Body: {response.text[:300]}")
-
-            items.extend(data.get('items', []))
-
-            page_count = int(data.get('page_count', 1))
-            if page >= page_count: break
-            page += 1
-
-    return items
-
-
-def get_vuln_fields_map(vuln_uuids: list, api_key: str):
-    """Fetches custom fields for vulnerabilities in chunks."""
-    vuln_fields_map = {}
-    if not vuln_uuids: return vuln_fields_map
-
-    chunk_size = 20
-    for i in range(0, len(vuln_uuids), chunk_size):
-        chunk = vuln_uuids[i:i + chunk_size]
-        fields_data = fetch_all_kiss24('fields', api_key, {"vulnerabilities": chunk})
-
-        for item in fields_data:
-            v_uuid = item.get('entity', {}).get('uuid')
-            if v_uuid:
-                if v_uuid not in vuln_fields_map:
-                    vuln_fields_map[v_uuid] = []
-                vuln_fields_map[v_uuid].append(item)
-
-    return vuln_fields_map
-
-
-def _is_field_populated(field_obj):
-    val = field_obj.get('value')
-    if val is None: return False
-    if isinstance(val, list): return len(val) > 0
-    if isinstance(val, str): return bool(val.strip())
-    return True
-
-
-def validate_kiss24_findings(vulns: list, vuln_fields_map: dict, report_type: int, api_key: str):
-    """Validates contexts and MITRE ID fields, returning a list of violations."""
-    invalid_findings = []
-    context_cache = {}
-
-    for vuln in vulns:
-        vuln_uuid = vuln['uuid']
-        reasons = []
-
-        if report_type == 1:
-            ctx_name = vuln.get('context', {}).get('name', '')
-            if not ctx_name:
-                vt_uuid = vuln.get('vulnerability_type', {}).get('uuid')
-                if vt_uuid:
-                    if vt_uuid not in context_cache:
-                        ctxs = fetch_all_kiss24('provider/contexts', api_key,
-                                                {"vulnerability_types": [vt_uuid]})
-                        context_cache[vt_uuid] = ctxs[0].get('name', '') if ctxs else ''
-                    ctx_name = context_cache[vt_uuid]
-
-            if not ctx_name.startswith("[Adv Sim]"):
-                reasons.append(f"Context '{ctx_name}' does not start with '[Adv Sim]'")
-
-            mitre_filled = False
-            for field in vuln_fields_map.get(vuln_uuid, []):
-                if field.get('custom_field', {}).get('name') == 'MITRE ID':
-                    if _is_field_populated(field): mitre_filled = True
-                    break
-            if not mitre_filled:
-                reasons.append("MITRE ID custom field is empty or missing")
-
-        created_at_str = vuln.get('created_at') or vuln.get('published_at', '')
-        try:
-            created_date = datetime.fromisoformat(created_at_str.replace('Z', '+00:00'))
-            if created_date.tzinfo is None:
-                created_date = created_date.replace(tzinfo=timezone.utc)
-        except (ValueError, TypeError):
-            created_date = datetime.now(timezone.utc)
-
-        if created_date > CUTOFF_DATE:
-            effort_filled = False
-            for field in vuln_fields_map.get(vuln_uuid, []):
-                if field.get('custom_field', {}).get('name') == 'Remediation Effort':
-                    if _is_field_populated(field): effort_filled = True
-                    break
-            if not effort_filled:
-                reasons.append("Remediation Effort custom field is missing (Required for new vulns)")
-
-        if reasons:
-            invalid_findings.append({
-                "vuln_uuid": vuln_uuid,
-                "reasons": reasons
-            })
-
-    return invalid_findings
-
-
+# --- HELPER: report generations --
 async def process_presentation_background(test_id: str, kiss24_id: str, user_id: str, user_email: str, user_role: str, test_name: str,
                                           drive_folder_id: str, service_name: str, snow_number: str,
                                           start_week: int, start_year: int, duration_weeks: float):
@@ -289,16 +168,6 @@ async def process_presentation_background(test_id: str, kiss24_id: str, user_id:
             )
 
     await manager.broadcast('{"action": "REFRESH_BOARD"}')
-
-
-def get_report_type_id(display_order: int) -> int:
-    """Maps the service lane's display_order to the report type expected by osrgt_v3."""
-    if display_order == 1:
-        return 1  # Adversary Simulation
-    elif display_order == 2:
-        return 3  # White Box
-    else:
-        return 2  # Black/Grey Box
 
 
 async def process_report_background(test_id: str, kiss24_id: str, user_id: str, user_email: str, user_role: str,
@@ -432,6 +301,116 @@ async def process_report_background(test_id: str, kiss24_id: str, user_id: str, 
         )
 
     await manager.broadcast('{"action": "REFRESH_BOARD"}')
+
+
+async def process_vuln_report_background(test_id: str, kiss24_id: str, user_id: str, user_email: str, user_role: str,
+                                         test_name: str, drive_folder_id: str, display_order: int, vuln_uuids: list):
+    """Background task to generate, upload, and fully log individual vulnerability PDFs."""
+    try:
+        raw_api_key = get_secret(os.environ.get("KISS_24_API_KEY_NAME"))
+        api_key = raw_api_key.strip() if raw_api_key else ""
+        report_type = get_report_type_id(display_order)
+
+        report_args = {
+            "pentest": kiss24_id,
+            "vuln": vuln_uuids,
+            "type": report_type,
+            "api_key": api_key,
+            "action": "generate",
+            "minify": False,
+            "environment": "sec24prd",
+            "loglevel": "info",
+            "devoteam": False,
+        }
+
+        # Generate the HTML reports (Returns a list of tuples)
+        reports_data = await asyncio.to_thread(osrgt_v3.generate_html_report, report_args)
+        drive_manager = DriveManager()
+
+        uploaded_count = 0
+        generated_links = []
+
+        with db_cursor_context() as cursor:
+            for html_content, html_filename in reports_data:
+                # Convert to PDF
+                pdf_content, pdf_filename = await asyncio.to_thread(pdf_gen.convert_html_to_pdf, html_content,
+                                                                    html_filename)
+
+                # Upload to Google Drive
+                pdf_result = await asyncio.to_thread(drive_manager.upload_file, drive_folder_id, pdf_filename,
+                                                     pdf_content, 'application/pdf')
+
+                if cursor:
+                    # 1. Save to test_documents for the workspace view
+                    cursor.execute("""
+                        INSERT INTO test_documents (id, test_id, drive_file_id, file_name, mime_type, file_url, last_modified, synced_at)
+                        VALUES (gen_random_uuid(), %s, %s, %s, 'application/pdf', %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                        ON CONFLICT (drive_file_id) DO UPDATE SET 
+                             last_modified = CURRENT_TIMESTAMP, 
+                             synced_at = CURRENT_TIMESTAMP
+                    """, (test_id, pdf_result["id"], pdf_filename, pdf_result["link"]))
+
+                uploaded_count += 1
+                generated_links.append((pdf_filename, pdf_result["link"]))
+
+            if cursor:
+                cursor.connection.commit()
+
+        # 2. Build the detailed message with links
+        message = f"Successfully generated {uploaded_count} vulnerability report(s) for '{test_name}':\n"
+        for name, link in generated_links:
+            message += f"• {name}\n  Link: {link}\n"
+
+        # 3. Save to notifications table so the Bell icon retains it
+        with db_cursor_context() as cursor:
+            if cursor:
+                cursor.execute(
+                    "INSERT INTO notifications (id, user_id, message, type, created_at) VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)",
+                    (str(uuid.uuid4()), user_id, message, "SUCCESS")
+                )
+                cursor.connection.commit()
+
+        # 4. Log to the Audit trail
+        await asyncio.to_thread(
+            log_audit_event,
+            user_id=user_id,
+            role=user_role,
+            action="VULN_REPORT_GENERATION_SUCCESS",
+            resource_type="REPORTING",
+            resource_id=test_id,
+            details=f"Generated {uploaded_count} individual vuln reports for '{test_name}'."
+        )
+
+        # 5. Broadcast to the frontend
+        await manager.broadcast(json.dumps({"action": "REPORT_READY", "email": user_email, "message": message}))
+        await manager.broadcast('{"action": "REFRESH_BOARD"}')
+
+    except Exception as e:
+        error_details = str(e)
+        full_traceback = traceback.format_exc()
+        print(f"Error generating vulnerability reports: {error_details}\n{full_traceback}")
+
+        user_message = f"Vuln Report generation failed for '{test_name}': {error_details}"
+
+        with db_cursor_context() as cursor:
+            if cursor:
+                cursor.execute(
+                    "INSERT INTO notifications (id, user_id, message, type, created_at) VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)",
+                    (str(uuid.uuid4()), user_id, user_message, "ERROR")
+                )
+                cursor.connection.commit()
+
+        await asyncio.to_thread(
+            log_audit_event,
+            user_id=user_id,
+            role=user_role,
+            action="VULN_REPORT_GENERATION_CRASH",
+            resource_type="REPORTING",
+            resource_id=test_id,
+            details=f"Crash during vuln report generation for '{test_name}': {error_details}\nTraceback: {full_traceback}"
+        )
+
+        await manager.broadcast(json.dumps({"action": "REPORT_FAILED", "email": user_email, "message": user_message}))
 
 
 # --- HELPER: Vulnerability analysis ---
@@ -1408,6 +1387,40 @@ def trigger_report_generation(test_id: str, background_tasks: BackgroundTasks,
     return {
         "message": "Report generation started in the background. You will receive a notification when it's ready!"
     }
+
+
+@router.post("/{test_id}/vulnerabilities/report", summary="Generate Specific Vuln PDFs")
+def trigger_vuln_reports(test_id: str, payload: dict, background_tasks: BackgroundTasks,
+                         current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+    if current_user.get('role') == 'read_only':
+        raise HTTPException(status_code=403, detail="Read-only users cannot trigger generation.")
+
+    vuln_uuids = payload.get("vuln_uuids", [])
+    if not vuln_uuids:
+        raise HTTPException(status_code=400, detail="No vulnerabilities selected.")
+
+    cursor.execute("""
+        SELECT t.name, t.kiss24, t.drive_folder_id, sl.display_order
+        FROM tests t
+        LEFT JOIN services_lanes sl ON t.service_lane_id = sl.id
+        WHERE t.id = %s LIMIT 1
+    """, (test_id,))
+    row = cursor.fetchone()
+    if not row: raise HTTPException(status_code=404, detail="Test not found.")
+
+    test_name, kiss24_id, drive_folder_id, display_order = row
+
+    if not kiss24_id: raise HTTPException(status_code=400, detail="Missing kiss24 UUID.")
+    if not drive_folder_id: raise HTTPException(status_code=400, detail="Missing Drive Workspace.")
+
+    safe_display_order = display_order if display_order is not None else 99
+
+    background_tasks.add_task(
+        process_vuln_report_background,
+        test_id, str(kiss24_id), str(current_user["id"]), current_user["email"], str(current_user["role"]),
+        test_name, drive_folder_id, safe_display_order, vuln_uuids
+    )
+    return {"message": f"Generating {len(vuln_uuids)} report(s) in the background!"}
 
 
 # --- Vulne analysis ---
