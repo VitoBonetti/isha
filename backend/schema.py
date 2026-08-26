@@ -49,6 +49,7 @@ class ServiceLaneBase(BaseModel):
     is_active: bool = True
     display_order: int = 99
     auto_provision_workspace: bool = False
+    requires_mitre: bool = False
 
 class ServiceLaneResponse(ServiceLaneBase):
     id: UUID4

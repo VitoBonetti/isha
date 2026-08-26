@@ -208,7 +208,7 @@ export default function SettingsView() {
   };
 
   // Forms
-  const defaultUserForm = { email: '', name: '', role: 'read_only', base_capacity: 1.0, location_id: '', start_week: 1, start_year: new Date().getFullYear(), end_week: '', end_year: '', auto_provision_workspace: false, kiss24_uuid: '', kiss24_api_key: '' };
+  const defaultUserForm = { email: '', name: '', role: 'read_only', base_capacity: 1.0, location_id: '', start_week: 1, start_year: new Date().getFullYear(), end_week: '', end_year: '', kiss24_uuid: '', kiss24_api_key: '' };
   const [userForm, setUserForm] = useState(defaultUserForm);
   const [editUserId, setEditUserId] = useState<string | null>(null);
 
@@ -216,7 +216,7 @@ export default function SettingsView() {
   const [locForm, setLocForm] = useState(defaultLocForm);
   const [editLocId, setEditLocId] = useState<string | null>(null);
 
-  const defaultServiceForm = { name: '', theme_color: '#3b82f6', default_credits: 2.0, default_duration_weeks: 1, max_concurrent_per_week: 5, target_goal: 0, display_order: 99, is_active: true };
+  const defaultServiceForm = { name: '', theme_color: '#3b82f6', default_credits: 2.0, default_duration_weeks: 1, max_concurrent_per_week: 5, target_goal: 0, display_order: 99, is_active: true, auto_provision_workspace: false, requires_mitre: false  };
   const [serviceForm, setServiceForm] = useState(defaultServiceForm);
   const [editServiceId, setEditServiceId] = useState<string | null>(null);
 
@@ -554,7 +554,7 @@ export default function SettingsView() {
                               setUserForm({
                                 email: u.email, name: u.name, role: u.role, base_capacity: u.base_capacity,
                                 location_id: u.location_id || '', start_week: u.start_week || 1, start_year: u.start_year || new Date().getFullYear(),
-                                end_week: u.end_week || '', end_year: u.end_year || '', auto_provision_workspace: false
+                                end_week: u.end_week || '', end_year: u.end_year || ''
                               });
                               setShowForm('users');
                             }} className="text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-500/10 p-2 rounded-lg transition-colors">
@@ -602,7 +602,7 @@ export default function SettingsView() {
                           setUserForm({
                             email: u.email, name: u.name, role: u.role, base_capacity: u.base_capacity,
                             location_id: u.location_id || '', start_week: u.start_week || 1, start_year: u.start_year || new Date().getFullYear(),
-                            end_week: u.end_week || '', end_year: u.end_year || '', auto_provision_workspace: false
+                            end_week: u.end_week || '', end_year: u.end_year || ''
                           });
                           setShowForm('users');
                         }} className="text-slate-500 bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 p-2.5 rounded-lg transition-colors flex-1 flex justify-center">
@@ -760,6 +760,9 @@ export default function SettingsView() {
                       <span className="block px-1">
                         <Toggle checked={serviceForm.auto_provision_workspace} onChange={(c) => setServiceForm({...serviceForm, auto_provision_workspace: c})} label="Auto-Provision Drive Workspace" />
                       </span>
+                      <span className="block px-1">
+                        <Toggle checked={serviceForm.requires_mitre} onChange={(c) => setServiceForm({...serviceForm, requires_mitre: c})} label="Require MITRE ID" />
+                      </span>
                     </div>
                   </div>
                   <div className="flex flex-col sm:flex-row justify-end gap-3 pt-4 border-t border-slate-200 dark:border-zinc-800">
@@ -823,7 +826,7 @@ export default function SettingsView() {
                           name: item.name, theme_color: item.theme_color, default_credits: item.default_credits,
                           default_duration_weeks: item.default_duration_weeks, max_concurrent_per_week: item.max_concurrent_per_week || 5,
                           target_goal: item.target_goal || 0, display_order: item.display_order || 99, is_active: item.is_active,
-                          auto_provision_workspace: item.auto_provision_workspace || false
+                          auto_provision_workspace: item.auto_provision_workspace || false, requires_mitre: item.requires_mitre || false
                         });
                         setShowForm('services');
                       }} className="flex-1 md:flex-none flex justify-center text-slate-500 bg-slate-100 dark:bg-zinc-800 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-500/10 p-2.5 md:p-2 rounded-lg transition-colors"><Edit2 size={16} /></button>

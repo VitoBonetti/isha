@@ -43,6 +43,7 @@ class ServiceLanes(Base):
     auto_provision_workspace = Column(Boolean, default=False)
     intro_email_template = Column(String, nullable=True)
     final_email_template = Column(String, nullable=True)
+    requires_mitre = Column(Boolean, default=False)
 
     # relationship
     service_categories = relationship('ServiceCategories', back_populates='services_lanes')

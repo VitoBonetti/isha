@@ -82,6 +82,7 @@ export default function Kiss24CreateVulnModal({ isOpen, testId, onClose, onSucce
 
           setHtmlContent(data.html);
           setSuggestedCwe(data.suggested_type);
+          setMitreId(data.mitre_id || '');
           setStep(2);
           setShowPreview(true);
           setIsDrafting(false);
@@ -116,8 +117,8 @@ export default function Kiss24CreateVulnModal({ isOpen, testId, onClose, onSucce
     draftToastId.current = toast.loading("Luigi is reading and drafting the vulnerability...");
 
     try {
-      // Fire and forget! The WebSocket will handle the rest.
-      await axios.post('/api/luigi/draft-vulnerability', { note, severity });
+      // FIX: Now passing the test_id to the backend!
+      await axios.post('/api/luigi/draft-vulnerability', { test_id: testId, note, severity });
     } catch (e: any) {
       toast.error(e.response?.data?.detail || "Luigi failed to receive task.", { id: draftToastId.current });
       setIsDrafting(false);
@@ -170,9 +171,14 @@ export default function Kiss24CreateVulnModal({ isOpen, testId, onClose, onSucce
   };
 
   return (
-    <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
-      <div className={`bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-2xl shadow-2xl w-full flex flex-col transition-all duration-300 ${step === 1 ? 'max-w-2xl' : 'max-w-6xl h-[90vh]'}`}>
-
+    <div
+      className="fixed inset-0 z-[130] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in"
+      onClick={onClose}
+    >
+      <div
+        className={`bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-2xl shadow-2xl w-full flex flex-col transition-all duration-300 ${step === 1 ? 'max-w-2xl' : 'max-w-6xl h-[90vh]'}`}
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Header */}
         <div className="p-5 border-b border-slate-100 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-900/50 flex justify-between items-center shrink-0">
           <div className="flex items-center gap-3">

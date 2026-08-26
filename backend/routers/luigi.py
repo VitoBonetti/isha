@@ -558,7 +558,21 @@ def book_meeting(test_id: str, payload: dict, current_user: dict = Depends(get_c
 # --- 4. VULNERABILITY DRAFTING ---
 # ==========================================
 @router.post("/draft-vulnerability", status_code=status.HTTP_200_OK)
-def trigger_luigi_draft(payload: dict, current_user: dict = Depends(get_current_user)):
+def trigger_luigi_draft(payload: dict, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+    test_id = payload.get("test_id")
+    requires_mitre = False
+
+    # 1. Query the database to see if this test's service lane requires MITRE mapping
+    if test_id:
+        cursor.execute("""
+                SELECT sl.requires_mitre 
+                FROM tests t 
+                JOIN services_lanes sl ON t.service_lane_id = sl.id 
+                WHERE t.id = %s
+            """, (test_id,))
+        row = cursor.fetchone()
+        if row:
+            requires_mitre = row[0]
 
     publisher = pubsub_v1.PublisherClient()
 
@@ -566,7 +580,8 @@ def trigger_luigi_draft(payload: dict, current_user: dict = Depends(get_current_
         "task": "DRAFT_VULNERABILITY",
         "note": payload.get("note"),
         "severity": payload.get("severity"),
-        "user_email": current_user["email"]
+        "user_email": current_user["email"],
+        "requires_mitre": requires_mitre
     }
 
     data = json.dumps(message_data).encode("utf-8")
@@ -577,13 +592,14 @@ def trigger_luigi_draft(payload: dict, current_user: dict = Depends(get_current_
 
 #  Webhook Callback (Called by Luigi)
 @router.post("/vuln-draft-callback", include_in_schema=False)
-def luigi_draft_callback(payload: LuigiVulnCallback, background_tasks: BackgroundTasks, token: str = Depends(verify_luigi_token)):
+def luigi_draft_callback(payload: dict, background_tasks: BackgroundTasks, token: str = Depends(verify_luigi_token)):
     """Luigi hits this endpoint when the drafted HTML is ready."""
     ws_message = {
         "action": "VULN_DRAFT_READY",
-        "email": payload.user_email,
-        "html": payload.html,
-        "suggested_type": payload.suggested_type
+        "email": payload.get("user_email"),
+        "html": payload.get("html"),
+        "suggested_type": payload.get("suggested_type"),
+        "mitre_id": payload.get("mitre_id", "")
     }
 
     # Broadcast to the user waiting in the frontend

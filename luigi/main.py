@@ -85,6 +85,49 @@ def sub_luigi_vision(gcs_uri: str, specific_question: str) -> str:
         return f"Failed to analyze image: {str(e)}"
 
 
+# --- Subagent: MITRE Mapper ---
+def sub_luigi_mitre_mapper(pentester_notes: str) -> str:
+    """Subagent dedicated to fetching the MITRE CSV and extracting the relevant T-Codes using the bucket skill."""
+    try:
+        # 1. Fetch the CSV from GCS
+        storage_client = storage.Client()
+        bucket = storage_client.bucket(LUIGI_SKILLS_BUCKET_NAME)
+        blob = bucket.blob("MITRE_ID/MITRE_ID.csv")
+        csv_data = blob.download_as_text()
+
+        # 2. Fetch the Persona/Skill from GCS
+        # Note: Depending on your get_skill_prompt setup, this might be "MITRE_ID" or "prompts/MITRE_ID"
+        mitre_skill = get_skill_prompt("MITRE_ID")
+
+        # 3. Combine them with a strict output enforcer for the UI
+        sys_prompt = f"""
+        {mitre_skill}
+
+        =========================================
+        REFERENCE MITRE CSV DATABASE:
+        {csv_data}
+
+        =========================================
+        PENTESTER NOTES:
+        {pentester_notes}
+
+        =========================================
+        IMPORTANT OVERRIDE FOR THIS API AUTOMATION: 
+        While your core instructions ask for explanations and M-Codes, for this specific API integration, you MUST bypass the explanation step. 
+        Return ONLY the raw T-Codes separated by commas (e.g., T1548, T1059.001) based on the notes above. Do not output labels, markdown, or text.
+        """
+
+        model = genai.GenerativeModel('gemini-2.5-pro')
+        response = model.generate_content(sys_prompt)
+
+        # Clean up just in case the AI adds formatting
+        clean_ids = response.text.replace("MITRE Techniques:", "").replace("`", "").strip()
+        return clean_ids
+
+    except Exception as e:
+        print(f"Failed to map MITRE IDs: {str(e)}")
+        return ""
+
 # --- Main Logic Trigger ---
 @app.post("/")
 async def pubsub_trigger(request: Request):
@@ -205,13 +248,19 @@ async def pubsub_trigger(request: Request):
             html_content = re.sub(r"(?i)<h1>\s*<span\s+style=['\"]color:\s*#[0-9a-fA-F]+['\"]\s*>",
                                   "<h1><span style='color:#2175d9'>", html_content)
 
+            mitre_ids = ""
+            if data.get("requires_mitre"):
+                print("🕵️‍♂️ SubLuigi analyzing MITRE matrix...")
+                mitre_ids = sub_luigi_mitre_mapper(data.get("note"))
+
             # 5. Webhook Callback
             url = f"{MAIN_BACKEND_URL}/api/luigi/vuln-draft-callback"
             headers = {"Authorization": f"Bearer {get_iam_token()}"}
             payload = {
                 "user_email": data.get("user_email"),
                 "html": html_content,
-                "suggested_type": suggested_type
+                "suggested_type": suggested_type,
+                "mitre_id": mitre_ids
             }
 
             save_res = requests.post(url, json=payload, headers=headers)

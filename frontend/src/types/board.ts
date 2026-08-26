@@ -19,6 +19,7 @@ export interface ServiceLane {
   max_concurrent_per_week?: number;
   display_order?: number;
   auto_provision_workspace?: boolean;
+  requires_mitre?: boolean;
 }
 
 export interface Test {

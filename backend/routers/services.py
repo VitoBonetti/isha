@@ -19,7 +19,7 @@ def get_services(year: int = Query(default_factory=lambda: datetime.now().year),
         SELECT sl.id, sl.name, sl.max_concurrent_per_week, sl.theme_color, 
                 sl.default_credits, sl.default_duration_weeks, sl.display_order, sl.is_active,
                 sl.auto_provision_workspace, 
-                sl.intro_email_template, sl.final_email_template, 
+                sl.intro_email_template, sl.final_email_template, sl.requires_mitre, 
                 COALESCE(slg.target_goal, 0) as target_goal
         FROM services_lanes sl
         LEFT JOIN service_lane_goals slg ON sl.id = slg.service_lane_id AND slg.year = %s
@@ -45,8 +45,8 @@ def create_service(s: ServiceLaneBase, year: int = Query(default_factory=lambda:
     new_service_id = str(uuid.uuid4())
     cursor.execute(
         '''INSERT INTO services_lanes 
-            (id, name, max_concurrent_per_week, theme_color, default_credits, default_duration_weeks, display_order, is_active, auto_provision_workspace)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            (id, name, max_concurrent_per_week, theme_color, default_credits, default_duration_weeks, display_order, is_active, auto_provision_workspace, requires_mitre)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
            ON CONFLICT (name) DO UPDATE 
             SET is_active = EXCLUDED.is_active,
                max_concurrent_per_week = EXCLUDED.max_concurrent_per_week,
@@ -54,10 +54,11 @@ def create_service(s: ServiceLaneBase, year: int = Query(default_factory=lambda:
                default_credits = EXCLUDED.default_credits,
                default_duration_weeks = EXCLUDED.default_duration_weeks,
                display_order = EXCLUDED.display_order,
-               auto_provision_workspace = EXCLUDED.auto_provision_workspace 
+               auto_provision_workspace = EXCLUDED.auto_provision_workspace,
+               requires_mitre = EXCLUDED.requires_mitre
            RETURNING id''',
         (new_service_id, s.name, s.max_concurrent_per_week, s.theme_color, s.default_credits,
-         s.default_duration_weeks, s.display_order, s.is_active, s.auto_provision_workspace)
+         s.default_duration_weeks, s.display_order, s.is_active, s.auto_provision_workspace, s.requires_mitre)
     )
     returned_id = cursor.fetchone()[0]
 
@@ -93,10 +94,10 @@ def update_service(service_id: str, s: ServiceLaneBase, year: int = Query(defaul
         '''UPDATE services_lanes 
             SET name=%s, max_concurrent_per_week=%s, theme_color=%s,
                 default_credits=%s, default_duration_weeks=%s, display_order=%s, is_active=%s,
-                auto_provision_workspace=%s 
+                auto_provision_workspace=%s, requires_mitre=%s
             WHERE id=%s''',
         (s.name, s.max_concurrent_per_week, s.theme_color, s.default_credits,
-         s.default_duration_weeks, s.display_order, s.is_active, s.auto_provision_workspace, service_id)
+         s.default_duration_weeks, s.display_order, s.is_active, s.auto_provision_workspace, s.requires_mitre, service_id)
     )
 
     # UPSERT THE GOAL FOR THE YEAR
