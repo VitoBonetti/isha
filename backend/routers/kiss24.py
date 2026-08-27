@@ -7,6 +7,7 @@ from routers.auth import get_current_user, require_admin
 from audit_logger import log_audit_event
 from utils.timeaware import aware_utcnow
 from utils.secret_manager import get_secret
+from schema import ReconcileAssetPayload, BulkReconcileAssetPayload
 from utils.kiss24_service import (
     map_asset_onetrust_custom_field,
     map_organizations,
@@ -20,7 +21,8 @@ from utils.kiss24_service import (
     upload_vulnerability_attachment,
     get_custom_fields_choice_uuid,
     fetch_validating_vulnerabilities,
-    fetch_validation_info
+    fetch_validation_info,
+    get_unmapped_kiss24_assets
 )
 from utils.security_cipher import get_cipher
 from datetime import datetime
@@ -28,6 +30,7 @@ import re
 import os
 import requests
 import json
+import difflib
 
 
 router = APIRouter(prefix="/api/kiss24", tags=["Kiss24"])
@@ -933,3 +936,159 @@ def trigger_luigi_verification_pipeline(vuln_uuid: str):
 def start_ai_analysis(uuid: str, background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user)):
     background_tasks.add_task(trigger_luigi_verification_pipeline, uuid)
     return {"message": "Luigi pipeline started"}
+
+
+# Sync asset with Kiss Secure 24
+# --- Helper: String Normalization for Fuzzy Math ---
+def normalize_asset_name(name: str) -> str:
+    """Strips noise words, punctuation, and TLDs to improve matching."""
+    if not name: return ""
+    s = str(name).lower()
+
+    # Strip URLs and protocols
+    s = re.sub(r'https?://(?:www\.)?', '', s)
+    s = re.sub(r'\.(com|nl|org|net|eu).*', '', s)
+
+    # Strip punctuation
+    s = re.sub(r'[^\w\s]', ' ', s)
+
+    # Remove common environment noise words
+    noise_words = ['prod', 'production', 'stg', 'staging', 'dev', 'test', 'uat', 'portal', 'app', 'application']
+    words = s.split()
+    words = [w for w in words if w not in noise_words]
+
+    return ' '.join(words).strip()
+
+
+def calculate_similarity(a: str, b: str) -> int:
+    """Calculates a 0-100 score based on normalized strings."""
+    norm_a = normalize_asset_name(a)
+    norm_b = normalize_asset_name(b)
+
+    # Fallback to original if normalization stripped everything (e.g. if the app is literally named "Test Portal")
+    if not norm_a: norm_a = str(a).lower()
+    if not norm_b: norm_b = str(b).lower()
+
+    ratio = difflib.SequenceMatcher(None, norm_a, norm_b).ratio()
+    return int(ratio * 100)
+
+
+@router.get("/reconciliation-candidates", summary="[Admin] Get Unmapped Assets & AI/Fuzzy Suggestions")
+def get_reconciliation_candidates(limit: int = 0, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    """
+    Fetches Mario assets that have a ServiceNow ID but no KISS24 ID,
+    and cross-references them against unmapped KISS24 assets in the same country.
+    """
+    # 1. Fetch unmapped KISS24 assets grouped by Org
+    kiss24_unmapped_by_org = get_unmapped_kiss24_assets(get_secret(KISS_24_API_KEY_NAME))
+
+    # 2. Fetch Mario assets (Must have SNow number, but NO KISS24 ID)
+    cursor.execute("""
+        SELECT r.id, r.name, r.snow_number, c.kiss24_uuid, c.name as country_name
+        FROM raw_assets r
+        JOIN countries c ON r.country_id = c.id
+        WHERE r.snow_number IS NOT NULL AND r.snow_number != ''
+          AND (r.kiss24_asset_id IS NULL OR r.kiss24_asset_id = '')
+          AND c.kiss24_uuid IS NOT NULL
+    """)
+    mario_assets = cursor.fetchall()
+
+    results = []
+
+    # 3. The Matchmaker Engine
+    for r_id, r_name, snow_number, org_uuid, country_name in mario_assets:
+        kiss24_candidates = kiss24_unmapped_by_org.get(org_uuid, [])
+
+        suggestions = []
+        for candidate in kiss24_candidates:
+            score = calculate_similarity(r_name, candidate["name"])
+            suggestions.append({
+                "kiss24_uuid": candidate["uuid"],
+                "kiss24_name": candidate["name"],
+                "score": score
+            })
+
+        # Sort suggestions highest score first, keeping only the top 5 to save bandwidth
+        suggestions.sort(key=lambda x: x["score"], reverse=True)
+        top_suggestions = suggestions[:5]
+
+        results.append({
+            "mario_raw_asset_id": str(r_id),
+            "mario_name": r_name,
+            "snow_number": snow_number,
+            "country_name": country_name,
+            "org_uuid": org_uuid,
+            "top_suggestions": top_suggestions
+        })
+
+        if limit > 0 and len(results) >= limit:
+            break
+
+    return results
+
+
+@router.post("/reconcile-asset", summary="[Admin] Manually Link Mario Asset to KISS24")
+def reconcile_asset(payload: ReconcileAssetPayload, current_user: dict = Depends(require_admin),
+                    cursor=Depends(get_db_cursor)):
+    """
+    Action endpoint for the UI. When an admin approves a match:
+    1. Updates Mario's Postgres DB.
+    2. Pushes the ServiceNow ID to Keep Secure 24.
+    """
+    # Because it is a Pydantic model now, we use dot notation!
+    raw_asset_id = payload.mario_raw_asset_id
+    kiss24_uuid = payload.kiss24_uuid
+    snow_number = payload.snow_number
+
+    if not raw_asset_id or not kiss24_uuid or not snow_number:
+        raise HTTPException(status_code=400, detail="Missing required fields.")
+
+    # 1. Push the SNow ID to KISS24 using our existing helper!
+    sync_payload = {kiss24_uuid: snow_number}
+    push_results = add_snowid_to_kiss24asset(sync_payload)
+
+    if push_results["failed_count"] > 0:
+        raise HTTPException(status_code=500, detail=f"Keep Secure 24 rejected the update: {push_results['errors']}")
+
+    # 2. Update Mario's DB
+    cursor.execute("""
+        UPDATE raw_assets 
+        SET kiss24_asset_id = %s, update_date = NOW() 
+        WHERE id = %s
+    """, (kiss24_uuid, raw_asset_id))
+    cursor.connection.commit()
+
+    log_audit_event(str(current_user["id"]), current_user["role"], "ASSET_RECONCILED", "KISS24", raw_asset_id,
+                    f"Manually linked SNow {snow_number} to KISS24 {kiss24_uuid}")
+
+    return {"status": "Success", "message": "Assets successfully linked!"}
+
+
+@router.post("/reconcile-asset/bulk", summary="[Admin] Bulk Link Mario Assets to KISS24")
+def bulk_reconcile_assets(payload: BulkReconcileAssetPayload, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    """Links multiple assets simultaneously using batch DB updates and a single KISS24 dictionary payload."""
+    if not payload.assets:
+        raise HTTPException(status_code=400, detail="No assets provided.")
+
+    # 1. Build the dictionary payload for KISS24 {kiss24_uuid: snow_number}
+    sync_payload = {item.kiss24_uuid: item.snow_number for item in payload.assets}
+    push_results = add_snowid_to_kiss24asset(sync_payload)
+
+    # 2. Batch update Mario's PostgreSQL DB
+    update_data = [(item.kiss24_uuid, item.mario_raw_asset_id) for item in payload.assets]
+    cursor.executemany("""
+        UPDATE raw_assets 
+        SET kiss24_asset_id = %s, update_date = NOW() 
+        WHERE id = %s
+    """, update_data)
+    cursor.connection.commit()
+
+    log_audit_event(
+        str(current_user["id"]), current_user["role"], "ASSET_RECONCILED_BULK",
+        "KISS24", "BULK", f"Manually linked {len(payload.assets)} assets to Keep Secure 24."
+    )
+
+    if push_results["failed_count"] > 0:
+        return {"status": "Partial", "message": f"Linked {push_results['success_count']} assets. {push_results['failed_count']} failed.", "errors": push_results["errors"]}
+
+    return {"status": "Success", "message": f"Successfully linked {push_results['success_count']} assets!"}

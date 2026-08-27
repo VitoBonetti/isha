@@ -14,7 +14,10 @@ KISS_24_API_KEY_NAME = os.environ.get("KISS_24_API_KEY_NAME")
 CUTOFF_DATE = datetime(2026, 5, 1, tzinfo=timezone.utc)
 
 
-# --- Keep Secure 24 helper ---
+
+# ==========================================
+# ---  0. Keep Secure 24 helper          ---
+# ==========================================
 def api_key():
     return str(get_secret(KISS_24_API_KEY_NAME))
 
@@ -29,6 +32,50 @@ def post(endpoint, body=None, page=None):
     req = urllib.request.Request(url, data=data, headers={"x-api-key": api_key(), "Content-Type": "application/json"})
     with urllib.request.urlopen(req) as res:
         return json.loads(res.read())
+
+
+def fetch_all_kiss24(endpoint: str, api_key: str, payload: dict = None):
+    """Helper to fetch all paginated results from KISS24 with safe JSON parsing."""
+    if payload is None: payload = {}
+
+    # CRITICAL FIX: Ensure no newlines exist in the API key header
+    headers = {'x-api-key': api_key.strip(), 'Content-Type': 'application/json'}
+    items = []
+    page = 1
+
+    with requests.Session() as session:
+        while True:
+            url = f"{KISS_24_ENDPOINT}{endpoint}"
+            response = session.post(url, headers=headers, params={'page': page}, json=payload, timeout=30)
+
+            if not response.ok:
+                if response.status_code == 400 and "Invalid Page Number" in response.text:
+                    break
+                else:
+                    raise ValueError(f"API Error on {endpoint}. Status: {response.status_code}, Body: {response.text}")
+
+            # CRITICAL FIX: Catch non-JSON HTML pages returned by WAFs
+            try:
+                data = response.json()
+            except Exception:
+                raise ValueError(
+                    f"Invalid JSON returned from {url}. Status: {response.status_code}. Raw Body: {response.text[:300]}")
+
+            items.extend(data.get('items', []))
+
+            page_count = int(data.get('page_count', 1))
+            if page >= page_count: break
+            page += 1
+
+    return items
+
+
+def _is_field_populated(field_obj):
+    val = field_obj.get('value')
+    if val is None: return False
+    if isinstance(val, list): return len(val) > 0
+    if isinstance(val, str): return bool(val.strip())
+    return True
 
 
 # ==========================================
@@ -197,6 +244,49 @@ def sync_vuln_type_kiss24():
             page_rel += 1
 
     return map_type, map_context
+
+
+# Asset Mapping
+def get_unmapped_kiss24_assets(api_key: str):
+    """
+    Fetches all assets from KISS24, but filters out any that already have
+    the 'Service Now ID' custom field populated.
+    Groups the result by Organization UUID.
+    """
+    # 1. Fetch all fields to find which assets already have a Service Now ID
+    mapped_asset_uuids = set()
+    fields_data = fetch_all_kiss24('fields', api_key)
+
+    for item in fields_data:
+        custom_field = item.get("custom_field", {})
+        # If it's a Service Now ID and has a value, mark the asset UUID
+        if custom_field.get("name", "").lower() == "service now id" and _is_field_populated(item):
+            entity = item.get("entity", {})
+            if entity.get("type", "").lower() == "asset":
+                mapped_asset_uuids.add(entity.get("uuid"))
+
+    # 2. Fetch all assets and filter them
+    unmapped_by_org = {}
+    all_assets = fetch_all_kiss24('assets', api_key)
+
+    for item in all_assets:
+        asset_uuid = item.get("uuid")
+        if asset_uuid in mapped_asset_uuids:
+            continue  # Skip, already mapped
+
+        org_uuid = item.get("organisation", {}).get("uuid")
+        if not org_uuid:
+            continue
+
+        if org_uuid not in unmapped_by_org:
+            unmapped_by_org[org_uuid] = []
+
+        unmapped_by_org[org_uuid].append({
+            "uuid": asset_uuid,
+            "name": item.get("name", "")
+        })
+
+    return unmapped_by_org
 
 
 # ==========================================
@@ -531,42 +621,6 @@ def fetch_validation_info(uuid: str):
 # ==========================================
 # ---  5. REPORTING                      ---
 # ==========================================
-def fetch_all_kiss24(endpoint: str, api_key: str, payload: dict = None):
-    """Helper to fetch all paginated results from KISS24 with safe JSON parsing."""
-    if payload is None: payload = {}
-
-    # CRITICAL FIX: Ensure no newlines exist in the API key header
-    headers = {'x-api-key': api_key.strip(), 'Content-Type': 'application/json'}
-    items = []
-    page = 1
-
-    with requests.Session() as session:
-        while True:
-            url = f"{KISS_24_ENDPOINT}{endpoint}"
-            response = session.post(url, headers=headers, params={'page': page}, json=payload, timeout=30)
-
-            if not response.ok:
-                if response.status_code == 400 and "Invalid Page Number" in response.text:
-                    break
-                else:
-                    raise ValueError(f"API Error on {endpoint}. Status: {response.status_code}, Body: {response.text}")
-
-            # CRITICAL FIX: Catch non-JSON HTML pages returned by WAFs
-            try:
-                data = response.json()
-            except Exception:
-                raise ValueError(
-                    f"Invalid JSON returned from {url}. Status: {response.status_code}. Raw Body: {response.text[:300]}")
-
-            items.extend(data.get('items', []))
-
-            page_count = int(data.get('page_count', 1))
-            if page >= page_count: break
-            page += 1
-
-    return items
-
-
 def get_vuln_fields_map(vuln_uuids: list, api_key: str):
     """Fetches custom fields for vulnerabilities in chunks."""
     vuln_fields_map = {}
@@ -585,14 +639,6 @@ def get_vuln_fields_map(vuln_uuids: list, api_key: str):
                 vuln_fields_map[v_uuid].append(item)
 
     return vuln_fields_map
-
-
-def _is_field_populated(field_obj):
-    val = field_obj.get('value')
-    if val is None: return False
-    if isinstance(val, list): return len(val) > 0
-    if isinstance(val, str): return bool(val.strip())
-    return True
 
 
 def validate_kiss24_findings(vulns: list, vuln_fields_map: dict, report_type: int, api_key: str):

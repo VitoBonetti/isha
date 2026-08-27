@@ -18,6 +18,7 @@ interface PoolAsset {
   duplicate_allowed: boolean;
   completed_count: number;
   is_archived_this_year: boolean;
+  kiss24_asset_id?: string;
 }
 
 export default function AssetsView() {
@@ -30,6 +31,7 @@ export default function AssetsView() {
   const [filterStatus, setFilterStatus] = useState<"all" | "assigned" | "ready_untested" | "ready_tested" | "archived">("all");
   const [filterService, setFilterService] = useState<string>("all");
   const [filterCountry, setFilterCountry] = useState<string>("all");
+  const [filterKiss24, setFilterKiss24] = useState<"all" | "synced" | "unsynced">("all");
   const [targetYear, setTargetYear] = useState(new Date().getFullYear());
 
   const availableYears = Array.from(
@@ -46,7 +48,7 @@ export default function AssetsView() {
   // Reset pagination when any filter changes
   useEffect(() => {
     setPage(1);
-  }, [searchTerm, filterStatus, filterService, filterCountry, sortBy, sortDir]);
+  }, [searchTerm, filterStatus, filterService, filterCountry, filterKiss24, sortBy, sortDir]);
 
   const handleSort = (column: string) => {
     if (sortBy === column) setSortDir(sortDir === "asc" ? "desc" : "asc");
@@ -245,7 +247,14 @@ export default function AssetsView() {
       (filterService === "none" ? !asset.service_name : asset.service_name === filterService);
     const matchesCountry = filterCountry === "all" || asset.country === filterCountry;
 
-    // 3. Status Check
+    // 3. KISS24 Sync Status ---
+    const hasKiss24 = Boolean(asset.kiss24_asset_id && asset.kiss24_asset_id.trim() !== "");
+    const matchesKiss24 =
+      filterKiss24 === "all" ||
+      (filterKiss24 === "synced" && hasKiss24) ||
+      (filterKiss24 === "unsynced" && !hasKiss24);
+
+    // 4. Status Check
     const isAvailableForTest = !asset.is_assigned || asset.duplicate_allowed;
     let matchesStatus = true;
     if (filterStatus === "archived") {
@@ -262,7 +271,7 @@ export default function AssetsView() {
         matchesStatus = isAvailableForTest && asset.completed_count > 0;
       }
     }
-    return matchesSearch && matchesService && matchesCountry && matchesStatus;
+    return matchesSearch && matchesService && matchesCountry && matchesKiss24 && matchesStatus;
   });
 
   const sortedAssets = [...filteredAssets].sort((a, b) => {
@@ -391,7 +400,7 @@ export default function AssetsView() {
             </div>
 
             {/* Filter Dropdowns Grid on Mobile */}
-            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 w-full md:w-auto items-center">
+            <div className="grid grid-cols-1 sm:grid-cols-5 gap-3 w-full md:w-auto items-center">
               <select
                 value={targetYear}
                 onChange={(e) => setTargetYear(parseInt(e.target.value))}
@@ -431,6 +440,17 @@ export default function AssetsView() {
                 <option value="all">All Countries</option>
                 {uniqueCountries.map(c => <option key={c as string} value={c as string}>{c as string}</option>)}
               </select>
+
+              <select
+                value={filterKiss24}
+                onChange={(e) => setFilterKiss24(e.target.value as "all" | "synced" | "unsynced")}
+                className={selectStyles}
+              >
+                <option value="all">KISS24: All</option>
+                <option value="synced">KISS24: Synced</option>
+                <option value="unsynced">KISS24: Unsynced</option>
+              </select>
+
             </div>
           </div>
 

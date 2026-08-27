@@ -15,6 +15,7 @@ import ContactsView from './pages/ContactsView';
 import TestDetailsView from "./pages/TestDetailsView";
 import VulnAnalysisView from "./pages/VulnAnalysisView"
 import ValidatingVulnsView from "./pages/ValidatingVulnsView";
+import AssetReconciliationView from './pages/AssetReconciliationView';
 import { SprayCan, LogOut } from "lucide-react";
 
 function AppContent() {
@@ -52,6 +53,7 @@ function AppContent() {
         <Route path="/insights" element={<InsightsView />} />
         <Route path="/contacts" element={<ContactsView />} />
         <Route path="/validating" element={<ValidatingVulnsView />} />
+        <Route path="/assets/reconciliation" element={<AssetReconciliationView />} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
     </div>

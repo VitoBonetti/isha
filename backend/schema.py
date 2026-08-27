@@ -294,3 +294,11 @@ class LuigiVulnCallback(BaseModel):
 # public key
 class PublicKeyUpdate(BaseModel):
     public_key: str
+
+class ReconcileAssetPayload(BaseModel):
+    mario_raw_asset_id: str
+    kiss24_uuid: str
+    snow_number: str
+
+class BulkReconcileAssetPayload(BaseModel):
+    assets: List[ReconcileAssetPayload]
