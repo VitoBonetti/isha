@@ -2,7 +2,6 @@ import { BrowserRouter, Routes, Route, Navigate, Link, useLocation } from "react
 import { ThemeProvider } from "./components/ThemeProvider";
 import { AppProvider, useAppContext } from "./context/AppContext";
 import Dashboard from "./pages/Dashboard";
-import SettingsView from "./pages/SettingsView";
 import CalendarView from "./pages/CalendarView";
 import AssetsView from "./pages/AssetsView";
 import RawAssetsView from "./pages/RawAssetsView";
@@ -11,11 +10,25 @@ import TestsView from "./pages/TestsView";
 import Planner from "./pages/Planner";
 import CountriesView from "./pages/CountriesView";
 import InsightsView from "./pages/InsightsView";
-import ContactsView from './pages/ContactsView';
 import TestDetailsView from "./pages/TestDetailsView";
 import VulnAnalysisView from "./pages/VulnAnalysisView"
 import ValidatingVulnsView from "./pages/ValidatingVulnsView";
-import AssetReconciliationView from './pages/AssetReconciliationView';
+import AssetReconciliationView from './pages/settings/AssetReconciliationView';
+import ControlPanelLayout from './layouts/ControlPanelLayout';
+import ControlPanelHome from './pages/settings/ControlPanelHome';
+import UsersSettings from './pages/settings/UsersSettings';
+import LocationsSettings from './pages/settings/LocationsSettings';
+import AssetTypesSettings from './pages/settings/AssetTypesSettings';
+import ServicesSettings from './pages/settings/ServicesSettings';
+import CategoriesSettings from './pages/settings/CategoriesSettings';
+import RegionsSettings from './pages/settings/RegionsSettings';
+import CountriesSettings from './pages/settings/CountriesSettings';
+import ApiKeysSettings from './pages/settings/ApiKeysSettings';
+import SystemLogsSettings from './pages/settings/SystemLogsSettings';
+import ServiceNowSyncSettings from './pages/settings/ServiceNowSyncSettings';
+import DangerZoneSettings from './pages/settings/DangerZoneSettings';
+import ContactsSettings from './pages/settings/ContactsSettings';
+import Kiss24SyncSettings from './pages/settings/Kiss24SyncSettings';
 import { SprayCan, LogOut } from "lucide-react";
 
 function AppContent() {
@@ -40,7 +53,6 @@ function AppContent() {
 
       <Routes>
         <Route path="/dashboard" element={<Dashboard />} />
-        <Route path="/settings" element={<SettingsView />} />
         <Route path="/calendar" element={<CalendarView />} />
         <Route path="/planner" element={<Planner />} />
         <Route path="/assets" element={<AssetsView />} />
@@ -51,9 +63,25 @@ function AppContent() {
         <Route path="/tests/:id/analysis" element={<VulnAnalysisView />} />
         <Route path="/countries" element={<CountriesView />} />
         <Route path="/insights" element={<InsightsView />} />
-        <Route path="/contacts" element={<ContactsView />} />
         <Route path="/validating" element={<ValidatingVulnsView />} />
-        <Route path="/assets/reconciliation" element={<AssetReconciliationView />} />
+        <Route path="/settings" element={<ControlPanelLayout />}>
+          <Route index element={<ControlPanelHome />} />
+          {/* Sub-page Placeholders */}
+          <Route path="users" element={<UsersSettings />} />
+          <Route path="locations" element={<LocationsSettings />} />
+          <Route path="asset-types" element={<AssetTypesSettings />} />
+          <Route path="services" element={<ServicesSettings />} />
+          <Route path="categories" element={<CategoriesSettings />} />
+          <Route path="regions" element={<RegionsSettings />} />
+          <Route path="countries" element={<CountriesSettings />} />
+          <Route path="contacts" element={<ContactsSettings />} />
+          <Route path="kiss24" element={<Kiss24SyncSettings />} />
+          <Route path="servicenow" element={<ServiceNowSyncSettings />} />
+          <Route path="reconciliation" element={<AssetReconciliationView />} />
+          <Route path="api-keys" element={<ApiKeysSettings />} />
+          <Route path="logs" element={<SystemLogsSettings />} />
+          <Route path="danger" element={<DangerZoneSettings />} />
+        </Route>
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
     </div>

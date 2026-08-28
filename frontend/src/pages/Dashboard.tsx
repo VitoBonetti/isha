@@ -54,7 +54,7 @@ export default function Dashboard() {
       features: [
         { title: 'Analytics', desc: 'Regional/country logic and aggregated analytics.', icon: <ChartNoAxesCombined size={24} />, view: 'countries', color: 'text-emerald-600', allowedRoles: ['admin', 'read_only'] },
         { title: 'Insights', desc: 'Analyze throughput, workload distribution, and goal tracking.', icon: <LineChart size={24} />, view: 'insights', color: 'text-amber-500', allowedRoles: ['admin', 'read_only'] },
-        { title: 'Settings', desc: 'Manage user accounts, roles, capacities, and global platform logic.', icon: <Settings size={24} />, view: 'settings', color: 'text-red-500', allowedRoles: ['admin'] }
+        { title: 'System', desc: 'Manage user accounts, roles, capacities, and global platform logic.', icon: <Settings size={24} />, view: 'settings', color: 'text-red-500', allowedRoles: ['admin'] }
       ]
     }
   ];
