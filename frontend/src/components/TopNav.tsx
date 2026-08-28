@@ -8,9 +8,9 @@ import MeetingProposalsModal from './Modals/MeetingProposalsModal';
 import Kiss24KeyModal from './Modals/Kiss24KeyModal';
 import E2EEKeyModal from './Modals/E2EEKeyModal';
 import {
-  Sun, Moon, Laptop, LogOut, User as UserIcon, Bell,
+  Sun, Moon, Laptop, LogOut, Bell,
   SprayCan, Snail, SunMoon, Fingerprint, Rabbit, Cat, Shell, Turtle, Radar, HandMetal, Drum, TentTree,
-  Wifi, WifiOff, Loader2, ChevronDown, Key, LockOpen, Lock, Menu, X, Feather, PawPrint, Origami, ShieldAlert, Settings
+  Wifi, WifiOff, Loader2, Key, LockOpen, Lock, Menu, X, Feather, PawPrint, Origami
 } from 'lucide-react';
 
 export default function TopNav() {
@@ -21,7 +21,6 @@ export default function TopNav() {
 
   const [isThemeOpen, setIsThemeOpen] = useState(false);
   const [isUserOpen, setIsUserOpen] = useState(false);
-  const [isAdminOpen, setIsAdminOpen] = useState(false);
   const [isApiModalOpen, setIsApiModalOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isKiss24KeyModalOpen, setIsKiss24KeyModalOpen] = useState(false);
@@ -29,7 +28,6 @@ export default function TopNav() {
 
   const themeRef = useRef<HTMLDivElement>(null);
   const userRef = useRef<HTMLDivElement>(null);
-  const adminRef = useRef<HTMLDivElement>(null);
   const notificationRef = useRef<HTMLDivElement>(null);
   const mobileMenuRef = useRef<HTMLDivElement>(null);
 
@@ -43,18 +41,15 @@ export default function TopNav() {
   const LogoIcon = logoIcons[iconIndex];
 
   useEffect(() => {
-    // 1. Click Outside Logic
     const handleClickOutside = (event: MouseEvent) => {
       if (themeRef.current && !themeRef.current.contains(event.target as Node)) setIsThemeOpen(false);
       if (userRef.current && !userRef.current.contains(event.target as Node)) setIsUserOpen(false);
-      if (adminRef.current && !adminRef.current.contains(event.target as Node)) setIsAdminOpen(false);
       if (notificationRef.current && !notificationRef.current.contains(event.target as Node)) setShowNotifications(false);
       if (mobileMenuRef.current && !mobileMenuRef.current.contains(event.target as Node)) setIsMobileMenuOpen(false);
     };
 
     document.addEventListener('mousedown', handleClickOutside);
 
-    // 2. Custom Event Listener
     const handleRefreshNotifications = () => {
       if (typeof fetchNotifications === 'function') {
         fetchNotifications();
@@ -62,7 +57,6 @@ export default function TopNav() {
     };
     window.addEventListener('refresh_notifications', handleRefreshNotifications);
 
-    // 3. GLOBAL WEBSOCKET FOR TOASTS & NOTIFICATIONS
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}/api/ws/board`;
     const socket = new WebSocket(wsUrl);
@@ -71,13 +65,11 @@ export default function TopNav() {
       try {
         const data = JSON.parse(event.data);
 
-        // Auto-refresh the notification bell for ANY board changes
         if (data.action === 'REFRESH_BOARD' || data.action === 'REPORT_READY') {
           handleRefreshNotifications();
           window.dispatchEvent(new Event('refresh_test_data'));
         }
 
-        // Handle targeted success toasts (with clickable links!)
         if (['REPORT_READY', 'PRESENTATION_READY'].includes(data.action) && data.email === currentUser?.email) {
           toast.success(
             (t) => (
@@ -93,13 +85,11 @@ export default function TopNav() {
             { duration: 8000 }
           );
         }
-        // --- Catch Meeting Proposals ---
         else if (data.action === 'MEETING_PROPOSALS_READY' && data.email === currentUser?.email) {
           toast.success("Luigi found available meeting slots!", { duration: 5000 });
           setMeetingProposalData(data);
           setIsMeetingModalOpen(true);
         }
-        // Handle targeted error toasts
         else if (['REPORT_FAILED', 'PRESENTATION_FAILED'].includes(data.action) && data.email === currentUser?.email) {
           toast.error(data.message, { duration: 8000 });
         }
@@ -116,7 +106,8 @@ export default function TopNav() {
   }, [fetchNotifications, location.pathname, currentUser?.email]);
 
   const navClass = (path: string) => {
-    const isActive = currentPath === path;
+    // Exact match for base URLs, or prefix match for nested layouts
+    const isActive = currentPath === path || (path !== '/' && currentPath.startsWith(path));
     return isActive
       ? "text-slate-900 dark:text-zinc-100 px-4 py-1.5 rounded-full bg-slate-200/50 dark:bg-zinc-800/50 border border-slate-300/50 dark:border-zinc-700/50"
       : "text-slate-500 dark:text-zinc-400 px-4 py-1.5 rounded-full border border-transparent hover:text-slate-900 dark:hover:text-zinc-100 transition-colors";
@@ -186,33 +177,8 @@ export default function TopNav() {
 
         {currentUser?.role === 'admin' && (
           <>
-            {/* ADMIN DROPDOWN (Data & Analytics) */}
-            <div className="relative" ref={adminRef}>
-              <button
-                onClick={() => { setIsAdminOpen(!isAdminOpen); setIsSettingsOpen(false); }}
-                className={`flex items-center gap-1.5 ${['/raw', '/assets', '/countries', '/insights', '/settings/reconciliation'].some(p => currentPath.startsWith(p)) ? "text-slate-900 dark:text-zinc-100 px-4 py-1.5 rounded-full bg-slate-200/50 dark:bg-zinc-800/50 border border-slate-300/50 dark:border-zinc-700/50" : "text-slate-500 dark:text-zinc-400 px-4 py-1.5 rounded-full border border-transparent hover:text-slate-900 dark:hover:text-zinc-100 transition-colors"}`}
-              >
-                Assets <ChevronDown size={14} className={`transition-transform ${isAdminOpen ? 'rotate-180' : ''}`} />
-              </button>
-
-              {isAdminOpen && (
-                <div className="absolute left-0 top-full mt-2 w-48 bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-xl shadow-xl py-2 animate-in fade-in zoom-in-95 overflow-hidden">
-                  <Link to="/raw" onClick={() => setIsAdminOpen(false)} className="block px-4 py-2 text-sm font-medium text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors">Raw Data Lab</Link>
-                  <Link to="/assets" onClick={() => setIsAdminOpen(false)} className="block px-4 py-2 text-sm font-medium text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors">Active Pool</Link>
-                  <div className="h-px bg-slate-100 dark:bg-zinc-800 my-1"></div>
-                  <Link to="/countries" onClick={() => setIsAdminOpen(false)} className="block px-4 py-2 text-sm font-medium text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors">Analytics</Link>
-                  <Link to="/insights" onClick={() => setIsAdminOpen(false)} className="block px-4 py-2 text-sm font-medium text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors">Insights</Link>
-                </div>
-              )}
-            </div>
-
-            {/* DIRECT CONTROL PANEL LINK */}
-            <Link
-              to="/settings"
-              className={`flex items-center gap-1.5 ${currentPath.startsWith('/settings') ? "text-slate-900 dark:text-zinc-100 px-4 py-1.5 rounded-full bg-slate-200/50 dark:bg-zinc-800/50 border border-slate-300/50 dark:border-zinc-700/50" : "text-slate-500 dark:text-zinc-400 px-4 py-1.5 rounded-full border border-transparent hover:text-slate-900 dark:hover:text-zinc-100 transition-colors"}`}
-            >
-              System
-            </Link>
+            <Link to="/assets" className={navClass("/assets")}>Assets</Link>
+            <Link to="/settings" className={navClass("/settings")}>System</Link>
           </>
         )}
       </div>
@@ -343,19 +309,10 @@ export default function TopNav() {
 
           {currentUser?.role === 'admin' && (
             <>
-              {/* Mobile Admin Section */}
+              {/* Mobile Admin & Settings Links */}
               <div className="h-px bg-slate-200 dark:bg-zinc-800 my-2"></div>
-              <span className="text-[10px] font-extrabold text-slate-400 dark:text-zinc-500 uppercase tracking-wider px-4 mb-1">Assets</span>
-              <Link to="/raw" className={mobileNavClass("/raw")}>Raw Data Lab</Link>
-              <Link to="/assets" className={mobileNavClass("/assets")}>Active Pool</Link>
-              <Link to="/settings/reconciliation" className={mobileNavClass("/settings/reconciliation")} onClick={() => setIsMobileMenuOpen(false)}>Asset Sync</Link>
-              <Link to="/countries" className={mobileNavClass("/countries")}>Analytics</Link>
-              <Link to="/insights" className={mobileNavClass("/insights")}>Insights</Link>
-
-              {/* Mobile Settings Section */}
-              <div className="h-px bg-slate-200 dark:bg-zinc-800 my-2"></div>
-              <span className="text-[10px] font-extrabold text-slate-400 dark:text-zinc-500 uppercase tracking-wider px-4 mb-1">System</span>
-              <Link to="/settings" className={mobileNavClass("/settings")} onClick={() => setIsMobileMenuOpen(false)}>Control Panel</Link>
+              <Link to="/assets" className={mobileNavClass("/assets")} onClick={() => setIsMobileMenuOpen(false)}>Assets</Link>
+              <Link to="/settings" className={mobileNavClass("/settings")} onClick={() => setIsMobileMenuOpen(false)}>System</Link>
             </>
           )}
         </div>

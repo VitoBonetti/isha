@@ -278,7 +278,7 @@ def mark_notifications_read(current_user: dict = Depends(get_current_user), curs
 
 
 # public key
-@router.get("/public-keys", summary="Get all users with configured public keys", include_in_schema=False)
+@router.get("/public-keys", summary="Get all users with configured public keys")
 def get_user_public_keys(current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
     """
     Only fetch active users who have actually set up a public key
@@ -296,7 +296,7 @@ def get_user_public_keys(current_user: dict = Depends(get_current_user), cursor=
     ]
 
 
-@router.post("/me/public-key", summary="Securely store personal E2EE Public Key", include_in_schema=False)
+@router.post("/me/public-key", summary="Securely store personal E2EE Public Key")
 def update_my_public_key(payload: PublicKeyUpdate, current_user: dict = Depends(get_current_user),
                          cursor=Depends(get_db_cursor)):
     if "PRIVATE KEY" in payload.public_key.upper():

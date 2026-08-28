@@ -43,7 +43,7 @@ export default function ControlPanelLayout() {
     <div className="min-h-screen bg-slate-50 dark:bg-zinc-950 text-slate-900 dark:text-zinc-100">
       <TopNav />
 
-      <div className="pt-28 pb-12 px-4 md:px-6 w-full max-w-[1600px] mx-auto flex flex-col md:flex-row gap-6">
+      <div className="pt-32 md:pt-36 pb-12 px-4 md:px-6 w-full max-w-[1600px] mx-auto flex flex-col md:flex-row gap-6">
 
         {/* MOBILE: Horizontally Scrollable Pills */}
         <div className="md:hidden flex overflow-x-auto gap-2 pb-2 -mx-4 px-4 [&::-webkit-scrollbar]:hidden">
@@ -61,7 +61,7 @@ export default function ControlPanelLayout() {
         </div>
 
         {/* DESKTOP: Persistent Left Sidebar */}
-        <div className="hidden md:flex flex-col gap-1 w-64 shrink-0 border-r border-slate-200 dark:border-zinc-800 pr-6 overflow-y-auto max-h-[calc(100vh-8rem)] sticky top-28 [&::-webkit-scrollbar]:hidden">
+        <div className="hidden md:flex flex-col gap-1 w-64 shrink-0 border-r border-slate-200 dark:border-zinc-800 pr-6 overflow-y-auto max-h-[calc(100vh-9rem)] sticky top-36 [&::-webkit-scrollbar]:hidden">
           {navItems.map((item) => (
             <NavLink
               key={item.path}

@@ -95,7 +95,7 @@ export function useSettings() {
 
   const handleWipeSystem = async () => {
     try {
-      await axios.delete('/api/board/system/wipe');
+      await axios.delete('/api/danger/system/wipe');
       toast.success('System data wiped successfully.');
       fetchAllData(true);
     } catch (error) { toast.error('Failed to wipe system.'); }

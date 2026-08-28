@@ -1191,7 +1191,7 @@ def get_test_history(test_id: str, current_user: dict = Depends(get_current_user
 
 
 # --- Secure note ---
-@router.get("/{test_id}/secret", summary="Return the encrypted test secret", include_in_schema=False)
+@router.get("/{test_id}/secret", summary="Return the encrypted test secret")
 def get_test_secret(test_id: str, current_user: dict = Depends(require_write_access), cursor=Depends(get_db_cursor)):
     # 1. Get the encrypted note
     cursor.execute("SELECT encrypted_data FROM secret_notes WHERE test_id = %s", (test_id,))
@@ -1218,7 +1218,7 @@ def get_test_secret(test_id: str, current_user: dict = Depends(require_write_acc
     }
 
 
-@router.put("/{test_id}/secret", summary="Update the test secret", include_in_schema=False)
+@router.put("/{test_id}/secret", summary="Update the test secret")
 def update_test_secret(test_id: str, payload: dict, background_tasks: BackgroundTasks,
                        current_user: dict = Depends(require_write_access), cursor=Depends(get_db_cursor)):
 
@@ -1247,7 +1247,7 @@ def update_test_secret(test_id: str, payload: dict, background_tasks: Background
     return {"message": "Secure note securely vaulted."}
 
 
-@router.delete("/{test_id}/secret", summary="[Admin Only] Delete the test secret", include_in_schema=False)
+@router.delete("/{test_id}/secret", summary="[Admin Only] Delete the test secret")
 def delete_test_secret(test_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin),
                        cursor=Depends(get_db_cursor)):
     # Because of our ON DELETE CASCADE rule on the table, deleting the note automatically wipes the access_list table too!
@@ -1257,6 +1257,8 @@ def delete_test_secret(test_id: str, background_tasks: BackgroundTasks, current_
     cursor.connection.commit()
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Secure note permanently deleted."}
+
+
 # --- Generation PPT ---
 @router.post("/{test_id}/presentation", summary="Create a new presentation")
 def trigger_presentation_generation(test_id: str, background_tasks: BackgroundTasks,
@@ -1476,7 +1478,7 @@ def trigger_test_analysis(test_id: str, background_tasks: BackgroundTasks,
 
 
 # -- Milestones ---
-@router.get("/{test_id}/milestones", summary="Get Milestones test", include_in_schema=False)
+@router.get("/{test_id}/milestones", summary="Get Milestones test")
 def get_milestones(test_id: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
     cursor.execute("SELECT step_name, is_completed FROM test_milestones WHERE test_id = %s", (test_id,))
     # Return a simple dictionary: {"Information Email Sent": true, "Intake Meeting Planned": false}

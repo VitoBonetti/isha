@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 import axios from "axios";
-import TopNav from "../components/TopNav";
 import AddRawAssetModal from "../components/Modals/AddRawAssetModal";
 import ConfirmModal from "../components/Modals/ConfirmModal";
 import { Search, Plus, Filter, ChevronUp, ChevronDown, ChevronsUpDown, Globe, Database, MoveRight } from "lucide-react";
@@ -160,8 +159,7 @@ export default function RawAssetsView() {
   };
 
   return (
-    <div className="min-h-screen text-slate-900 dark:text-zinc-100 pb-12">
-      <TopNav />
+    <div className="w-full animate-in fade-in zoom-in-95 duration-200">
       <Toaster position="bottom-right" />
 
       <AddRawAssetModal isOpen={showAddModal} onClose={() => setShowAddModal(false)} onSuccess={fetchRawAssets} countries={countries} services={services} categories={categories} assetTypes={assetTypes} />
@@ -175,214 +173,212 @@ export default function RawAssetsView() {
         onCancel={() => setConfirmModal({ ...confirmModal, isOpen: false })}
       />
 
-      <div className="pt-28 md:pt-32 px-4 md:px-6 max-w-7xl mx-auto">
-        <h1 className="text-2xl font-extrabold flex items-center gap-2">
-          <Database size={28} className="text-slate-500" />
-          Raw Assets
-        </h1>
-        <p className="text-slate-500 dark:text-zinc-400 mb-6 md:mb-8 text-sm md:text-base">Unprocessed assets ready for review and promotion.</p>
+      <h1 className="text-2xl font-extrabold flex items-center gap-2">
+        <Database size={28} className="text-slate-500" />
+        Raw Assets
+      </h1>
+      <p className="text-slate-500 dark:text-zinc-400 mb-6 md:mb-8 text-sm md:text-base">Unprocessed assets ready for review and promotion.</p>
 
-        {/* Toolbar - Fully Stackable */}
-        <div className="flex flex-col md:flex-row gap-4 items-stretch md:items-center justify-between bg-white dark:bg-zinc-900 p-4 rounded-xl border border-slate-200 dark:border-zinc-800 shadow-sm relative">
+      {/* Toolbar - Fully Stackable */}
+      <div className="flex flex-col md:flex-row gap-4 items-stretch md:items-center justify-between bg-white dark:bg-zinc-900 p-4 rounded-xl border border-slate-200 dark:border-zinc-800 shadow-sm relative">
 
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 flex-1">
-            <div className="relative w-full md:max-w-md">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-              <input type="text" placeholder="Search assets..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2.5 md:py-2 rounded-lg border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 focus:ring-2 focus:ring-emerald-500 outline-none text-sm" />
-            </div>
-
-            <button ref={filterBtnRef} onClick={() => setShowFilters(!showFilters)} className={`w-full sm:w-auto flex justify-center items-center gap-2 px-4 py-2.5 md:py-2 rounded-lg border transition-colors text-sm ${showFilters || Object.values(filters).some(v => v !== "") ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 font-bold' : 'border-slate-300 dark:border-zinc-700 hover:bg-slate-100 dark:hover:bg-zinc-800'}`}>
-              <Filter className="h-4 w-4" /> Filters
-            </button>
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 flex-1">
+          <div className="relative w-full md:max-w-md">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+            <input type="text" placeholder="Search assets..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2.5 md:py-2 rounded-lg border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 focus:ring-2 focus:ring-emerald-500 outline-none text-sm" />
           </div>
 
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full md:w-auto">
-            {selectedAssets.length > 0 && (
-              <div className="relative w-full sm:w-auto" ref={bulkActionsRef}>
-                <button onClick={() => setShowBulkActions(!showBulkActions)} className="w-full sm:w-auto flex justify-center items-center gap-2 px-4 py-2.5 md:py-2 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition-colors font-medium text-sm">
-                  Actions ({selectedAssets.length}) <ChevronDown size={16}/>
-                </button>
-                {showBulkActions && (
-                  <div className="absolute top-full left-0 sm:left-auto sm:right-0 mt-2 w-full sm:w-48 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-xl shadow-xl py-2 z-30 animate-in fade-in zoom-in-95">
-                    <button onClick={() => { setShowBulkActions(false); setConfirmModal({isOpen: true, action: 'promote', title: "Promote Assets", message: `Are you sure you want to promote ${selectedAssets.length} assets to the Active Pool?`, confirmText: "Promote"}); }} className="w-full text-left px-4 py-2.5 text-sm font-medium hover:bg-slate-50 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300">Promote Selected</button>
-                    <div className="h-px bg-slate-100 dark:bg-zinc-800 my-1"></div>
-                    <button onClick={() => { setShowBulkActions(false); setConfirmModal({isOpen: true, action: 'delete', title: "Delete Assets", message: `Are you sure you want to permanently delete ${selectedAssets.length} raw assets?`,  confirmText: "Delete"}); }} className="w-full text-left px-4 py-2.5 text-sm font-medium hover:bg-red-50 dark:hover:bg-red-900/20 text-red-600 dark:text-red-400">Delete Selected</button>
-                  </div>
-                )}
-              </div>
-            )}
-            <button onClick={() => setShowAddModal(true)} className="w-full sm:w-auto flex justify-center items-center gap-2 px-4 py-2.5 md:py-2 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition-colors font-medium text-sm"><Plus className="h-4 w-4" /> Add Asset</button>
-          </div>
-
-          {/* Filter Popover - Stackable Grid */}
-          {showFilters && (
-            <div ref={filterRef} className="absolute top-full left-0 right-0 md:right-auto mt-2 w-full md:w-[800px] md:max-w-4xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-xl shadow-xl p-4 md:p-6 z-20 grid grid-cols-1 sm:grid-cols-3 gap-4 md:gap-6">
-              <div className="space-y-4">
-                <div><label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Status</label><select className="w-full p-2.5 md:p-2 border border-slate-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-sm" value={filters.status} onChange={e => {setFilters({...filters, status: e.target.value}); setPage(1);}}><option value="">All</option><option value="raw">Raw Only</option><option value="pool">In Active Pool</option></select></div>
-                <div><label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Country</label><select className="w-full p-2.5 md:p-2 border border-slate-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-sm" value={filters.country} onChange={e => {setFilters({...filters, country: e.target.value}); setPage(1);}}><option value="">All Countries</option>{countries.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
-                <div><label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Asset Type</label><select className="w-full p-2.5 md:p-2 border border-slate-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-sm" value={filters.asset_type} onChange={e => {setFilters({...filters, asset_type: e.target.value}); setPage(1);}}><option value="">All Types</option>{assetTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></div>
-              </div>
-
-              <div className="space-y-4">
-                <div><label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Service Lane</label><select className="w-full p-2.5 md:p-2 border border-slate-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-sm" value={filters.service} onChange={e => {setFilters({...filters, service: e.target.value, category: ""}); setPage(1);}}><option value="">All Services</option>{services.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
-                <div><label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Category</label><select className="w-full p-2.5 md:p-2 border border-slate-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 disabled:opacity-50 text-sm" value={filters.category} onChange={e => {setFilters({...filters, category: e.target.value}); setPage(1);}} disabled={!filters.service}><option value="">All Categories</option>{filteredCategories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
-              </div>
-
-              <div className="space-y-4">
-                <div><label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Internet Facing</label><select className="w-full p-2.5 md:p-2 border border-slate-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-sm" value={filters.facing_internet} onChange={e => {setFilters({...filters, facing_internet: e.target.value}); setPage(1);}}><option value="">Any</option><option value="true">Yes</option><option value="false">No</option></select></div>
-                <div><label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Min. Business Criticality (≥)</label><input type="number" min="0" max="9" placeholder="0-9" className="w-full p-2.5 md:p-2 border border-slate-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-sm" value={filters.business_critical} onChange={e => {setFilters({...filters, business_critical: e.target.value}); setPage(1);}} /></div>
-              </div>
-
-              <div className="sm:col-span-3 flex justify-end mt-2 pt-4 border-t border-slate-100 dark:border-zinc-800">
-                <button onClick={() => {setFilters({country: "", service: "", category: "", status: "", asset_type: "", facing_internet: "", business_critical: ""}); setPage(1);}} className="text-sm text-blue-500 font-bold hover:text-blue-600 p-2">Clear All Filters</button>
-              </div>
-            </div>
-          )}
+          <button ref={filterBtnRef} onClick={() => setShowFilters(!showFilters)} className={`w-full sm:w-auto flex justify-center items-center gap-2 px-4 py-2.5 md:py-2 rounded-lg border transition-colors text-sm ${showFilters || Object.values(filters).some(v => v !== "") ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 font-bold' : 'border-slate-300 dark:border-zinc-700 hover:bg-slate-100 dark:hover:bg-zinc-800'}`}>
+            <Filter className="h-4 w-4" /> Filters
+          </button>
         </div>
 
-        {/* Clean & Compact Table / Cards */}
-        <div className="mt-6 bg-white dark:bg-zinc-900 rounded-xl border border-slate-200 dark:border-zinc-800 shadow-sm overflow-hidden w-full">
-          {loading ? (
-            <div className="p-12 text-center"><div className="animate-spin h-8 w-8 border-4 border-emerald-500 border-t-transparent rounded-full mx-auto"></div><p className="mt-4 text-slate-500 text-sm">Loading...</p></div>
-          ) : (
-            <>
-              {/* DESKTOP VIEW: Standard Table */}
-              <table className="hidden md:table w-full text-left text-sm">
-                <thead className="bg-slate-50 dark:bg-zinc-800/50 border-b border-slate-200 dark:border-zinc-700">
-                  <tr>
-                    <th className="p-4 w-12"><input type="checkbox" className="h-4 w-4 rounded text-emerald-500 border-slate-300" onChange={(e) => { if(e.target.checked) { setSelectedAssets(assets.map(a => a.id)); } else { setSelectedAssets([]); } }} checked={selectedAssets.length === assets.length && assets.length > 0} /></th>
-                    <th className="p-4 font-semibold text-slate-500 uppercase cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort("name")}><div className="flex items-center gap-2">Asset Details <SortIcon column="name" /></div></th>
-                    <th className="p-4 font-semibold text-slate-500 uppercase cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort("country")}><div className="flex items-center gap-2">Loc. <SortIcon column="country" /></div></th>
-                    <th className="p-4 font-semibold text-slate-500 uppercase">Criticality</th>
-                    <th className="p-4 font-semibold text-slate-500 uppercase cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort("service")}><div className="flex items-center gap-2">Forecast Lane <SortIcon column="service" /></div></th>
-                    <th className="p-4 font-semibold text-slate-500 uppercase cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort("status")}><div className="flex items-center gap-2"><SortIcon column="status" /> Status</div></th>
-                    <th className="p-4 font-semibold text-slate-500 uppercase text-right">Actions</th>
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full md:w-auto">
+          {selectedAssets.length > 0 && (
+            <div className="relative w-full sm:w-auto" ref={bulkActionsRef}>
+              <button onClick={() => setShowBulkActions(!showBulkActions)} className="w-full sm:w-auto flex justify-center items-center gap-2 px-4 py-2.5 md:py-2 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition-colors font-medium text-sm">
+                Actions ({selectedAssets.length}) <ChevronDown size={16}/>
+              </button>
+              {showBulkActions && (
+                <div className="absolute top-full left-0 sm:left-auto sm:right-0 mt-2 w-full sm:w-48 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-xl shadow-xl py-2 z-30 animate-in fade-in zoom-in-95">
+                  <button onClick={() => { setShowBulkActions(false); setConfirmModal({isOpen: true, action: 'promote', title: "Promote Assets", message: `Are you sure you want to promote ${selectedAssets.length} assets to the Active Pool?`, confirmText: "Promote"}); }} className="w-full text-left px-4 py-2.5 text-sm font-medium hover:bg-slate-50 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300">Promote Selected</button>
+                  <div className="h-px bg-slate-100 dark:bg-zinc-800 my-1"></div>
+                  <button onClick={() => { setShowBulkActions(false); setConfirmModal({isOpen: true, action: 'delete', title: "Delete Assets", message: `Are you sure you want to permanently delete ${selectedAssets.length} raw assets?`,  confirmText: "Delete"}); }} className="w-full text-left px-4 py-2.5 text-sm font-medium hover:bg-red-50 dark:hover:bg-red-900/20 text-red-600 dark:text-red-400">Delete Selected</button>
+                </div>
+              )}
+            </div>
+          )}
+          <button onClick={() => setShowAddModal(true)} className="w-full sm:w-auto flex justify-center items-center gap-2 px-4 py-2.5 md:py-2 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition-colors font-medium text-sm"><Plus className="h-4 w-4" /> Add Asset</button>
+        </div>
+
+        {/* Filter Popover - Stackable Grid */}
+        {showFilters && (
+          <div ref={filterRef} className="absolute top-full left-0 right-0 md:right-auto mt-2 w-full md:w-[800px] md:max-w-4xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-xl shadow-xl p-4 md:p-6 z-20 grid grid-cols-1 sm:grid-cols-3 gap-4 md:gap-6">
+            <div className="space-y-4">
+              <div><label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Status</label><select className="w-full p-2.5 md:p-2 border border-slate-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-sm" value={filters.status} onChange={e => {setFilters({...filters, status: e.target.value}); setPage(1);}}><option value="">All</option><option value="raw">Raw Only</option><option value="pool">In Active Pool</option></select></div>
+              <div><label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Country</label><select className="w-full p-2.5 md:p-2 border border-slate-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-sm" value={filters.country} onChange={e => {setFilters({...filters, country: e.target.value}); setPage(1);}}><option value="">All Countries</option>{countries.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
+              <div><label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Asset Type</label><select className="w-full p-2.5 md:p-2 border border-slate-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-sm" value={filters.asset_type} onChange={e => {setFilters({...filters, asset_type: e.target.value}); setPage(1);}}><option value="">All Types</option>{assetTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></div>
+            </div>
+
+            <div className="space-y-4">
+              <div><label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Service Lane</label><select className="w-full p-2.5 md:p-2 border border-slate-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-sm" value={filters.service} onChange={e => {setFilters({...filters, service: e.target.value, category: ""}); setPage(1);}}><option value="">All Services</option>{services.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
+              <div><label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Category</label><select className="w-full p-2.5 md:p-2 border border-slate-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 disabled:opacity-50 text-sm" value={filters.category} onChange={e => {setFilters({...filters, category: e.target.value}); setPage(1);}} disabled={!filters.service}><option value="">All Categories</option>{filteredCategories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
+            </div>
+
+            <div className="space-y-4">
+              <div><label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Internet Facing</label><select className="w-full p-2.5 md:p-2 border border-slate-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-sm" value={filters.facing_internet} onChange={e => {setFilters({...filters, facing_internet: e.target.value}); setPage(1);}}><option value="">Any</option><option value="true">Yes</option><option value="false">No</option></select></div>
+              <div><label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Min. Business Criticality (≥)</label><input type="number" min="0" max="9" placeholder="0-9" className="w-full p-2.5 md:p-2 border border-slate-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-sm" value={filters.business_critical} onChange={e => {setFilters({...filters, business_critical: e.target.value}); setPage(1);}} /></div>
+            </div>
+
+            <div className="sm:col-span-3 flex justify-end mt-2 pt-4 border-t border-slate-100 dark:border-zinc-800">
+              <button onClick={() => {setFilters({country: "", service: "", category: "", status: "", asset_type: "", facing_internet: "", business_critical: ""}); setPage(1);}} className="text-sm text-blue-500 font-bold hover:text-blue-600 p-2">Clear All Filters</button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Clean & Compact Table / Cards */}
+      <div className="mt-6 bg-white dark:bg-zinc-900 rounded-xl border border-slate-200 dark:border-zinc-800 shadow-sm overflow-hidden w-full">
+        {loading ? (
+          <div className="p-12 text-center"><div className="animate-spin h-8 w-8 border-4 border-emerald-500 border-t-transparent rounded-full mx-auto"></div><p className="mt-4 text-slate-500 text-sm">Loading...</p></div>
+        ) : (
+          <>
+            {/* DESKTOP VIEW: Standard Table */}
+            <table className="hidden md:table w-full text-left text-sm">
+              <thead className="bg-slate-50 dark:bg-zinc-800/50 border-b border-slate-200 dark:border-zinc-700">
+                <tr>
+                  <th className="p-4 w-12"><input type="checkbox" className="h-4 w-4 rounded text-emerald-500 border-slate-300" onChange={(e) => { if(e.target.checked) { setSelectedAssets(assets.map(a => a.id)); } else { setSelectedAssets([]); } }} checked={selectedAssets.length === assets.length && assets.length > 0} /></th>
+                  <th className="p-4 font-semibold text-slate-500 uppercase cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort("name")}><div className="flex items-center gap-2">Asset Details <SortIcon column="name" /></div></th>
+                  <th className="p-4 font-semibold text-slate-500 uppercase cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort("country")}><div className="flex items-center gap-2">Loc. <SortIcon column="country" /></div></th>
+                  <th className="p-4 font-semibold text-slate-500 uppercase">Criticality</th>
+                  <th className="p-4 font-semibold text-slate-500 uppercase cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort("service")}><div className="flex items-center gap-2">Forecast Lane <SortIcon column="service" /></div></th>
+                  <th className="p-4 font-semibold text-slate-500 uppercase cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort("status")}><div className="flex items-center gap-2"><SortIcon column="status" /> Status</div></th>
+                  <th className="p-4 font-semibold text-slate-500 uppercase text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200 dark:divide-zinc-700">
+                {assets.map((asset) => (
+                  <tr key={asset.id} className={`hover:bg-slate-50 dark:hover:bg-zinc-800/30 transition-colors ${selectedAssets.includes(asset.id) ? 'bg-emerald-50 dark:bg-emerald-900/20' : ''}`}>
+                    <td className="p-4"><input type="checkbox" checked={selectedAssets.includes(asset.id)} onChange={() => toggleAssetSelection(asset.id)} className="h-4 w-4 text-emerald-500 rounded border-slate-300" /></td>
+                    <td className="p-4 max-w-[200px]">
+                      <div className="flex items-center gap-2">
+                        <Link to={`/assets/raw/${asset.id}`} state={{ from: '/assets/raw', label: 'Raw Assets' }} className="font-bold text-blue-600 dark:text-blue-400 hover:underline truncate">{asset.name}</Link>
+                        {asset.facing_internet && <Globe size={14} className="text-blue-500 flex-shrink-0" title="Internet Facing" />}
+                      </div>
+                      <div className="text-xs text-slate-500 mt-1 flex gap-2 items-center">
+                        <span className="font-medium text-slate-700 dark:text-zinc-300 whitespace-nowrap">{asset.asset_type_name || 'Unknown Type'}</span>
+                        <span>•</span>
+                        <span>{asset.id.substring(0, 8)}</span>
+                      </div>
+                    </td>
+                    <td className="p-4"><span className="font-mono font-bold text-slate-500 dark:text-zinc-400">{asset.country_code || '--'}</span></td>
+                    <td className="p-4 font-mono text-[10px]">
+                      {getCriticalityPill(asset.business_critical)}
+                    </td>
+                    <td className="p-4">
+                      <div className="font-medium whitespace-nowrap">{asset.service_name || '-'}</div>
+                      <div className="text-xs text-slate-500 whitespace-nowrap">{asset.category_name || '-'}</div>
+                    </td>
+                    <td className="p-4 whitespace-nowrap">
+                      {asset.is_promoted ? <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-400">In Pool</span> : <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-bold bg-slate-100 dark:bg-zinc-800 text-slate-500 dark:text-zinc-400">Raw</span>}
+                    </td>
+                    <td className="p-4 text-right">
+                      {!asset.is_promoted && (
+                        <button
+                          onClick={() => handlePromoteSingle(asset.id)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-emerald-200 dark:border-emerald-900/50 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 transition-colors text-sm font-bold shadow-sm"
+                          title="Promote to Active Pool"
+                        >
+                          <MoveRight className="h-3.5 w-3.5" />
+                          Promote
+                        </button>
+                      )}
+                    </td>
                   </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-200 dark:divide-zinc-700">
-                  {assets.map((asset) => (
-                    <tr key={asset.id} className={`hover:bg-slate-50 dark:hover:bg-zinc-800/30 transition-colors ${selectedAssets.includes(asset.id) ? 'bg-emerald-50 dark:bg-emerald-900/20' : ''}`}>
-                      <td className="p-4"><input type="checkbox" checked={selectedAssets.includes(asset.id)} onChange={() => toggleAssetSelection(asset.id)} className="h-4 w-4 text-emerald-500 rounded border-slate-300" /></td>
-                      <td className="p-4 max-w-[200px]">
+                ))}
+              </tbody>
+            </table>
+
+            {/* MOBILE VIEW: Stacked Cards */}
+            <div className="flex md:hidden flex-col divide-y divide-slate-100 dark:divide-zinc-800 w-full">
+              {assets.map((asset) => {
+                const isSelected = selectedAssets.includes(asset.id);
+                return (
+                  <div key={asset.id} className={`p-4 flex flex-col gap-3 transition-colors ${isSelected ? 'bg-emerald-50 dark:bg-emerald-900/20' : ''}`}>
+
+                    {/* Top Row: Checkbox & Title */}
+                    <div className="flex items-start gap-3 w-full">
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => toggleAssetSelection(asset.id)}
+                        className="mt-1 h-4 w-4 text-emerald-500 rounded border-slate-300 flex-shrink-0"
+                      />
+                      <div className="flex flex-col flex-1 min-w-0">
                         <div className="flex items-center gap-2">
-                          <Link to={`/raw/${asset.id}`} state={{ from: '/raw', label: 'Raw Assets' }} className="font-bold text-blue-600 dark:text-blue-400 hover:underline truncate">{asset.name}</Link>
-                          {asset.facing_internet && <Globe size={14} className="text-blue-500 flex-shrink-0" title="Internet Facing" />}
+                          <Link
+                            to={`/assets/raw/${asset.id}`}
+                            state={{ from: '/assets/raw', label: 'Raw Assets' }}
+                            className="text-sm font-bold text-blue-600 dark:text-blue-400 hover:underline break-words"
+                          >
+                            {asset.name}
+                          </Link>
+                          {asset.facing_internet && <Globe size={12} className="text-blue-500 flex-shrink-0" title="Internet Facing" />}
                         </div>
-                        <div className="text-xs text-slate-500 mt-1 flex gap-2 items-center">
-                          <span className="font-medium text-slate-700 dark:text-zinc-300 whitespace-nowrap">{asset.asset_type_name || 'Unknown Type'}</span>
+                        <div className="text-[11px] text-slate-500 dark:text-zinc-400 mt-1 flex flex-wrap gap-1 items-center">
+                          <span className="font-medium text-slate-700 dark:text-zinc-300">{asset.asset_type_name || 'Unknown Type'}</span>
                           <span>•</span>
                           <span>{asset.id.substring(0, 8)}</span>
                         </div>
-                      </td>
-                      <td className="p-4"><span className="font-mono font-bold text-slate-500 dark:text-zinc-400">{asset.country_code || '--'}</span></td>
-                      <td className="p-4 font-mono text-[10px]">
-                        {getCriticalityPill(asset.business_critical)}
-                      </td>
-                      <td className="p-4">
-                        <div className="font-medium whitespace-nowrap">{asset.service_name || '-'}</div>
-                        <div className="text-xs text-slate-500 whitespace-nowrap">{asset.category_name || '-'}</div>
-                      </td>
-                      <td className="p-4 whitespace-nowrap">
-                        {asset.is_promoted ? <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-400">In Pool</span> : <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-bold bg-slate-100 dark:bg-zinc-800 text-slate-500 dark:text-zinc-400">Raw</span>}
-                      </td>
-                      <td className="p-4 text-right">
-                        {!asset.is_promoted && (
-                          <button
-                            onClick={() => handlePromoteSingle(asset.id)}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-emerald-200 dark:border-emerald-900/50 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 transition-colors text-sm font-bold shadow-sm"
-                            title="Promote to Active Pool"
-                          >
-                            <MoveRight className="h-3.5 w-3.5" />
-                            Promote
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-
-              {/* MOBILE VIEW: Stacked Cards */}
-              <div className="flex md:hidden flex-col divide-y divide-slate-100 dark:divide-zinc-800 w-full">
-                {assets.map((asset) => {
-                  const isSelected = selectedAssets.includes(asset.id);
-                  return (
-                    <div key={asset.id} className={`p-4 flex flex-col gap-3 transition-colors ${isSelected ? 'bg-emerald-50 dark:bg-emerald-900/20' : ''}`}>
-
-                      {/* Top Row: Checkbox & Title */}
-                      <div className="flex items-start gap-3 w-full">
-                        <input
-                          type="checkbox"
-                          checked={isSelected}
-                          onChange={() => toggleAssetSelection(asset.id)}
-                          className="mt-1 h-4 w-4 text-emerald-500 rounded border-slate-300 flex-shrink-0"
-                        />
-                        <div className="flex flex-col flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <Link
-                              to={`/raw/${asset.id}`}
-                              state={{ from: '/raw', label: 'Raw Assets' }}
-                              className="text-sm font-bold text-blue-600 dark:text-blue-400 hover:underline break-words"
-                            >
-                              {asset.name}
-                            </Link>
-                            {asset.facing_internet && <Globe size={12} className="text-blue-500 flex-shrink-0" title="Internet Facing" />}
-                          </div>
-                          <div className="text-[11px] text-slate-500 dark:text-zinc-400 mt-1 flex flex-wrap gap-1 items-center">
-                            <span className="font-medium text-slate-700 dark:text-zinc-300">{asset.asset_type_name || 'Unknown Type'}</span>
-                            <span>•</span>
-                            <span>{asset.id.substring(0, 8)}</span>
-                          </div>
-                        </div>
                       </div>
-
-                      {/* Middle Row: Criticality, Loc, Lane, Status */}
-                      <div className="grid grid-cols-2 gap-2 pl-7 mt-1">
-                        <div className="flex flex-col gap-1">
-                          <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Loc & Crit</span>
-                          <div className="flex items-center gap-2">
-                            <span className="font-mono text-xs font-bold text-slate-500 dark:text-zinc-400">{asset.country_code || '--'}</span>
-                            <span className="text-[9px]">{getCriticalityPill(asset.business_critical)}</span>
-                          </div>
-                        </div>
-                        <div className="flex flex-col gap-1 items-end">
-                          <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Status & Lane</span>
-                          <div className="flex flex-col items-end gap-1">
-                            {asset.is_promoted ? (
-                              <span className="inline-flex px-2 py-0.5 bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-400 font-bold text-[10px] rounded-full uppercase tracking-wider">In Pool</span>
-                            ) : (
-                              <span className="inline-flex px-2 py-0.5 bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400 font-bold text-[10px] rounded-full uppercase tracking-wider">Raw</span>
-                            )}
-                            <span className="text-xs font-medium text-slate-700 dark:text-zinc-300 truncate w-full text-right">{asset.service_name || '-'}</span>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Bottom Row: Actions */}
-                      {!asset.is_promoted && (
-                        <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-zinc-800 mt-2 pl-7">
-                          <button
-                            onClick={() => handlePromoteSingle(asset.id)}
-                            className="flex-1 justify-center inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-emerald-200 dark:border-emerald-900/50 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 transition-colors text-xs font-bold shadow-sm bg-white dark:bg-zinc-900"
-                          >
-                            <MoveRight className="h-3.5 w-3.5" /> Promote
-                          </button>
-                        </div>
-                      )}
                     </div>
-                  );
-                })}
-              </div>
-            </>
-          )}
 
-          {/* Pagination */}
-          <div className="px-4 md:px-6 py-4 border-t border-slate-200 dark:border-zinc-700 flex flex-col sm:flex-row justify-between items-center gap-4 sm:gap-0 bg-slate-50 dark:bg-zinc-950/50">
-            <span className="text-xs md:text-sm text-slate-500">Page {page} of {totalPages}</span>
-            <div className="flex gap-2 w-full sm:w-auto">
-              <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} className="flex-1 sm:flex-none px-4 py-2 sm:py-1.5 border border-slate-300 dark:border-zinc-700 rounded-lg hover:bg-slate-100 dark:hover:bg-zinc-800 disabled:opacity-50 text-sm font-medium transition-colors bg-white dark:bg-zinc-900">Prev</button>
-              <button onClick={() => setPage(p => p + 1)} disabled={page >= totalPages} className="flex-1 sm:flex-none px-4 py-2 sm:py-1.5 border border-slate-300 dark:border-zinc-700 rounded-lg hover:bg-slate-100 dark:hover:bg-zinc-800 disabled:opacity-50 text-sm font-medium transition-colors bg-white dark:bg-zinc-900">Next</button>
+                    {/* Middle Row: Criticality, Loc, Lane, Status */}
+                    <div className="grid grid-cols-2 gap-2 pl-7 mt-1">
+                      <div className="flex flex-col gap-1">
+                        <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Loc & Crit</span>
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-xs font-bold text-slate-500 dark:text-zinc-400">{asset.country_code || '--'}</span>
+                          <span className="text-[9px]">{getCriticalityPill(asset.business_critical)}</span>
+                        </div>
+                      </div>
+                      <div className="flex flex-col gap-1 items-end">
+                        <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Status & Lane</span>
+                        <div className="flex flex-col items-end gap-1">
+                          {asset.is_promoted ? (
+                            <span className="inline-flex px-2 py-0.5 bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-400 font-bold text-[10px] rounded-full uppercase tracking-wider">In Pool</span>
+                          ) : (
+                            <span className="inline-flex px-2 py-0.5 bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400 font-bold text-[10px] rounded-full uppercase tracking-wider">Raw</span>
+                          )}
+                          <span className="text-xs font-medium text-slate-700 dark:text-zinc-300 truncate w-full text-right">{asset.service_name || '-'}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Bottom Row: Actions */}
+                    {!asset.is_promoted && (
+                      <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-zinc-800 mt-2 pl-7">
+                        <button
+                          onClick={() => handlePromoteSingle(asset.id)}
+                          className="flex-1 justify-center inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-emerald-200 dark:border-emerald-900/50 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 transition-colors text-xs font-bold shadow-sm bg-white dark:bg-zinc-900"
+                        >
+                          <MoveRight className="h-3.5 w-3.5" /> Promote
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
+          </>
+        )}
+
+        {/* Pagination */}
+        <div className="px-4 md:px-6 py-4 border-t border-slate-200 dark:border-zinc-700 flex flex-col sm:flex-row justify-between items-center gap-4 sm:gap-0 bg-slate-50 dark:bg-zinc-950/50">
+          <span className="text-xs md:text-sm text-slate-500">Page {page} of {totalPages}</span>
+          <div className="flex gap-2 w-full sm:w-auto">
+            <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} className="flex-1 sm:flex-none px-4 py-2 sm:py-1.5 border border-slate-300 dark:border-zinc-700 rounded-lg hover:bg-slate-100 dark:hover:bg-zinc-800 disabled:opacity-50 text-sm font-medium transition-colors bg-white dark:bg-zinc-900">Prev</button>
+            <button onClick={() => setPage(p => p + 1)} disabled={page >= totalPages} className="flex-1 sm:flex-none px-4 py-2 sm:py-1.5 border border-slate-300 dark:border-zinc-700 rounded-lg hover:bg-slate-100 dark:hover:bg-zinc-800 disabled:opacity-50 text-sm font-medium transition-colors bg-white dark:bg-zinc-900">Next</button>
           </div>
         </div>
       </div>

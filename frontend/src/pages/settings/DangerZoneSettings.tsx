@@ -83,6 +83,54 @@ export default function DangerZoneSettings() {
           </button>
         </div>
 
+        {/* Unlink Drive Folders */}
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-100 dark:border-zinc-800 pb-6">
+          <div>
+            <h3 className="font-bold text-slate-900 dark:text-zinc-100">Unlink Drive Folders</h3>
+            <p className="text-sm text-slate-500 dark:text-zinc-400 mt-1 max-w-md">
+              Removes the Google Drive folder links from all tests and wipes their synchronized document metadata. The physical files in Google Drive are NOT deleted.
+            </p>
+          </div>
+          <button onClick={() => {
+            setActionModal({
+              isOpen: true, variant: 'danger', confirmText: "Unlink Folders", title: "Unlink All Drive Folders",
+              message: "Are you sure you want to unlink all Google Drive folders and wipe the document cache? Links will have to be manually re-established for each test.",
+              onConfirm: async () => {
+                try {
+                  await axios.delete('/api/danger/tests/wipe-google-drive-workspace');
+                  toast.success("Drive folders unlinked and documents wiped.");
+                } catch (err) { toast.error("Failed to wipe drive folders."); }
+              }
+            });
+          }} className="w-full md:w-auto shrink-0 bg-red-500 hover:bg-red-600 text-white font-bold py-2.5 px-6 rounded-xl shadow-sm transition-colors text-sm">
+            Unlink Folders
+          </button>
+        </div>
+
+        {/* Wipe Documents */}
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-100 dark:border-zinc-800 pb-6">
+          <div>
+            <h3 className="font-bold text-slate-900 dark:text-zinc-100">Wipe Synced Documents</h3>
+            <p className="text-sm text-slate-500 dark:text-zinc-400 mt-1 max-w-md">
+              Wipes the cached Google Drive file records from the database. Parent folder links are preserved. You will need to click "Resync Files" on active tests to rebuild the cache.
+            </p>
+          </div>
+          <button onClick={() => {
+            setActionModal({
+              isOpen: true, variant: 'warning', confirmText: "Wipe Documents", title: "Wipe Synced Documents",
+              message: "Are you sure you want to empty the synchronized document cache? This action is safe, but requires manual resyncs on active tests.",
+              onConfirm: async () => {
+                try {
+                  await axios.delete('/api/danger/tests/wipe-documents');
+                  toast.success("Document cache wiped.");
+                } catch (err) { toast.error("Failed to wipe document cache."); }
+              }
+            });
+          }} className="w-full md:w-auto shrink-0 bg-orange-500 hover:bg-orange-600 text-white font-bold py-2.5 px-6 rounded-xl shadow-sm transition-colors text-sm">
+            Wipe Documents
+          </button>
+        </div>
+
         {/* Wipe Secrets */}
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div>
@@ -96,11 +144,13 @@ export default function DangerZoneSettings() {
               isOpen: true, variant: 'danger', confirmText: "Wipe Secrets", title: "Wipe All Secure Notes",
               message: "Are you sure you want to permanently wipe ALL encrypted notes from the vault? This action cannot be reversed.",
               onConfirm: async () => {
-                await axios.delete('/api/board/system/wipe-secrets');
-                toast.success("Notes wiped.");
+                try {
+                  await axios.delete('/api/danger/secrets-note/wipe-secrets');
+                  toast.success("Notes wiped.");
+                } catch (err) { toast.error("Failed to wipe notes."); }
               }
             });
-          }} className="w-full md:w-auto shrink-0 bg-orange-600 hover:bg-orange-700 text-white font-bold py-2.5 px-6 rounded-xl shadow-sm transition-colors text-sm">
+          }} className="w-full md:w-auto shrink-0 bg-red-600 hover:bg-red-700 text-white font-bold py-2.5 px-6 rounded-xl shadow-sm transition-colors text-sm">
             Wipe Secure Notes
           </button>
         </div>

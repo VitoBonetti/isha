@@ -44,16 +44,16 @@ export default function Dashboard() {
     {
       name: "Asset Management",
       features: [
-        { title: 'Raw Data Lab', desc: 'Data staging, sheet importation, and asset promotion pipeline.', icon: <Database size={24} />, view: 'raw', color: 'text-slate-600 dark:text-slate-400', allowedRoles: ['admin'] },
-        { title: 'Active Pool', desc: 'Centralized inventory of applications prioritized for testing.', icon: <Server size={24} />, view: 'assets', color: 'text-emerald-500', allowedRoles: ['admin', 'read_only'] },
-        { title: 'Contacts', desc: 'Manage stakeholders and developers across all countries and assets.', icon: <Users size={24} />, view: 'contacts', color: 'text-blue-500', allowedRoles: ['admin'] }
+        { title: 'Raw Data Lab', desc: 'Data staging, sheet importation, and asset promotion pipeline.', icon: <Database size={24} />, view: 'assets/raw', color: 'text-slate-600 dark:text-slate-400', allowedRoles: ['admin', 'read_only'] },
+        { title: 'Active Pool', desc: 'Centralized inventory of applications prioritized for testing.', icon: <Server size={24} />, view: 'assets/pool', color: 'text-emerald-500', allowedRoles: ['admin', 'read_only'] },
+        { title: 'Analytics', desc: 'Regional/country logic and aggregated analytics.', icon: <ChartNoAxesCombined size={24} />, view: 'assets/analytics', color: 'text-emerald-600', allowedRoles: ['admin', 'read_only'] },
+        { title: 'Insights', desc: 'Analyze throughput, workload distribution, and goal tracking.', icon: <LineChart size={24} />, view: 'assets/insights', color: 'text-amber-500', allowedRoles: ['admin', 'read_only'] },
+        { title: 'Contacts', desc: 'Manage stakeholders and developers across all countries and assets.', icon: <Users size={24} />, view: 'settings/contacts', color: 'text-blue-500', allowedRoles: ['admin'] }
       ]
     },
     {
       name: "System Data",
       features: [
-        { title: 'Analytics', desc: 'Regional/country logic and aggregated analytics.', icon: <ChartNoAxesCombined size={24} />, view: 'countries', color: 'text-emerald-600', allowedRoles: ['admin', 'read_only'] },
-        { title: 'Insights', desc: 'Analyze throughput, workload distribution, and goal tracking.', icon: <LineChart size={24} />, view: 'insights', color: 'text-amber-500', allowedRoles: ['admin', 'read_only'] },
         { title: 'System', desc: 'Manage user accounts, roles, capacities, and global platform logic.', icon: <Settings size={24} />, view: 'settings', color: 'text-red-500', allowedRoles: ['admin'] }
       ]
     }

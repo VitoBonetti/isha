@@ -618,9 +618,24 @@ def get_kiss24_vuln_types_for_dropdown(current_user: dict = Depends(get_current_
 
 
 # The Main Publishing Sequence
-@router.post("/{test_id}/vulnerabilities/publish", status_code=status.HTTP_200_OK, include_in_schema=False)
+@router.post("/{test_id}/vulnerabilities/publish", status_code=status.HTTP_200_OK)
 def publish_vulnerability(test_id: str, payload: dict, current_user: dict = Depends(get_current_user),
                           cursor=Depends(get_db_cursor)):
+    """
+    Main publishing vulnerabilities sequence endpoint.
+    1. Decrypt user's API key
+    2. Get Test Identifiers
+    3. Map CVSS v4 based on Severity
+    4. Convert newlines to HTML break tags so the formatting survives, then strip the literal newlines so KISS24 doesn't crash
+    5. Preserve code blocks: Converts \n to <br/> ONLY inside <pre> tags
+    6. Strip all remaining newlines so the Keep Secure 24 API doesn't crash with a 400 error
+    7. Destroy any hallucinatory empty paragraphs or list items the AI generated
+    8. country_uuid maps to the KISS24 'ouuid' for remediation effort (Keep Secure 24 developers are out of mind)
+    9. Build the custom fields array dynamically
+    10. Build Create Payload
+    11. Execute Creation
+    12. Upload Images sequentially
+    """
     try:
         # 1. Decrypt user's API key
         cursor.execute("SELECT kiss24_api_key FROM users WHERE id = %s", (str(current_user["id"]),))
@@ -932,8 +947,16 @@ def trigger_luigi_verification_pipeline(vuln_uuid: str):
                         f"Pipeline CRASHED for {vuln_uuid}: {str(e)}")
 
 
-@router.post("/validating-vulns/{uuid}/analyze", include_in_schema=False)
+@router.post("/validating-vulns/{uuid}/analyze")
 def start_ai_analysis(uuid: str, background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user)):
+    """
+    Trigs trigger_luigi_verification_pipeline: Background task to prep the JSON payload and alert Luigi.
+    1. Get the cleaned JSON payload
+    2. Process root vulnerability attachments
+    3. Process comment attachments
+    4. Ship to Pub/Sub
+    5. future.result() forces the background task to wait for Google to confirm the message
+    """
     background_tasks.add_task(trigger_luigi_verification_pipeline, uuid)
     return {"message": "Luigi pipeline started"}
 

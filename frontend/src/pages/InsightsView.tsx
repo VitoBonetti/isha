@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react";
 import axios from "axios";
-import TopNav from "../components/TopNav";
 import { Target, ChevronDown, ChevronRight, AlertTriangle, LineChart, Info, Zap  } from "lucide-react";
 
 // --- CUSTOM OVERFLOW-AWARE TARGET BAR ---
@@ -88,131 +87,127 @@ export default function InsightsView() {
     axios.get(`/api/insights/?year=${targetYear}`).then(res => setData(res.data));
   }, [targetYear]);
 
-  if (!data) return <div className="min-h-screen pt-32 text-center text-slate-500 text-sm font-bold animate-pulse">Loading Insights...</div>;
+  if (!data) return <div className="p-12 text-center text-slate-500 text-sm font-bold animate-pulse">Loading Insights...</div>;
 
   const netCap = data.forecast.net_capacity;
 
   return (
-    <div className="min-h-screen text-slate-900 dark:text-zinc-100 pb-12 bg-slate-50/30 dark:bg-[#09090b]">
-      <TopNav />
-      <div className="pt-28 md:pt-32 px-4 md:px-6 max-w-7xl mx-auto overflow-hidden">
+    <div className="w-full animate-in fade-in zoom-in-95 duration-200">
 
-        {/* Title and Controls Selector (Stackable) */}
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-6 md:mb-8 gap-4 w-full">
+      {/* Title and Controls Selector (Stackable) */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-6 md:mb-8 gap-4 w-full">
+        <div>
+          <h1 className="text-2xl md:text-3xl font-black flex items-center gap-2 md:gap-3 tracking-tight"><LineChart size={28} className="text-blue-600 md:w-8 md:h-8" /> Insights</h1>
+          <p className="text-xs md:text-sm text-slate-500 mt-1 md:mt-2 font-medium">Strategic overview of team capacity vs. target goals.</p>
+        </div>
+        <select
+          className="w-full md:w-auto px-4 py-2.5 sm:py-2 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-xl font-black text-blue-600 outline-none shadow-sm text-center appearance-none"
+          value={targetYear} onChange={e => setTargetYear(parseInt(e.target.value))}
+        >
+          {availableYears.map(y => <option key={y} value={y}>{y}</option>)}
+        </select>
+      </div>
+
+      {/* 1. Header Cards (Responsive layout grid) */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6 md:mb-8">
+        <div className="bg-white dark:bg-zinc-900 p-4 md:p-5 rounded-2xl border border-slate-200 dark:border-zinc-800 shadow-sm border-t-4 border-t-slate-700 flex flex-col justify-between">
+          <div className="text-[10px] md:text-xs font-bold text-slate-500 uppercase tracking-wider mb-1 md:mb-2 leading-tight">1. Gross Cap</div>
+          <div className="text-xl md:text-3xl font-black">{data.header.gross_capacity.toFixed(1)} <span className="text-xs md:text-sm font-bold text-slate-400">cr</span></div>
+        </div>
+        <div className="bg-white dark:bg-zinc-900 p-4 md:p-5 rounded-2xl border border-slate-200 dark:border-zinc-800 shadow-sm border-t-4 border-t-red-500 flex flex-col justify-between">
+          <div className="text-[10px] md:text-xs font-bold text-slate-500 uppercase tracking-wider mb-1 md:mb-2 leading-tight">2. PTO & Hol.</div>
+          <div className="text-xl md:text-3xl font-black text-red-500">-{data.header.total_time_off.toFixed(1)} <span className="text-xs md:text-sm font-bold text-red-300">cr</span></div>
+        </div>
+        <div className="bg-white dark:bg-zinc-900 p-4 md:p-5 rounded-2xl border border-slate-200 dark:border-zinc-800 shadow-sm border-t-4 border-t-blue-500 flex flex-col justify-between">
+          <div className="text-[10px] md:text-xs font-bold text-slate-500 uppercase tracking-wider mb-1 md:mb-2 leading-tight">3. Assigned</div>
+          <div className="text-xl md:text-3xl font-black text-blue-600">-{data.header.assigned_resources.toFixed(1)} <span className="text-xs md:text-sm font-bold text-blue-300">cr</span></div>
+        </div>
+        <div className="bg-white dark:bg-zinc-900 p-4 md:p-5 rounded-2xl border border-slate-200 dark:border-zinc-800 shadow-sm border-t-4 border-t-emerald-500 col-span-2 lg:col-span-1 flex flex-col justify-between">
+          <div className="text-[10px] md:text-xs font-bold text-slate-500 uppercase tracking-wider mb-1 md:mb-2 leading-tight">4. Unassigned Bench</div>
+          <div className="text-xl md:text-3xl font-black text-emerald-600">{data.header.unassigned_bench.toFixed(1)} <span className="text-xs md:text-sm font-bold text-emerald-300">cr</span></div>
+        </div>
+      </div>
+
+      {/* 2. Annual Workload Forecast Block */}
+      <div className="bg-red-50/50 dark:bg-red-950/10 border border-red-100 dark:border-red-900/30 rounded-2xl p-4 md:p-6 mb-8 md:mb-10 shadow-sm w-full">
+        <h2 className="text-lg md:text-xl font-bold text-red-900 dark:text-red-400 mb-4 md:mb-6">Annual Workload Forecast</h2>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 md:gap-6 mb-5 md:mb-6">
+          <ForecastCard title="Assigned" total={data.forecast.scheduled.total} breakdown={data.forecast.scheduled.breakdown} isOpen={showSched} toggleOpen={() => setShowSched(!showSched)} />
+          <ForecastCard title="Unassigned" total={data.forecast.unassigned_scheduled.total} breakdown={data.forecast.unassigned_scheduled.breakdown} isOpen={showUnassignedSched} toggleOpen={() => setShowUnassignedSched(!showUnassignedSched)} />
+          <ForecastCard title="Backlog" total={data.forecast.backlog.total} breakdown={data.forecast.backlog.breakdown} isOpen={showBacklog} toggleOpen={() => setShowBacklog(!showBacklog)} />
+          <ForecastCard title="Time Off" total={data.forecast.time_off.total} breakdown={data.forecast.time_off.breakdown} isOpen={showTimeOff} toggleOpen={() => setShowTimeOff(!showTimeOff)} />
+          <ForecastCard title="Expired" total={data.forecast.wasted.total} breakdown={data.forecast.wasted.breakdown} isOpen={showWasted} toggleOpen={() => setShowWasted(!showWasted)} />
+        </div>
+
+        <div className="border-t border-red-200 dark:border-red-900/50 pt-5 md:pt-6 flex flex-col md:flex-row justify-between items-stretch md:items-center gap-4 w-full">
           <div>
-            <h1 className="text-2xl md:text-3xl font-black flex items-center gap-2 md:gap-3 tracking-tight"><LineChart size={28} className="text-blue-600 md:w-8 md:h-8" /> Insights</h1>
-            <p className="text-xs md:text-sm text-slate-500 mt-1 md:mt-2 font-medium">Strategic overview of team capacity vs. target goals.</p>
-          </div>
-          <select
-            className="w-full md:w-auto px-4 py-2.5 sm:py-2 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-xl font-black text-blue-600 outline-none shadow-sm text-center appearance-none"
-            value={targetYear} onChange={e => setTargetYear(parseInt(e.target.value))}
-          >
-            {availableYears.map(y => <option key={y} value={y}>{y}</option>)}
-          </select>
-        </div>
-
-        {/* 1. Header Cards (Responsive layout grid) */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6 md:mb-8">
-          <div className="bg-white dark:bg-zinc-900 p-4 md:p-5 rounded-2xl border border-slate-200 dark:border-zinc-800 shadow-sm border-t-4 border-t-slate-700 flex flex-col justify-between">
-            <div className="text-[10px] md:text-xs font-bold text-slate-500 uppercase tracking-wider mb-1 md:mb-2 leading-tight">1. Gross Cap</div>
-            <div className="text-xl md:text-3xl font-black">{data.header.gross_capacity.toFixed(1)} <span className="text-xs md:text-sm font-bold text-slate-400">cr</span></div>
-          </div>
-          <div className="bg-white dark:bg-zinc-900 p-4 md:p-5 rounded-2xl border border-slate-200 dark:border-zinc-800 shadow-sm border-t-4 border-t-red-500 flex flex-col justify-between">
-            <div className="text-[10px] md:text-xs font-bold text-slate-500 uppercase tracking-wider mb-1 md:mb-2 leading-tight">2. PTO & Hol.</div>
-            <div className="text-xl md:text-3xl font-black text-red-500">-{data.header.total_time_off.toFixed(1)} <span className="text-xs md:text-sm font-bold text-red-300">cr</span></div>
-          </div>
-          <div className="bg-white dark:bg-zinc-900 p-4 md:p-5 rounded-2xl border border-slate-200 dark:border-zinc-800 shadow-sm border-t-4 border-t-blue-500 flex flex-col justify-between">
-            <div className="text-[10px] md:text-xs font-bold text-slate-500 uppercase tracking-wider mb-1 md:mb-2 leading-tight">3. Assigned</div>
-            <div className="text-xl md:text-3xl font-black text-blue-600">-{data.header.assigned_resources.toFixed(1)} <span className="text-xs md:text-sm font-bold text-blue-300">cr</span></div>
-          </div>
-          <div className="bg-white dark:bg-zinc-900 p-4 md:p-5 rounded-2xl border border-slate-200 dark:border-zinc-800 shadow-sm border-t-4 border-t-emerald-500 col-span-2 lg:col-span-1 flex flex-col justify-between">
-            <div className="text-[10px] md:text-xs font-bold text-slate-500 uppercase tracking-wider mb-1 md:mb-2 leading-tight">4. Unassigned Bench</div>
-            <div className="text-xl md:text-3xl font-black text-emerald-600">{data.header.unassigned_bench.toFixed(1)} <span className="text-xs md:text-sm font-bold text-emerald-300">cr</span></div>
-          </div>
-        </div>
-
-        {/* 2. Annual Workload Forecast Block */}
-        <div className="bg-red-50/50 dark:bg-red-950/10 border border-red-100 dark:border-red-900/30 rounded-2xl p-4 md:p-6 mb-8 md:mb-10 shadow-sm w-full">
-          <h2 className="text-lg md:text-xl font-bold text-red-900 dark:text-red-400 mb-4 md:mb-6">Annual Workload Forecast</h2>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 md:gap-6 mb-5 md:mb-6">
-            <ForecastCard title="Assigned" total={data.forecast.scheduled.total} breakdown={data.forecast.scheduled.breakdown} isOpen={showSched} toggleOpen={() => setShowSched(!showSched)} />
-            <ForecastCard title="Unassigned" total={data.forecast.unassigned_scheduled.total} breakdown={data.forecast.unassigned_scheduled.breakdown} isOpen={showUnassignedSched} toggleOpen={() => setShowUnassignedSched(!showUnassignedSched)} />
-            <ForecastCard title="Backlog" total={data.forecast.backlog.total} breakdown={data.forecast.backlog.breakdown} isOpen={showBacklog} toggleOpen={() => setShowBacklog(!showBacklog)} />
-            <ForecastCard title="Time Off" total={data.forecast.time_off.total} breakdown={data.forecast.time_off.breakdown} isOpen={showTimeOff} toggleOpen={() => setShowTimeOff(!showTimeOff)} />
-            <ForecastCard title="Expired" total={data.forecast.wasted.total} breakdown={data.forecast.wasted.breakdown} isOpen={showWasted} toggleOpen={() => setShowWasted(!showWasted)} />
-          </div>
-
-          <div className="border-t border-red-200 dark:border-red-900/50 pt-5 md:pt-6 flex flex-col md:flex-row justify-between items-stretch md:items-center gap-4 w-full">
-            <div>
-              <div className="text-[11px] md:text-xs font-bold text-red-800 dark:text-red-500 uppercase tracking-wider mb-1">Net Capacity Remaining</div>
-              <div className={`text-2xl md:text-3xl font-black ${netCap < 0 ? 'text-red-600 dark:text-red-500' : 'text-emerald-600 dark:text-emerald-500'}`}>
-                {netCap > 0 ? '+' : ''}{netCap.toFixed(1)} <span className="text-xs md:text-sm">cr</span>
-              </div>
+            <div className="text-[11px] md:text-xs font-bold text-red-800 dark:text-red-500 uppercase tracking-wider mb-1">Net Capacity Remaining</div>
+            <div className={`text-2xl md:text-3xl font-black ${netCap < 0 ? 'text-red-600 dark:text-red-500' : 'text-emerald-600 dark:text-emerald-500'}`}>
+              {netCap > 0 ? '+' : ''}{netCap.toFixed(1)} <span className="text-xs md:text-sm">cr</span>
             </div>
-            {netCap < 0 ? (
-              <div className="bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/30 text-amber-800 dark:text-amber-400 px-4 py-3 rounded-lg flex items-center gap-2.5 font-bold text-xs md:text-sm shadow-sm leading-tight">
-                <AlertTriangle size={18} className="shrink-0 text-amber-500" /> <span>You are understaffed by {Math.abs(netCap).toFixed(1)} credits for this workload.</span>
-              </div>
-            ) : netCap > 0 ? (
-              <div className="bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/30 text-blue-800 dark:text-blue-400 px-4 py-3 rounded-lg flex items-center gap-2.5 font-bold text-xs md:text-sm shadow-sm leading-tight">
-                <Info size={18} className="shrink-0 text-blue-500" /> <span>You have {netCap.toFixed(1)} unassigned credits. Team members are sitting on the bench!</span>
-              </div>
-            ) : null}
           </div>
+          {netCap < 0 ? (
+            <div className="bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/30 text-amber-800 dark:text-amber-400 px-4 py-3 rounded-lg flex items-center gap-2.5 font-bold text-xs md:text-sm shadow-sm leading-tight">
+              <AlertTriangle size={18} className="shrink-0 text-amber-500" /> <span>You are understaffed by {Math.abs(netCap).toFixed(1)} credits for this workload.</span>
+            </div>
+          ) : netCap > 0 ? (
+            <div className="bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/30 text-blue-800 dark:text-blue-400 px-4 py-3 rounded-lg flex items-center gap-2.5 font-bold text-xs md:text-sm shadow-sm leading-tight">
+              <Info size={18} className="shrink-0 text-blue-500" /> <span>You have {netCap.toFixed(1)} unassigned credits. Team members are sitting on the bench!</span>
+            </div>
+          ) : null}
         </div>
+      </div>
 
-        {/* 3. Service & Category Accordions Layout */}
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 md:mb-6 gap-3 sm:gap-0 w-full">
-          <h2 className="text-lg md:text-xl font-bold text-slate-900 dark:text-zinc-100">Target vs Actual Performance</h2>
-          <div className="flex flex-wrap items-center gap-3 sm:gap-4 text-[10px] md:text-xs font-bold text-slate-500">
-            <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 bg-emerald-500 rounded-sm shrink-0"></div> Completed</div>
-            <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 bg-blue-500 rounded-sm shrink-0"></div> Scheduled</div>
-            <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 bg-slate-300 dark:bg-zinc-600 rounded-sm shrink-0"></div> Backlog</div>
-            <div className="flex items-center gap-1"><div className="w-0.5 h-2.5 bg-red-500 rounded-sm shrink-0"></div> Goal</div>
-          </div>
+      {/* 3. Service & Category Accordions Layout */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 md:mb-6 gap-3 sm:gap-0 w-full">
+        <h2 className="text-lg md:text-xl font-bold text-slate-900 dark:text-zinc-100">Target vs Actual Performance</h2>
+        <div className="flex flex-wrap items-center gap-3 sm:gap-4 text-[10px] md:text-xs font-bold text-slate-500">
+          <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 bg-emerald-500 rounded-sm shrink-0"></div> Completed</div>
+          <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 bg-blue-500 rounded-sm shrink-0"></div> Scheduled</div>
+          <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 bg-slate-300 dark:bg-zinc-600 rounded-sm shrink-0"></div> Backlog</div>
+          <div className="flex items-center gap-1"><div className="w-0.5 h-2.5 bg-red-500 rounded-sm shrink-0"></div> Goal</div>
         </div>
+      </div>
 
-        <div className="space-y-3 sm:space-y-4 w-full">
-          {data.services.map((s: any) => (
-            <div key={s.id} className="bg-white dark:bg-zinc-900 rounded-2xl border border-slate-200 dark:border-zinc-800 shadow-sm overflow-hidden transition-colors w-full">
-              <button onClick={() => toggleService(s.id)} className="w-full p-4 sm:p-6 flex justify-between items-center hover:bg-slate-50 dark:hover:bg-zinc-800/50 outline-none text-left gap-2">
-                <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
-                  {openServices[s.id] ? <ChevronDown size={20} className="text-slate-400 shrink-0" /> : <ChevronRight size={20} className="text-slate-400 shrink-0" />}
-                  <div className="w-2.5 h-2.5 rounded-full shadow-sm shrink-0" style={{backgroundColor: s.theme_color}}/>
-                  <h3 className="font-bold text-sm sm:text-lg text-slate-900 dark:text-zinc-100 truncate flex-1">{s.name}</h3>
-                  {!s.is_active && <span className="px-2 py-0.5 rounded text-[9px] font-extrabold uppercase tracking-wider bg-slate-100 dark:bg-zinc-800 text-slate-500 shrink-0">Inactive</span>}
-                </div>
-              </button>
+      <div className="space-y-3 sm:space-y-4 w-full">
+        {data.services.map((s: any) => (
+          <div key={s.id} className="bg-white dark:bg-zinc-900 rounded-2xl border border-slate-200 dark:border-zinc-800 shadow-sm overflow-hidden transition-colors w-full">
+            <button onClick={() => toggleService(s.id)} className="w-full p-4 sm:p-6 flex justify-between items-center hover:bg-slate-50 dark:hover:bg-zinc-800/50 outline-none text-left gap-2">
+              <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
+                {openServices[s.id] ? <ChevronDown size={20} className="text-slate-400 shrink-0" /> : <ChevronRight size={20} className="text-slate-400 shrink-0" />}
+                <div className="w-2.5 h-2.5 rounded-full shadow-sm shrink-0" style={{backgroundColor: s.theme_color}}/>
+                <h3 className="font-bold text-sm sm:text-lg text-slate-900 dark:text-zinc-100 truncate flex-1">{s.name}</h3>
+                {!s.is_active && <span className="px-2 py-0.5 rounded text-[9px] font-extrabold uppercase tracking-wider bg-slate-100 dark:bg-zinc-800 text-slate-500 shrink-0">Inactive</span>}
+              </div>
+            </button>
 
-              {openServices[s.id] && (
-                <div className="px-4 sm:px-6 pb-4 sm:pb-6 pt-2 border-t border-slate-100 dark:border-zinc-800 animate-in fade-in slide-in-from-top-2 w-full">
-                  <TargetBar label="Overall Service Total" completed={s.completed} planned={s.planned} unplanned={s.unplanned} goal={s.target_goal} isHero={true} />
+            {openServices[s.id] && (
+              <div className="px-4 sm:px-6 pb-4 sm:pb-6 pt-2 border-t border-slate-100 dark:border-zinc-800 animate-in fade-in slide-in-from-top-2 w-full">
+                <TargetBar label="Overall Service Total" completed={s.completed} planned={s.planned} unplanned={s.unplanned} goal={s.target_goal} isHero={true} />
 
-                  {s.categories && s.categories.length > 0 && (
-                    <div className="mt-6 sm:mt-8 w-full">
-                      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-2 sm:gap-0">
-                        <h4 className="text-[10px] md:text-xs font-bold uppercase tracking-wider text-slate-500">Category Breakdowns</h4>
-                        {s.goal_warning && (
-                          <span className="text-[10px] sm:text-[11px] font-bold text-amber-600 bg-amber-50 dark:bg-amber-500/10 px-2 py-1 rounded-md border border-amber-200 dark:border-amber-500/20 leading-tight">
-                            Warning: Overall target is less than sum of category targets.
-                          </span>
-                        )}
-                      </div>
-                      <div className="space-y-4 sm:space-y-6 w-full">
-                        {s.categories.map((c: any) => (
-                          <TargetBar key={c.id} label={c.name} completed={c.completed} planned={c.planned} unplanned={c.unplanned} goal={c.target_goal} isHero={false} />
-                        ))}
-                      </div>
+                {s.categories && s.categories.length > 0 && (
+                  <div className="mt-6 sm:mt-8 w-full">
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-2 sm:gap-0">
+                      <h4 className="text-[10px] md:text-xs font-bold uppercase tracking-wider text-slate-500">Category Breakdowns</h4>
+                      {s.goal_warning && (
+                        <span className="text-[10px] sm:text-[11px] font-bold text-amber-600 bg-amber-50 dark:bg-amber-500/10 px-2 py-1 rounded-md border border-amber-200 dark:border-amber-500/20 leading-tight">
+                          Warning: Overall target is less than sum of category targets.
+                        </span>
+                      )}
                     </div>
-                  )}
-                </div>
-              )}
+                    <div className="space-y-4 sm:space-y-6 w-full">
+                      {s.categories.map((c: any) => (
+                        <TargetBar key={c.id} label={c.name} completed={c.completed} planned={c.planned} unplanned={c.unplanned} goal={c.target_goal} isHero={false} />
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
-            </div>
-          ))}
-        </div>
-
+          </div>
+        ))}
       </div>
     </div>
   );

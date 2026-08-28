@@ -498,8 +498,13 @@ def request_meeting_proposals(test_id: str, payload: MeetingProposalRequest,
 
 
 # Luigi  will call this when it's done thinking!
-@router.post("/save-meeting-proposals", include_in_schema=False)
+@router.post("/save-meeting-proposals")
 async def receive_meeting_proposals(payload: dict, token: str = Depends(verify_luigi_token)):
+    """
+    Luigi  will call this when it's done thinking!
+
+    Payload contains the test_id, user_email, and the AI's proposed slots.
+    """
     # payload contains the test_id, user_email, and the AI's proposed slots
     user_email = payload.get("user_email")
 
@@ -591,9 +596,13 @@ def trigger_luigi_draft(payload: dict, current_user: dict = Depends(get_current_
 
 
 #  Webhook Callback (Called by Luigi)
-@router.post("/vuln-draft-callback", include_in_schema=False)
+@router.post("/vuln-draft-callback")
 def luigi_draft_callback(payload: dict, background_tasks: BackgroundTasks, token: str = Depends(verify_luigi_token)):
-    """Luigi hits this endpoint when the drafted HTML is ready."""
+    """
+    Webhook Callback (Called by Luigi)
+
+    Luigi hits this endpoint when the drafted HTML is ready.
+    """
     ws_message = {
         "action": "VULN_DRAFT_READY",
         "email": payload.get("user_email"),
@@ -610,12 +619,12 @@ def luigi_draft_callback(payload: dict, background_tasks: BackgroundTasks, token
 # ==========================================
 # --- 5. VALIDATION QUEUE ---
 # ==========================================
-@router.post("/validation-callback", summary="Webhook for Luigi's Validation Verdict", include_in_schema=False)
+@router.post("/validation-callback", summary="Webhook for Luigi's Validation Verdict")
 async def luigi_validation_callback(
         payload: dict,
         background_tasks: BackgroundTasks,
         cursor=Depends(get_db_cursor),
-        token: str = Depends(verify_luigi_token)  # <--- ENFORCING LUIGI AUTHENTICATION!
+        token: str = Depends(verify_luigi_token)
 ):
     vuln_uuid = payload.get("vuln_uuid")
     ai_suggestion = payload.get("ai_suggestion")
