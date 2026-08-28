@@ -625,6 +625,7 @@ def bulk_delete_raw_assets(
     return {"message": f"Processed successfully: {deleted_count} deleted, {archived_count} archived."}
 
 
+# --- LEGACY SYNCHRONOUS IMPORT IN BACKGROUND THREAD ---
 def is_valid_uuid(val: str):
     """Helper to ensure provided CSV IDs are valid UUIDs to prevent DB crashes."""
     try:
@@ -634,7 +635,6 @@ def is_valid_uuid(val: str):
         return False
 
 
-# --- LEGACY SYNCHRONOUS IMPORT IN BACKGROUND THREAD ---
 def process_excel_import_sync(contents: bytes, filename: str, current_user: dict):
     with db_cursor_context() as cursor:
         if not cursor: return 0, ["Database connection unavailable"]

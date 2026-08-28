@@ -22,7 +22,7 @@ class RawAssets(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     asset_type_id = Column(UUID(as_uuid=True), ForeignKey('asset_types.id', ondelete='CASCADE'), nullable=False)
-    name = Column(String(500), nullable=False)
+    name = Column(String(500), nullable=False) #
     description = Column(Text, nullable=True)
     business_critical = Column(Integer)
     confidentiality_rating = Column(Integer)
@@ -38,6 +38,8 @@ class RawAssets(Base):
     snow_number = Column(String(100), nullable=True)
     team_note = Column(Text, nullable=True)
     kiss24_asset_id = Column(String, nullable=True)
+    is_kpi = Column(Boolean, default=False)
+    is_critical = Column(Boolean, default=False)
 
     # relashionship
     asset_types = relationship("AssetTypes", back_populates="raw_assets")

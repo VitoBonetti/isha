@@ -153,7 +153,12 @@ def process_and_sync_snow_data(db: Session, snow_records: list, user_id: str, us
         return
 
     # Create fast lookup dictionaries mapping codes/names to UUIDs
-    country_map = {c.code.upper(): c.id for c in db.query(Country).all()}
+    country_map = {}
+    for c in db.query(Country).all():
+        if c.code:
+            country_map[c.code.upper().strip()] = c.id
+        if c.name:
+            country_map[c.name.upper().strip()] = c.id
     asset_type_map = {a.name.lower(): a.id for a in db.query(AssetTypes).all()}
 
     processed_count = 0
@@ -173,17 +178,24 @@ def process_and_sync_snow_data(db: Session, snow_records: list, user_id: str, us
             continue
 
         # Country Mapping Logic
-        company_str = item.pop("company", "")
-        country_code = None
+        implemented_at_str = item.pop("u_implemented_at", "")
+        country_id = None
 
-        if company_str:
-            if "Global" in company_str:
-                country_code = "GIS"
+        if implemented_at_str:
+            # Converted to uppercase making the match completely case-insensitive
+            clean_str = implemented_at_str.upper().strip()
+
+            # Rule 1: Try an exact match against our dictionary (Checks both Codes AND full Names)
+            if clean_str in country_map:
+                country_id = country_map[clean_str]
+
+            # Rule 2: Strip "RANDSTAD" and try again (Handles "RANDSTAD PT" -> "PT" or "RANDSTAD NETHERLANDS" -> "NETHERLANDS")
             else:
-                # Remove "Randstad ", strip whitespace, uppercase (e.g., "Randstad PT" -> "PT")
-                country_code = company_str.replace("Randstad", "").strip().upper()
-
-        country_id = country_map.get(country_code)
+                stripped_str = clean_str.replace("RANDSTAD", "").strip()
+                if stripped_str in country_map:
+                    country_id = country_map[stripped_str]
+                elif "GLOBAL" in clean_str:
+                    country_id = country_map.get("GIS")
 
         # Asset Type Mapping Logic
         asset_type_str = item.pop("u_onetrust_asset_type", "")

@@ -13,6 +13,7 @@ class SecretNotes(Base):
     updated_at = Column(DateTime(timezone=True), default=aware_utcnow)
 
     accesses = relationship('SecretNoteAccess', back_populates='note', cascade='all, delete-orphan')
+    tests = relationship('Tests', back_populates='secret_notes')
 
 
 class SecretNoteAccess(Base):

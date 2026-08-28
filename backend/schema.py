@@ -121,6 +121,8 @@ class RawAssetCreate(AssetBase):
     snow_number: Optional[str] = None
     team_note: Optional[str] = None
     kiss24_asset_id: Optional[str] = None
+    is_kpi: bool = False
+    is_critical: bool = False
 
 class AssetResponse(AssetBase):
     id: UUID4

@@ -50,7 +50,7 @@ class ServiceLanes(Base):
     raw_assets = relationship("RawAssets", back_populates="services_lanes")
     assets = relationship("Assets", back_populates="services_lanes")
     tests = relationship("Tests", back_populates="services_lanes")
-    services_placeholders = relationship("ServicePlaceholders", back_populates="services_lane")
+    service_placeholders = relationship("ServicePlaceholders", back_populates="services_lane")
     goals = relationship('ServiceLaneGoals', back_populates='service_lane', cascade="all, delete")
 
 
