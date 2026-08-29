@@ -1,6 +1,7 @@
 import os
 import json
 import asyncio
+import re
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse
@@ -24,6 +25,42 @@ def chunk_text(text: str, chunk_size: int = 500) -> list[str]:
     """Splits a large text block into smaller chunks of ~500 words."""
     words = text.split()
     return [" ".join(words[i:i + chunk_size]) for i in range(0, len(words), chunk_size)]
+
+
+def extract_relevant_snippet(text: str, query: str, snippet_length: int = 200) -> str:
+    """Finds the 200-character window in a chunk that best matches the user's query."""
+    text = " ".join(text.split())
+    if len(text) <= snippet_length:
+        return text
+
+    # Extract meaningful words from the query
+    stop_words = {"can", "you", "the", "a", "is", "what", "how", "give", "me", "some", "about", "please", "for", "of",
+                  "in", "to"}
+    query_words = set(re.findall(r'\w+', query.lower())) - stop_words
+
+    if not query_words:
+        return text[:snippet_length] + "..."
+
+    best_score = 0
+    best_start = 0
+
+    # Slide a 200-character window across the text, stepping by 50 characters
+    for i in range(0, len(text) - snippet_length, 50):
+        window_text = text[i:i + snippet_length]
+        window_words = set(re.findall(r'\w+', window_text.lower()))
+
+        # Score based on how many unique query words appear in this window
+        score = len(query_words.intersection(window_words))
+
+        if score > best_score:
+            best_score = score
+            best_start = i
+
+    snippet = text[best_start:best_start + snippet_length]
+    prefix = "..." if best_start > 0 else ""
+    suffix = "..." if best_start + snippet_length < len(text) else ""
+
+    return prefix + snippet.strip() + suffix
 
 
 def process_test_documents_background(test_id: str, user_id: str, user_role: str):
@@ -280,10 +317,21 @@ def chat_with_documents(
 
     # 4. Assemble Context & Map
     context_text = ""
-    source_url_map = {}
-    for text_content, file_name, file_url, doc_type in filtered_results[:15]:
-        context_text += f"\n--- Source Document: [{doc_type}] {file_name} ---\n{text_content}\n"
-        source_url_map[file_name] = file_url
+    citations_map = {}  # Maps '1', '2', etc. to their data payload
+
+    # Enumerate starting at 1 to give each chunk a clear ID
+    for idx, (text_content, file_name, file_url, doc_type) in enumerate(filtered_results[:15], start=1):
+        context_text += f"\n--- Source Document [{idx}]: [{doc_type}] {file_name} ---\n{text_content}\n"
+
+        # USE THE SMART SNIPPET EXTRACTOR HERE
+        snippet = extract_relevant_snippet(text_content, req.query, 200)
+
+        citations_map[str(idx)] = {
+            "id": idx,
+            "file_name": file_name,
+            "url": file_url,
+            "snippet": snippet
+        }
 
     if not context_text:
         context_text = "No relevant context documents were found in the database for this specific query."
@@ -303,7 +351,9 @@ def chat_with_documents(
     2. Documents tagged [LLM_ANALYSIS] represent deep quality checks. ALWAYS prioritize [LLM_ANALYSIS] when answering questions about vulnerability quality, false positive status, or grades.
 
     CITATION INSTRUCTIONS:
-    When using information from the context, explicitly mention the document filename directly in your text (e.g., 'According to LLM_Vulnerability_Analysis.md...'). 
+    When using information from the context, you MUST append an inline citation directly after the relevant sentence. 
+    Format the citation EXACTLY as a Markdown link pointing to '#cite-ID'.
+    For example: "The vulnerability allows privilege escalation [[1]](#cite-1)."
     """
 
     config = types.GenerateContentConfig(
@@ -313,57 +363,41 @@ def chat_with_documents(
     # 5. Define the NDJSON Generator
     def event_generator():
         try:
-            chat = client.chats.create(
-                model='gemini-3.5-flash',
-                history=gemini_history,
-                config=config
-            )
-
+            chat = client.chats.create(model='gemini-3.5-flash', history=gemini_history, config=config)
             prompt_with_context = f"Context Documents:\n{context_text}\n\nUser Question: {req.query}"
 
-            # Use send_message_stream instead of send_message
             response_stream = chat.send_message_stream(prompt_with_context)
-
             full_answer = ""
             for chunk in response_stream:
                 if chunk.text:
                     full_answer += chunk.text
-                    # Yield each text token as a JSON string
                     yield json.dumps({"text": chunk.text}) + "\n"
 
-            # Evaluate which sources were actually mentioned in the final text
+            # Evaluate which sources were actually mentioned (look for 'cite:X' in output)
             confirmed_citations = []
-            for file_name, file_url in source_url_map.items():
-                if file_name in full_answer:
-                    confirmed_citations.append({"file_name": file_name, "url": file_url})
+            for cite_id, cite_data in citations_map.items():
+                if f"#cite-{cite_id}" in full_answer:
+                    confirmed_citations.append(cite_data)
+                    log_audit_event(user_id="LUIGI", role="LUIGI", action="CHECK_CITATIONS",
+                                    resource_type="RAG", resource_id=str(cite_id),
+                                    details=f"[RAG DEBUG] Confirmed Citation {cite_id}: {cite_data['file_name']}. Snippet: {cite_data['snippet']}")
 
-            # Fallback: if it didn't explicitly cite inline but we provided context, attach the context sources
-            if not confirmed_citations and source_url_map:
-                for file_name, file_url in source_url_map.items():
-                    confirmed_citations.append({"file_name": file_name, "url": file_url})
-
-            # Yield the final citations payload
             yield json.dumps({"citations": confirmed_citations}) + "\n"
 
-            # Open a new cursor inside the generator to save the finalized answer
             with db_cursor_context() as stream_cursor:
                 stream_cursor.execute("""
                     INSERT INTO rag_chat_logs (id, session_id, user_id, test_id, asset_id, question, answer, timestamp)
                     VALUES (gen_random_uuid(), %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
                 """, (
-                    str(req.session_id),
-                    str(current_user["id"]),
-                    str(req.test_id) if req.test_id else None,
-                    str(req.asset_id) if req.asset_id else None,
-                    req.query,
-                    full_answer
+                    str(req.session_id), str(current_user["id"]),
+                    str(req.test_id) if req.test_id else None, str(req.asset_id) if req.asset_id else None,
+                    req.query, full_answer
                 ))
                 stream_cursor.connection.commit()
 
         except Exception as e:
             yield json.dumps({"error": str(e)}) + "\n"
 
-    # Return the stream with x-ndjson content type
     return StreamingResponse(event_generator(), media_type="application/x-ndjson")
 
 

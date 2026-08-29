@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { twMerge } from 'tailwind-merge';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { v4 as uuidv4 } from 'uuid';
 import { Send, Trash2, Bot, User, Link as LinkIcon } from 'lucide-react';
 import type { Citation, Message } from "../types/board";
@@ -201,7 +202,7 @@ export default function RagChatPage() {
                 {/* CHAT BUBBLE */}
                 <div
                   className={twMerge(
-                    'flex flex-col gap-2 rounded-2xl px-5 py-4 shadow-sm',
+                    'flex flex-col gap-2 rounded-2xl px-5 py-4 shadow-sm relative',
                     isUser
                       ? 'bg-slate-100 dark:bg-zinc-800 text-slate-900 dark:text-zinc-100 rounded-tr-none border border-slate-200 dark:border-zinc-700'
                       : twMerge(
@@ -212,13 +213,85 @@ export default function RagChatPage() {
                 >
                   <div className="text-sm leading-relaxed">
                     <ReactMarkdown
+                      urlTransform={(url) => url}
+                      remarkPlugins={[remarkGfm]}
                       components={{
                         p: ({ node, ...props }) => <p className="mb-3 last:mb-0" {...props} />,
                         strong: ({ node, ...props }) => <strong className="font-semibold text-slate-950 dark:text-white" {...props} />,
                         ul: ({ node, ...props }) => <ul className="list-disc pl-5 mb-3 space-y-1" {...props} />,
                         ol: ({ node, ...props }) => <ol className="list-decimal pl-5 mb-3 space-y-1" {...props} />,
                         li: ({ node, ...props }) => <li className="text-slate-800 dark:text-zinc-300" {...props} />,
-                        a: ({ node, ...props }) => <a className="text-blue-600 dark:text-blue-400 hover:underline font-medium" target="_blank" rel="noopener noreferrer" {...props} />,
+
+                        // NEW: Table Renderers
+                        table: ({ node, ...props }) => (
+                          <div className="overflow-x-auto mb-4 border border-slate-200 dark:border-zinc-700 rounded-lg">
+                            <table className="min-w-full divide-y divide-slate-200 dark:divide-zinc-700 text-sm" {...props} />
+                          </div>
+                        ),
+                        thead: ({ node, ...props }) => <thead className="bg-slate-100 dark:bg-zinc-800" {...props} />,
+                        th: ({ node, ...props }) => (
+                          <th className="px-4 py-2.5 text-left font-semibold text-slate-900 dark:text-zinc-100 border-b border-slate-200 dark:border-zinc-700" {...props} />
+                        ),
+                        td: ({ node, ...props }) => (
+                          <td className="px-4 py-2 border-t border-slate-200 dark:border-zinc-700/50" {...props} />
+                        ),
+
+                        // CUSTOM INTERACTIVE CITATION CHIP RENDERER (Snippet Removed)
+                        a: ({ node, href, children, ...props }) => {
+                          if (href?.startsWith('#cite-')) {
+                            const citeIdStr = href.replace('#cite-', '').trim();
+                            const citationData = msg.citations?.find(c => String(c.id) === citeIdStr);
+
+                            return (
+                              <span className="relative inline-block group mx-0.5 font-sans align-baseline">
+                                <a
+                                  href={citationData?.url || undefined}
+                                  target={citationData?.url ? "_blank" : undefined}
+                                  rel="noopener noreferrer"
+                                  onClick={(e) => {
+                                    if (!citationData?.url) {
+                                      e.preventDefault();
+                                    }
+                                  }}
+                                  className="inline-flex items-center justify-center px-1.5 py-0.5 text-[10px] font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-100 dark:bg-emerald-500/20 border border-emerald-500/30 rounded cursor-pointer hover:bg-emerald-200 dark:hover:bg-emerald-500/40 transition-colors no-underline shadow-sm"
+                                >
+                                  {children}
+                                </a>
+
+                                {/* HOVER TOOLTIP CARD (Simplified) */}
+                                {citationData ? (
+                                  <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-max max-w-xs p-2.5 bg-slate-900 dark:bg-zinc-100 text-slate-100 dark:text-zinc-900 text-xs rounded-xl shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-[100] pointer-events-none flex flex-col text-left font-normal normal-case">
+                                    <span className="font-bold flex items-center gap-1.5 text-xs text-emerald-400 dark:text-emerald-600">
+                                      <LinkIcon size={12} className="shrink-0" />
+                                      <span className="truncate">{citationData.file_name}</span>
+                                    </span>
+                                    <span className="mt-1 text-[10px] text-slate-400 dark:text-slate-500 font-semibold text-right block">
+                                      Click to open document ↗
+                                    </span>
+                                    <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-slate-900 dark:bg-zinc-100 rotate-45 block"></span>
+                                  </span>
+                                ) : (
+                                  <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-max px-2.5 py-1.5 bg-slate-900 dark:bg-zinc-100 text-slate-100 dark:text-zinc-900 text-[10px] rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-[100] pointer-events-none">
+                                    Processing source...
+                                  </span>
+                                )}
+                              </span>
+                            );
+                          }
+
+                          // Standard web links
+                          return (
+                            <a
+                              className="text-blue-600 dark:text-blue-400 hover:underline font-medium break-all"
+                              href={href}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              {...props}
+                            >
+                              {children}
+                            </a>
+                          );
+                        },
                         code: ({ node, ...props }) => <code className="bg-slate-200 dark:bg-zinc-800 text-pink-600 dark:text-pink-400 px-1.5 py-0.5 rounded text-xs font-mono" {...props} />,
                         pre: ({ node, ...props }) => <pre className="bg-slate-800 text-slate-50 p-3 rounded-lg overflow-x-auto text-xs mb-3" {...props} />,
                         h1: ({ node, ...props }) => <h1 className="text-lg font-bold mb-2 mt-4 text-slate-900 dark:text-white" {...props} />,
@@ -230,22 +303,23 @@ export default function RagChatPage() {
                     </ReactMarkdown>
                   </div>
 
-                  {/* CITATIONS */}
+                  {/* CITATIONS SUMMARY LIST AT BOTTOM */}
                   {msg.citations && msg.citations.length > 0 && (
                     <div className="mt-3 pt-3 border-t border-slate-200 dark:border-zinc-800">
                       <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-zinc-500 block mb-2">
                         Sources
                       </span>
                       <div className="flex flex-wrap gap-2">
-                        {msg.citations.map((cite, i) => (
+                        {msg.citations.map((cite) => (
                           <a
-                            key={i}
+                            key={cite.id}
                             href={cite.url}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="inline-flex items-center gap-1.5 text-xs bg-slate-50 dark:bg-zinc-950 hover:bg-slate-100 dark:hover:bg-zinc-800 text-blue-600 dark:text-blue-400 px-2.5 py-1 rounded-md border border-slate-200 dark:border-zinc-700 transition-colors"
                           >
                             <LinkIcon size={12} />
+                            <span className="font-bold text-emerald-600">[{cite.id}]</span>
                             <span className="truncate max-w-[200px]">{cite.file_name}</span>
                           </a>
                         ))}
