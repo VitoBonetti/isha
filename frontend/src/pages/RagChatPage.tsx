@@ -66,20 +66,73 @@ export default function RagChatPage() {
       });
 
       if (!response.ok) throw new Error(`Status ${response.status}`);
-      const data = await response.json();
+      if (!response.body) throw new Error("No readable stream available.");
 
-      setMessages([
-        ...newMessages,
+      // Setup the stream reader
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let assistantMessage = '';
+
+      // Immediately append an empty assistant message to the UI to hold the stream
+      setMessages((prev) => [
+        ...prev,
         {
           role: 'assistant',
-          content: data.answer || 'No response returned.',
-          citations: data.citations || [],
+          content: '',
+          citations: [],
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         },
       ]);
+
+      // Stop the bouncing loading dots since the stream is starting
+      setIsLoading(false);
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunkText = decoder.decode(value, { stream: true });
+
+        // Split by newline because multiple JSON lines might arrive in a single packet
+        const lines = chunkText.split('\n');
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+
+          try {
+            const data = JSON.parse(line);
+
+            if (data.error) {
+              throw new Error(data.error);
+            }
+
+            // Append text tokens to the message content
+            if (data.text) {
+              assistantMessage += data.text;
+              setMessages((prev) => {
+                const updated = [...prev];
+                updated[updated.length - 1].content = assistantMessage;
+                return updated;
+              });
+            }
+
+            // Apply final citations when the stream ends
+            if (data.citations) {
+              setMessages((prev) => {
+                const updated = [...prev];
+                updated[updated.length - 1].citations = data.citations;
+                return updated;
+              });
+            }
+          } catch (err) {
+            console.error("Error parsing stream line:", line, err);
+          }
+        }
+      }
     } catch (error: any) {
-      setMessages([
-        ...newMessages,
+      setIsLoading(false);
+      setMessages((prev) => [
+        ...prev,
         {
           role: 'assistant',
           content: `⚠️ Error fetching response: ${error.message}`,
@@ -88,8 +141,6 @@ export default function RagChatPage() {
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         },
       ]);
-    } finally {
-      setIsLoading(false);
     }
   };
 

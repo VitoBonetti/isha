@@ -3,6 +3,7 @@ import json
 import asyncio
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi.responses import StreamingResponse
 from pydantic import UUID4
 from google import genai
 from google.genai import types
@@ -12,7 +13,6 @@ from utils.document_parser import extract_text_from_drive_file
 from utils.secret_manager import get_secret
 from audit_logger import log_audit_event
 from schema import RagChatRequest, RagAIResponse
-
 
 router = APIRouter(prefix="/api/rag", tags=["RAG Intelligence"])
 
@@ -73,16 +73,22 @@ def process_test_documents_background(test_id: str, user_id: str, user_role: str
                     # 3. Extract text from Google Drive
                     try:
                         raw_text = extract_text_from_drive_file(drive_file_id, mime_type)
-                        log_audit_event(user_id=str(user_id), role=str(user_role), action="EXTRACT_TEXT_FROM_DOCUMENT", resource_type="RAG", resource_id=str(doc_id), details=f"Extract text from Google Drive Document: {file_name}")
+                        log_audit_event(user_id=str(user_id), role=str(user_role), action="EXTRACT_TEXT_FROM_DOCUMENT",
+                                        resource_type="RAG", resource_id=str(doc_id),
+                                        details=f"Extract text from Google Drive Document: {file_name}")
                     except Exception as e:
-                        log_audit_event(user_id=str(user_id), role=str(user_role), action="EXTRACT_TEXT_FROM_DOCUMENT_FAILED", resource_type="RAG", resource_id=str(doc_id), details=f"Failed to parse {file_name}: {e}")
+                        log_audit_event(user_id=str(user_id), role=str(user_role),
+                                        action="EXTRACT_TEXT_FROM_DOCUMENT_FAILED", resource_type="RAG",
+                                        resource_id=str(doc_id), details=f"Failed to parse {file_name}: {e}")
                         continue
 
                     if not raw_text or not raw_text.strip():
                         continue
 
                     chunks = chunk_text(raw_text)
-                    log_audit_event(user_id=str(user_id), role=str(user_role), action="CHUCK_TEXT", resource_type="RAG",resource_id=str(doc_id), details=f"Split into 500-word chunks Document: {file_name}")
+                    log_audit_event(user_id=str(user_id), role=str(user_role), action="CHUCK_TEXT", resource_type="RAG",
+                                    resource_id=str(doc_id),
+                                    details=f"Split into 500-word chunks Document: {file_name}")
 
                 if not chunks:
                     continue
@@ -95,7 +101,9 @@ def process_test_documents_background(test_id: str, user_id: str, user_role: str
                         config=types.EmbedContentConfig(output_dimensionality=768)
                     )
                 except Exception as e:
-                    log_audit_event(user_id=str(user_id), role=str(user_role), action="GEMINI_MODEL_FAILED", resource_type="RAG", resource_id=str(doc_id), details=f"Generate embeddings using Gemini API failed for test {doc_id}: {str(e)}" )
+                    log_audit_event(user_id=str(user_id), role=str(user_role), action="GEMINI_MODEL_FAILED",
+                                    resource_type="RAG", resource_id=str(doc_id),
+                                    details=f"Generate embeddings using Gemini API failed for test {doc_id}: {str(e)}")
                     continue
 
                 # 5. Insert chunks and their vectors into the database
@@ -107,10 +115,13 @@ def process_test_documents_background(test_id: str, user_id: str, user_role: str
                     """, (doc_id, test_id, index, chunk_text_content, vector_str))
 
             cursor.connection.commit()
-            log_audit_event(user_id=str(user_id), role=str(user_role), action="CHUNK_TEXT_EMBEDED", resource_type="RAG", resource_id=str(test_id), details=f"Generate embeddings using Gemini API Successful for test {test_id}")
+            log_audit_event(user_id=str(user_id), role=str(user_role), action="CHUNK_TEXT_EMBEDED", resource_type="RAG",
+                            resource_id=str(test_id),
+                            details=f"Generate embeddings using Gemini API Successful for test {test_id}")
         except Exception as e:
             cursor.connection.rollback()
-            log_audit_event(user_id=str(user_id), role=str(user_role), action="RAG_SYNC_FAILED", resource_type="RAG", resource_id=str(test_id), details=f"RAG Sync failed for test {test_id}: {str(e)}")
+            log_audit_event(user_id=str(user_id), role=str(user_role), action="RAG_SYNC_FAILED", resource_type="RAG",
+                            resource_id=str(test_id), details=f"RAG Sync failed for test {test_id}: {str(e)}")
 
 
 @router.get("/", summary="[Admin] Testing endpoint for check the chunck")
@@ -210,25 +221,12 @@ async def start_nightly_rag_scheduler():
 
 
 # --- CHATS ---
-@router.post("/chat", summary="Query the RAG Knowledge Base")
+@router.post("/chat", summary="Query the RAG Knowledge Base (Streaming)")
 def chat_with_documents(
         req: RagChatRequest,
         current_user: dict = Depends(require_admin)
 ):
-    """
-    Admin only endpoint for chat with Luigi.
-    1. Embed the user's question using the exact same model
-    2. Perform Vector Similarity Search in PostgreSQL, fetching doc_type and dc.test_id, and using LIMIT 10
-    3. Fetch previous chat history for this session
-    4. Apply Metadata De-duplication Rules. Rule: If a FULL_TEST_REPORT exists for a test in results, discard VULN_REPORT chunks for that same test.
-    5. Assemble Context & Build Source URL Lookup Map: Take the top 5 chunks AFTER we have filtered out the duplicates
-    6. Format the Chat History for Gemini
-    7. Initialize the Chat Session with System Instructions
-    8. Parse structured JSON output
-    9. Build Final Citations List (ONLY for sources confirmed by Gemini)
-    10. Save the new interaction to the database
-    """
-    # 1. Embed the user's question using the exact same model
+    # 1. Embed the user's question
     try:
         query_response = client.models.embed_content(
             model='gemini-embedding-2',
@@ -239,9 +237,8 @@ def chat_with_documents(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to embed query: {str(e)}")
 
-    # 2. Perform Vector Similarity Search in PostgreSQL
+    # 2. Perform Vector Similarity Search
     with db_cursor_context() as cursor:
-        # fetching doc_type and dc.test_id, and using LIMIT 30
         query_sql = """
             SELECT dc.text_content, td.file_name, td.file_url, td.doc_type, 1 - (dc.embedding <=> %s::vector) as similarity, dc.test_id
             FROM document_chunks dc
@@ -259,7 +256,6 @@ def chat_with_documents(
 
         raw_results = cursor.fetchall()
 
-        # 3. Fetch previous chat history for this session
         cursor.execute("""
             SELECT question, answer 
             FROM rag_chat_logs 
@@ -268,8 +264,7 @@ def chat_with_documents(
         """, (str(req.session_id),))
         history_rows = cursor.fetchall()
 
-    # 4. Apply Metadata De-duplication Rules
-    # Rule: If a FULL_TEST_REPORT exists for a test in results, discard VULN_REPORT chunks for that same test.
+    # 3. Apply Metadata De-duplication Rules
     has_full_report_for_test = set()
     for _, _, _, doc_type, similarity, t_id in raw_results:
         if similarity > 0.35 and doc_type == 'FULL_TEST_REPORT':
@@ -279,16 +274,13 @@ def chat_with_documents(
     for text_content, file_name, file_url, doc_type, similarity, t_id in raw_results:
         if similarity <= 0.35:
             continue
-        # Discard individual vuln report chunks if full test report is present
         if doc_type == 'VULN_REPORT' and t_id in has_full_report_for_test:
             continue
         filtered_results.append((text_content, file_name, file_url, doc_type))
 
-    # 5. Assemble Context & Build Source URL Lookup Map
+    # 4. Assemble Context & Map
     context_text = ""
     source_url_map = {}
-
-    # Take the top 5 chunks AFTER we have filtered out the duplicates
     for text_content, file_name, file_url, doc_type in filtered_results[:15]:
         context_text += f"\n--- Source Document: [{doc_type}] {file_name} ---\n{text_content}\n"
         source_url_map[file_name] = file_url
@@ -296,82 +288,83 @@ def chat_with_documents(
     if not context_text:
         context_text = "No relevant context documents were found in the database for this specific query."
 
-    # 6. Format the Chat History for Gemini
     gemini_history = []
     for past_q, past_a in history_rows:
         gemini_history.append(types.Content(role="user", parts=[types.Part.from_text(text=past_q)]))
         gemini_history.append(types.Content(role="model", parts=[types.Part.from_text(text=past_a)]))
 
-    # 7. Initialize the Chat Session with System Instructions
     system_instruction = """
     You are an expert cybersecurity assistant for the Global Offensive Security Team.
     Answer the user's question based strictly on the provided Context Documents and your previous conversation history.
     If the context does not contain the answer, politely state that you do not have that information.
-    Do not invent vulnerabilities, scores, or findings.
-    
+
     DOCUMENT TAXONOMY & ROUTING RULES:
     1. Documents tagged [FULL_TEST_REPORT] are the canonical source for overall pentest scope, vulnerability summaries, and official findings.
-    2. Documents tagged [LLM_ANALYSIS] represent deep quality checks (vulnerability grade, validity assessment, evidence completeness, and recommendation accuracy). ALWAYS prioritize [LLM_ANALYSIS] when answering questions about vulnerability quality, false positive status, or grades.
-    3. Documents tagged [PRESENTATION] represent executive slide decks.
-    
-    STRICT CITATION RULES:
-    1. In 'used_sources', ONLY list the exact document filenames from the context that you explicitly extracted facts from to answer the question.
-    2. If you do not find the answer in the provided context, state that clearly in 'answer' and set 'used_sources' to an empty list [].
-    3. Do NOT include a filename in 'used_sources' if you did not use information from that specific file.
+    2. Documents tagged [LLM_ANALYSIS] represent deep quality checks. ALWAYS prioritize [LLM_ANALYSIS] when answering questions about vulnerability quality, false positive status, or grades.
+
+    CITATION INSTRUCTIONS:
+    When using information from the context, explicitly mention the document filename directly in your text (e.g., 'According to LLM_Vulnerability_Analysis.md...'). 
     """
 
     config = types.GenerateContentConfig(
-        system_instruction=system_instruction,
-        response_mime_type="application/json",
-        response_schema=RagAIResponse
+        system_instruction=system_instruction
     )
 
-    try:
-        chat = client.chats.create(
-            model='gemini-3.5-flash',
-            history=gemini_history,
-            config=config
-        )
+    # 5. Define the NDJSON Generator
+    def event_generator():
+        try:
+            chat = client.chats.create(
+                model='gemini-3.5-flash',
+                history=gemini_history,
+                config=config
+            )
 
-        prompt_with_context = f"Context Documents:\n{context_text}\n\nUser Question: {req.query}"
-        chat_response = chat.send_message(prompt_with_context)
+            prompt_with_context = f"Context Documents:\n{context_text}\n\nUser Question: {req.query}"
 
-        # 8. Parse structured JSON output
-        parsed_output = json.loads(chat_response.text)
-        answer = parsed_output.get("answer", "I couldn't process an answer.")
-        used_sources = parsed_output.get("used_sources", [])
+            # Use send_message_stream instead of send_message
+            response_stream = chat.send_message_stream(prompt_with_context)
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to generate answer: {str(e)}")
+            full_answer = ""
+            for chunk in response_stream:
+                if chunk.text:
+                    full_answer += chunk.text
+                    # Yield each text token as a JSON string
+                    yield json.dumps({"text": chunk.text}) + "\n"
 
-    # 9. Build Final Citations List (ONLY for sources confirmed by Gemini)
-    citations = []
-    for file_name in used_sources:
-        if file_name in source_url_map:
-            citations.append({
-                "file_name": file_name,
-                "url": source_url_map[file_name]
-            })
+            # Evaluate which sources were actually mentioned in the final text
+            confirmed_citations = []
+            for file_name, file_url in source_url_map.items():
+                if file_name in full_answer:
+                    confirmed_citations.append({"file_name": file_name, "url": file_url})
 
-    # 10. Save the new interaction to the database
-    with db_cursor_context() as cursor:
-        cursor.execute("""
-            INSERT INTO rag_chat_logs (id, session_id, user_id, test_id, asset_id, question, answer, timestamp)
-            VALUES (gen_random_uuid(), %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
-        """, (
-            str(req.session_id),
-            str(current_user["id"]),
-            str(req.test_id) if req.test_id else None,
-            str(req.asset_id) if req.asset_id else None,
-            req.query,
-            answer
-        ))
-        cursor.connection.commit()
+            # Fallback: if it didn't explicitly cite inline but we provided context, attach the context sources
+            if not confirmed_citations and source_url_map:
+                for file_name, file_url in source_url_map.items():
+                    confirmed_citations.append({"file_name": file_name, "url": file_url})
 
-    return {
-        "answer": answer,
-        "citations": citations
-    }
+            # Yield the final citations payload
+            yield json.dumps({"citations": confirmed_citations}) + "\n"
+
+            # Open a new cursor inside the generator to save the finalized answer
+            with db_cursor_context() as stream_cursor:
+                stream_cursor.execute("""
+                    INSERT INTO rag_chat_logs (id, session_id, user_id, test_id, asset_id, question, answer, timestamp)
+                    VALUES (gen_random_uuid(), %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                """, (
+                    str(req.session_id),
+                    str(current_user["id"]),
+                    str(req.test_id) if req.test_id else None,
+                    str(req.asset_id) if req.asset_id else None,
+                    req.query,
+                    full_answer
+                ))
+                stream_cursor.connection.commit()
+
+        except Exception as e:
+            yield json.dumps({"error": str(e)}) + "\n"
+
+    # Return the stream with x-ndjson content type
+    return StreamingResponse(event_generator(), media_type="application/x-ndjson")
 
 
 @router.get('/rag_chat_logs', summary='{Admin only] Rag Chat Logs')
