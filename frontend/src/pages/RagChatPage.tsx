@@ -11,6 +11,7 @@ import { useAppContext } from "../context/AppContext";
 
 export default function RagChatPage() {
   const [sessionId, setSessionId] = useState<string>(uuidv4());
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [messages, setMessages] = useState<Message[]>([
     {
       role: 'assistant',
@@ -358,18 +359,36 @@ export default function RagChatPage() {
 
         {/* INPUT FORM */}
         <form onSubmit={handleSend} className="p-4 bg-slate-50 dark:bg-zinc-900/50 border-t border-slate-200 dark:border-zinc-800">
-          <div className="relative flex items-center">
-            <input
-              type="text"
+          <div className="relative flex items-end">
+            <textarea
+              ref={textareaRef}
               value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="Ask a question about findings, scope, leads..."
-              className="w-full bg-white dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 placeholder-slate-400 dark:placeholder-zinc-600 text-sm rounded-full pl-6 pr-14 py-4 border border-slate-300 dark:border-zinc-700 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+              onChange={(e) => {
+                setInput(e.target.value);
+                // Auto-resize magic
+                e.target.style.height = 'auto';
+                e.target.style.height = `${Math.min(e.target.scrollHeight, 200)}px`;
+              }}
+              onKeyDown={(e) => {
+                // Submit on Enter (unless Shift is held)
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSend(e);
+                  // Reset height after sending
+                  if (textareaRef.current) {
+                    textareaRef.current.style.height = 'auto';
+                  }
+                }
+              }}
+              placeholder="Ask a question about findings, scope, leads... (Shift+Enter for new line)"
+              className="w-full bg-white dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 placeholder-slate-400 dark:placeholder-zinc-600 text-sm rounded-3xl pl-6 pr-14 py-4 border border-slate-300 dark:border-zinc-700 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 resize-none overflow-y-auto [&::-webkit-scrollbar]:hidden"
+              rows={1}
+              style={{ minHeight: '54px', maxHeight: '200px' }}
             />
             <button
               type="submit"
               disabled={!input.trim() || isLoading}
-              className="absolute right-2 p-2 text-white bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:hover:bg-emerald-600 rounded-full transition-all"
+              className="absolute right-2 bottom-2 p-2 text-white bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:hover:bg-emerald-600 rounded-full transition-all mb-[5px]"
             >
               <Send size={18} />
             </button>
