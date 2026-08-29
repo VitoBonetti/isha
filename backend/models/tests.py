@@ -3,6 +3,7 @@ import enum
 from sqlalchemy import Column, String, Integer, ForeignKey, REAL, Enum, DateTime, Boolean, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
+from pgvector.sqlalchemy import Vector
 from database import Base
 from utils.timeaware import aware_utcnow
 
@@ -41,6 +42,8 @@ class Tests(Base):
     test_history = relationship("TestHistory", back_populates="tests", cascade="all, delete-orphan")
     secret_notes = relationship("SecretNotes", back_populates="tests")
     documents = relationship("TestDocuments", back_populates="tests", cascade="all, delete-orphan")
+    document_chuncks = relationship("DocumentChunks", back_populates="tests")
+    rag_chat_logs = relationship("RagChatLogs", back_populates="tests")
 
 
 class TestDocuments(Base):
@@ -57,6 +60,40 @@ class TestDocuments(Base):
 
     # relationships
     tests = relationship("Tests", back_populates="documents")
+    document_chuncks = relationship("DocumentChunks", back_populates="documents")
+
+
+class DocumentChunk(Base):
+    __tablename__ = 'document_chunks'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    document_id = Column(UUID(as_uuid=True), ForeignKey('test_documents.id', ondelete='CASCADE'), nullable=False)
+    test_id = Column(UUID(as_uuid=True), ForeignKey('tests.id', ondelete='CASCADE'), nullable=False)
+    chunk_index = Column(Integer, nullable=False)
+    text_content = Column(Text, nullable=False)
+    embedding = Column(Vector(768), nullable=False)  # 768 is the standard dimension output for gemini-embedding-2
+    created_at = Column(DateTime(timezone=True), default=aware_utcnow)
+
+
+    documents = relationship("TestDocuments", back_populates="document_chunks")
+    tests = relationship("Tests", back_populates="document_chunks")
+
+
+class RagChatLogs(Base):
+    __tablename__ = 'rag_chat_logs'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    session_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    test_id = Column(UUID(as_uuid=True), ForeignKey('tests.id', ondelete='CASCADE'), nullable=True) # Nullable for global searches
+    asset_id = Column(UUID(as_uuid=True), ForeignKey('assets.id', ondelete='CASCADE'), nullable=True)
+    question = Column(Text, nullable=False)
+    answer = Column(Text, nullable=False)
+    timestamp = Column(DateTime(timezone=True), default=aware_utcnow)
+
+    # Optional relationships
+    users = relationship("Users", back_populates="rag_chat_logs")
+    tests = relationship("Tests", back_populates="rag_chat_logs")
 
 
 class TestAssets(Base):

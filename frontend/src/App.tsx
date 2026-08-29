@@ -13,6 +13,8 @@ import InsightsView from "./pages/InsightsView";
 import TestDetailsView from "./pages/TestDetailsView";
 import VulnAnalysisView from "./pages/VulnAnalysisView"
 import ValidatingVulnsView from "./pages/ValidatingVulnsView";
+import DocumentsView from "./pages/DocumentsView";
+import RagChatPage from './pages/RagChatPage';
 import AssetReconciliationView from './pages/settings/AssetReconciliationView';
 import ControlPanelLayout from './layouts/ControlPanelLayout';
 import ControlPanelHome from './pages/settings/ControlPanelHome';
@@ -55,6 +57,8 @@ function AppContent() {
           <Route path="pool" element={<AssetsView />} />
           <Route path="analytics" element={<CountriesView />} />
           <Route path="insights" element={<InsightsView />} />
+          <Route path="documents" element={<DocumentsView />} />
+          <Route path="rag" element={<RagChatPage />} />
         </Route>
 
         {/* Modular Control Panel */}

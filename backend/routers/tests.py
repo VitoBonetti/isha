@@ -35,6 +35,7 @@ from utils.drive_manager import (
 from utils.secret_manager import get_secret
 from utils.vuln_analysis import build_payload, run_cloud_run_analysis
 from utils.security_cipher import get_cipher
+from routers.rag import process_test_documents_background
 from presentations.presentation import generate_presentation
 from reports import osrgt_v3, pdf_gen
 from utils.kiss24_service import validate_kiss24_findings, get_vuln_fields_map, fetch_all_kiss24, get_report_type_id
@@ -127,6 +128,11 @@ async def process_presentation_background(test_id: str, kiss24_id: str, user_id:
                         ON CONFLICT (test_id, step_name) DO UPDATE SET is_completed = true
                     """, (test_id,))
                     cursor.connection.commit()
+
+            try:
+                await asyncio.to_thread(process_test_documents_background, test_id, user_id, user_role)
+            except Exception as rag_err:
+                print(f"RAG ingestion warning (Presentation): {rag_err}")
 
         # Format the unhealthy warnings into a readable list
         issues = []
@@ -244,6 +250,11 @@ async def process_report_background(test_id: str, kiss24_id: str, user_id: str, 
                 """, (test_id,))
                 cursor.connection.commit()
 
+        try:
+            await asyncio.to_thread(process_test_documents_background, test_id, user_id, user_role)
+        except Exception as rag_err:
+            print(f"RAG ingestion warning (Main Report): {rag_err}")
+
         # --- SUCCESS HANDLING ---
         message = f"Report for '{test_name}' is ready!\nPDF Link: {pdf_result['link']}"
         await manager.broadcast(json.dumps({"action": "REPORT_READY", "email": user_email, "message": message}))
@@ -355,6 +366,11 @@ async def process_vuln_report_background(test_id: str, kiss24_id: str, user_id: 
 
             if cursor:
                 cursor.connection.commit()
+
+        try:
+            await asyncio.to_thread(process_test_documents_background, test_id, user_id, user_role)
+        except Exception as rag_err:
+            print(f"RAG ingestion warning (Vuln Reports): {rag_err}")
 
         # 2. Build the detailed message with links
         message = f"Successfully generated {uploaded_count} vulnerability report(s) for '{test_name}':\n"

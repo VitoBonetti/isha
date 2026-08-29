@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, UUID4
+from pydantic import BaseModel, EmailStr, UUID4, Field
 from typing import Optional, List
 from datetime import date, datetime
 from enum import Enum
@@ -304,3 +304,13 @@ class ReconcileAssetPayload(BaseModel):
 
 class BulkReconcileAssetPayload(BaseModel):
     assets: List[ReconcileAssetPayload]
+
+class RagChatRequest(BaseModel):
+    query: str
+    session_id: UUID4
+    test_id: Optional[UUID4] = None
+    asset_id: Optional[UUID4] = None
+
+class RagAIResponse(BaseModel):
+    answer: str = Field(description="The response text to the user's question.")
+    used_sources: List[str] = Field(description="List of exact document file names actually used to answer the question. Empty if no sources were used or no answer was found.")

@@ -29,6 +29,7 @@ class Users(Base):
     assignments = relationship("Assignments", back_populates="users")
     events = relationship("Events", back_populates="users")
     notifications = relationship("Notifications", back_populates="users")
+    rag_chat_logs = relationship("RagChatLogs", back_populates="users")
 
 
 class ApiKeys(Base):

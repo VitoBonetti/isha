@@ -71,3 +71,16 @@ export interface BoardData {
   events: any[];
   placeholders: Placeholder[];
 }
+
+export interface Citation {
+  file_name: string;
+  url: string;
+}
+
+export interface Message {
+  role: 'user' | 'assistant';
+  content: string;
+  citations?: Citation[];
+  timestamp: string;
+  isError?: boolean;
+}

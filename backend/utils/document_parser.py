@@ -1,0 +1,96 @@
+import io
+import zipfile
+import pandas as pd
+import fitz  # PyMuPDF
+from docx import Document
+from googleapiclient.discovery import build
+import google.auth
+
+# --- MIME TYPE MAPPINGS ---
+GOOGLE_MIME_TYPES = {
+    'doc': 'application/vnd.google-apps.document',
+    'sheet': 'application/vnd.google-apps.spreadsheet',
+    'slide': 'application/vnd.google-apps.presentation'
+}
+
+EXPORT_MIME_TYPES = {
+    'doc': 'text/plain',
+    'sheet': 'text/csv',
+    'slide': 'text/plain'
+}
+
+
+def get_drive_service():
+    # Use your existing GCP service account credentials setup here
+    credentials, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/drive.readonly"])
+    return build('drive', 'v3', credentials=credentials)
+
+
+def extract_text_from_drive_file(drive_file_id: str, mime_type: str) -> str:
+    """
+    Downloads or exports a file from Google Drive and extracts all text.
+    """
+    service = get_drive_service()
+
+    # 1. HANDLE NATIVE GOOGLE WORKSPACE FILES (EXPORT)
+    if mime_type == GOOGLE_MIME_TYPES['doc']:
+        request = service.files().export_media(fileId=drive_file_id, mimeType=EXPORT_MIME_TYPES['doc'])
+        return request.execute().decode('utf-8')
+
+    elif mime_type == GOOGLE_MIME_TYPES['sheet']:
+        request = service.files().export_media(fileId=drive_file_id, mimeType=EXPORT_MIME_TYPES['sheet'])
+        return request.execute().decode('utf-8')
+
+    elif mime_type == GOOGLE_MIME_TYPES['slide']:
+        request = service.files().export_media(fileId=drive_file_id, mimeType=EXPORT_MIME_TYPES['slide'])
+        return request.execute().decode('utf-8')
+
+    # 2. HANDLE STANDARD BLOB FILES (DOWNLOAD)
+    request = service.files().get_media(fileId=drive_file_id)
+    file_bytes = request.execute()
+    file_stream = io.BytesIO(file_bytes)
+
+    # 3. PARSE BLOB FILES BASED ON MIME TYPE
+    if mime_type == 'application/pdf':
+        doc = fitz.open(stream=file_bytes, filetype="pdf")
+        text = "\n".join([page.get_text() for page in doc])
+        return text
+
+    elif mime_type == 'application/vnd.openxmlformats-officedocument.wordprocessingml.document':  # .docx
+        doc = Document(file_stream)
+        return "\n".join([para.text for para in doc.paragraphs])
+
+    elif mime_type == 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':  # .xlsx
+        df = pd.read_excel(file_stream)
+        return df.to_csv(index=False)  # Convert Excel to CSV string for LLM readability
+
+    elif mime_type == 'application/zip':
+        return parse_zip_file(file_stream)
+
+    elif mime_type.startswith('text/') or mime_type in ['application/json', 'application/javascript']:
+        # Catch-all for .txt, .py, .js, .json, .csv etc.
+        return file_bytes.decode('utf-8', errors='ignore')
+
+    else:
+        return ""  # Unsupported file type (e.g. images, videos)
+
+
+def parse_zip_file(zip_stream: io.BytesIO) -> str:
+    """Extracts text from all readable code/text files inside a ZIP archive."""
+    text_content = []
+    ignore_dirs = ['node_modules/', '.git/', '__pycache__/']
+    valid_extensions = ('.py', '.js', '.ts', '.java', '.json', '.txt', '.md', '.html', '.css', '.go', '.rs')
+
+    with zipfile.ZipFile(zip_stream) as z:
+        for filename in z.namelist():
+            if filename.endswith('/') or any(ign in filename for ign in ignore_dirs):
+                continue
+            if filename.endswith(valid_extensions):
+                try:
+                    with z.open(filename) as f:
+                        file_text = f.read().decode('utf-8', errors='ignore')
+                        text_content.append(f"--- FILE: {filename} ---\n{file_text}\n")
+                except Exception:
+                    continue
+
+    return "\n".join(text_content)

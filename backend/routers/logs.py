@@ -5,7 +5,7 @@ import csv
 from routers.auth import require_admin
 from audit_logger import log_audit_event, get_bq_client, TABLE_REF
 
-router = APIRouter(prefix="/api/system/logs", tags=["System Logs"])
+router = APIRouter(prefix="/api/system/logs", tags=["Logs"])
 
 
 @router.get("/", summary="[Admin Only]")

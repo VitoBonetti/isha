@@ -10,7 +10,7 @@ import E2EEKeyModal from './Modals/E2EEKeyModal';
 import {
   Sun, Moon, Laptop, LogOut, Bell,
   SprayCan, Snail, SunMoon, Fingerprint, Rabbit, Cat, Shell, Turtle, Radar, HandMetal, Drum, TentTree,
-  Wifi, WifiOff, Loader2, Key, LockOpen, Lock, Menu, X, Feather, PawPrint, Origami
+  Wifi, WifiOff, Loader2, Key, LockOpen, Lock, Menu, X, Feather, PawPrint, Origami, KeySquare
 } from 'lucide-react';
 
 export default function TopNav() {
@@ -279,7 +279,7 @@ export default function TopNav() {
                 </span>
               </div>
               <button onClick={() => { setIsUserOpen(false); setIsApiModalOpen(true); }} className="w-full flex items-center px-4 py-2 text-sm text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors">
-                <Key className="mr-2 h-4 w-4" /> Developer API
+                <KeySquare className="mr-2 h-4 w-4" /> Developer API
               </button>
               <button onClick={() => { setIsUserOpen(false); setIsKiss24KeyModalOpen(true); }} className="w-full flex items-center px-4 py-2 text-sm text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors">
                 <Key className="mr-2 h-4 w-4" /> KISS24 API Key

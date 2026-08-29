@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from contextlib import asynccontextmanager
+import asyncio
 import traceback
 import os
 import time
@@ -10,8 +11,9 @@ import json
 from jose import jwt, JWTError
 from routers import (
     auth, services, users, regions, countries, assets, tests, board, logs, locations, insights, contacts, luigi,
-    kiss24, danger
+    kiss24, danger, documents, rag
 )
+from routers.rag import start_nightly_rag_scheduler
 from routers.auth import require_admin, get_google_public_keys
 from database import get_db_connection, run_alembic_migrations
 from websockets_manager import manager
@@ -23,7 +25,11 @@ init_audit_log_infrastructure()
 # --- LIFESPAN MANAGER (Runs on Cloud Run Boot) ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 1. Run Alembic migrations automatically on startup
+    # 1. Start the nightly 24-hour RAG sync scheduler
+    scheduler_task = asyncio.create_task(start_nightly_rag_scheduler())
+    print("⏰ Nightly RAG sync scheduler initialized.")
+
+    # 2. Run Alembic migrations automatically on startup
     try:
         print("Starting up and checking database migrations...")
         run_alembic_migrations()
@@ -102,11 +108,13 @@ app.include_router(auth.router)
 app.include_router(board.router)
 app.include_router(contacts.router)
 app.include_router(countries.router)
+app.include_router(documents.router)
 app.include_router(insights.router)
 app.include_router(kiss24.router)
 app.include_router(locations.router)
 app.include_router(logs.router)
 app.include_router(luigi.router)
+app.include_router(rag.router)
 app.include_router(regions.router)
 app.include_router(services.router)
 app.include_router(tests.router)
@@ -183,7 +191,7 @@ async def websocket_endpoint_api(websocket: WebSocket):
 
 
 # --- SYSTEM ENDPOINTS ---
-@app.get("/api/system/ping", include_in_schema=False)
+@app.get("/api/system/ping")
 def ping_database(current_user: dict = Depends(require_admin)):
     """Measures actual round-trip latency to the PostgreSQL database."""
     start_time = time.time()
@@ -205,7 +213,7 @@ def ping_database(current_user: dict = Depends(require_admin)):
     return {"status": "online", "latency_ms": latency}
 
 
-@app.get("/api/health", include_in_schema=False)
+@app.get("/api/health")
 def health_check():
     return {"status": "online", "system": "Mario"}
 

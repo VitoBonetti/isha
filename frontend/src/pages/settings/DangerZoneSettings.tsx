@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import axios from 'axios';
-import toast from 'react-hot-toast';
+import toast, { Toaster } from 'react-hot-toast';
 import { AlertTriangle } from 'lucide-react';
 import { useSettings } from '../../hooks/useSettings';
 import ConfirmModal from '../../components/Modals/ConfirmModal';
@@ -16,6 +16,7 @@ export default function DangerZoneSettings() {
 
   return (
     <div className="w-full animate-in fade-in zoom-in-95 duration-200">
+      <Toaster position="bottom-right" />
       <ConfirmModal
         isOpen={actionModal?.isOpen || false}
         title={actionModal?.title || ""}

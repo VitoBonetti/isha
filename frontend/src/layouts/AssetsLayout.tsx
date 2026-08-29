@@ -1,19 +1,28 @@
 import React from 'react';
 import { Outlet, NavLink } from 'react-router-dom';
 import TopNav from '../components/TopNav';
+import { useAppContext } from '../context/AppContext';
 import {
-  Database, Layers, BarChart3, Lightbulb, GitMerge
+  Database, Layers, BarChart3, Lightbulb, GitMerge, Files, Bot
 } from 'lucide-react';
 
 export default function AssetsLayout() {
+  const { currentUser } = useAppContext();
+
   const navItems = [
     { path: "/assets/raw", label: "Raw Data Lab", icon: Database },
     { path: "/assets/pool", label: "Active Pool", icon: Layers },
     { path: "/assets/analytics", label: "Analytics", icon: BarChart3 },
     { path: "/assets/insights", label: "Insights", icon: Lightbulb },
-    // External link back to the Settings Control Panel
-    { path: "/settings/reconciliation", label: "Asset Sync", icon: GitMerge, isExternal: true },
   ];
+
+  if (currentUser?.role === 'admin') {
+    navItems.push({ path: "/assets/documents", label: "Documents", icon: Files });
+    navItems.push({ path: "/assets/rag", label: "Luigi Intelligence", icon: Bot });
+  }
+
+  // External link back to the Settings Control Panel
+  navItems.push({ path: "/settings/reconciliation", label: "Asset Sync", icon: GitMerge, isExternal: true });
 
   const getNavLinkClass = (isActive: boolean) => {
     const baseClass = "flex items-center gap-3 px-4 py-2.5 rounded-xl font-medium text-sm whitespace-nowrap transition-colors";

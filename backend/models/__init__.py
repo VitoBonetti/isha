@@ -12,7 +12,9 @@ from .tests import (
     TestDocuments,
     TestAnalysis,
     TestRequirement,
-    TestMilestone
+    TestMilestone,
+    DocumentChunk,
+    RagChatLogs
 )
 from .events import Events
 from .notifications import Notifications
