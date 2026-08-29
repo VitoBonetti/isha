@@ -32,7 +32,7 @@ def process_test_documents_background(test_id: str, user_id: str, user_role: str
         try:
             # 1. Fetch all documents associated with this test
             cursor.execute("""
-                SELECT id, drive_file_id, mime_type, file_name 
+                SELECT id, drive_file_id, mime_type, file_name, doc_type 
                 FROM test_documents 
                 WHERE test_id = %s
             """, (test_id,))
@@ -53,47 +53,41 @@ def process_test_documents_background(test_id: str, user_id: str, user_role: str
             cursor.execute("DELETE FROM document_chunks WHERE test_id = %s", (test_id,))
 
             for doc in documents:
-                doc_id, drive_file_id, mime_type, file_name = doc
+                doc_id, drive_file_id, mime_type, file_name, doc_type = doc
+                chunks = []
 
-                # 3. Extract text from Google Drive
-                try:
-                    raw_text = extract_text_from_drive_file(drive_file_id, mime_type)
-                    log_audit_event(
-                        user_id=str(user_id),
-                        role=str(user_role),
-                        action="EXTRACT_TEXT_FROM_DOCUMENT",
-                        resource_type="RAG",
-                        resource_id=str(doc_id),
-                        details=f"Extract text from Google Drive Document: {file_name}"
-                    )
+                # Handle Virtual LLM_ANALYSIS (Stored in Postgres) vs Drive Files
+                if doc_type == 'LLM_ANALYSIS' or drive_file_id.startswith("analysis_"):
+                    cursor.execute("SELECT analysis_text FROM test_analyses WHERE test_id = %s", (test_id,))
+                    analysis_row = cursor.fetchone()
+                    raw_text = analysis_row[0] if analysis_row and analysis_row[0] else ""
 
                     if not raw_text.strip():
                         continue
-                except Exception as e:
-                    log_audit_event(
-                        user_id=str(user_id),
-                        role=str(user_role),
-                        action="EXTRACT_TEXT_FROM_DOCUMENT_FAILED",
-                        resource_type="RAG",
-                        resource_id=str(doc_id),
-                        details=f"Failed to parse {file_name}: {e}"
-                    )
-                    continue
 
-                # 4. Split into 500-word chunks
-                chunks = chunk_text(raw_text)
-                log_audit_event(
-                    user_id=str(user_id),
-                    role=str(user_role),
-                    action="CHUCK_TEXT",
-                    resource_type="RAG",
-                    resource_id=str(doc_id),
-                    details=f"Split into 500-word chunks Document: {file_name}"
-                )
+                    # Split strictly by the Markdown separator so each chunk is exactly 1 complete vuln analysis
+                    # We look for "---" which is what your Cloud Run stitching uses
+                    raw_chunks = raw_text.split("\n\n---\n\n")
+                    chunks = [c.strip() for c in raw_chunks if c.strip()]
+                else:
+                    # 3. Extract text from Google Drive
+                    try:
+                        raw_text = extract_text_from_drive_file(drive_file_id, mime_type)
+                        log_audit_event(user_id=str(user_id), role=str(user_role), action="EXTRACT_TEXT_FROM_DOCUMENT", resource_type="RAG", resource_id=str(doc_id), details=f"Extract text from Google Drive Document: {file_name}")
+                    except Exception as e:
+                        log_audit_event(user_id=str(user_id), role=str(user_role), action="EXTRACT_TEXT_FROM_DOCUMENT_FAILED", resource_type="RAG", resource_id=str(doc_id), details=f"Failed to parse {file_name}: {e}")
+                        continue
+
+                    if not raw_text or not raw_text.strip():
+                        continue
+
+                    chunks = chunk_text(raw_text)
+                    log_audit_event(user_id=str(user_id), role=str(user_role), action="CHUCK_TEXT", resource_type="RAG",resource_id=str(doc_id), details=f"Split into 500-word chunks Document: {file_name}")
+
                 if not chunks:
                     continue
 
-                # 5. Generate embeddings using Gemini API
+                # 4. Generate embeddings using Gemini API
                 try:
                     response = client.models.embed_content(
                         model='gemini-embedding-2',
@@ -101,46 +95,22 @@ def process_test_documents_background(test_id: str, user_id: str, user_role: str
                         config=types.EmbedContentConfig(output_dimensionality=768)
                     )
                 except Exception as e:
-                    log_audit_event(
-                        user_id=str(user_id),
-                        role=str(user_role),
-                        action="GEMINI_MODEL_FAILED",
-                        resource_type="RAG",
-                        resource_id=str(doc_id),
-                        details=f"Generate embeddings using Gemini API failed for test {doc_id}: {str(e)}"
-                    )
-                    continue  # THIS CRITICAL FIX PREVENTS THE FATAL CRASH
+                    log_audit_event(user_id=str(user_id), role=str(user_role), action="GEMINI_MODEL_FAILED", resource_type="RAG", resource_id=str(doc_id), details=f"Generate embeddings using Gemini API failed for test {doc_id}: {str(e)}" )
+                    continue
 
-                # 6. Insert chunks and their vectors into the database
+                # 5. Insert chunks and their vectors into the database
                 for index, (chunk_text_content, embedding_obj) in enumerate(zip(chunks, response.embeddings)):
-                    # Convert the float list into a JSON string format that pgvector accepts
                     vector_str = json.dumps(embedding_obj.values)
-
                     cursor.execute("""
-                    INSERT INTO document_chunks (id, document_id, test_id, chunk_index, text_content, embedding, created_at)
-                    VALUES (gen_random_uuid(), %s, %s, %s, %s, %s::vector, CURRENT_TIMESTAMP)
+                        INSERT INTO document_chunks (id, document_id, test_id, chunk_index, text_content, embedding, created_at)
+                        VALUES (gen_random_uuid(), %s, %s, %s, %s, %s::vector, CURRENT_TIMESTAMP)
                     """, (doc_id, test_id, index, chunk_text_content, vector_str))
 
             cursor.connection.commit()
-
-            log_audit_event(
-                user_id=str(user_id),
-                role=str(user_role),
-                action="CHUNK_TEXT_EMBEDED",
-                resource_type="RAG",
-                resource_id=str(test_id),
-                details=f"Generate embeddings using Gemini API Successful for test {test_id}"
-            )
+            log_audit_event(user_id=str(user_id), role=str(user_role), action="CHUNK_TEXT_EMBEDED", resource_type="RAG", resource_id=str(test_id), details=f"Generate embeddings using Gemini API Successful for test {test_id}")
         except Exception as e:
             cursor.connection.rollback()
-            log_audit_event(
-                user_id=str(user_id),
-                role=str(user_role),
-                action="RAG_SYNC_FAILED",
-                resource_type="RAG",
-                resource_id=str(test_id),
-                details=f"RAG Sync failed for test {test_id}: {str(e)}"
-            )
+            log_audit_event(user_id=str(user_id), role=str(user_role), action="RAG_SYNC_FAILED", resource_type="RAG", resource_id=str(test_id), details=f"RAG Sync failed for test {test_id}: {str(e)}")
 
 
 @router.get("/", summary="[Admin] Testing endpoint for check the chunck")
@@ -238,12 +208,26 @@ async def start_nightly_rag_scheduler():
         # Execute the sync
         sync_all_active_tests_background("SYSTEM", "SYSTEM")
 
+
 # --- CHATS ---
 @router.post("/chat", summary="Query the RAG Knowledge Base")
 def chat_with_documents(
         req: RagChatRequest,
         current_user: dict = Depends(require_admin)
 ):
+    """
+    Admin only endpoint for chat with Luigi.
+    1. Embed the user's question using the exact same model
+    2. Perform Vector Similarity Search in PostgreSQL, fetching doc_type and dc.test_id, and using LIMIT 10
+    3. Fetch previous chat history for this session
+    4. Apply Metadata De-duplication Rules. Rule: If a FULL_TEST_REPORT exists for a test in results, discard VULN_REPORT chunks for that same test.
+    5. Assemble Context & Build Source URL Lookup Map: Take the top 5 chunks AFTER we have filtered out the duplicates
+    6. Format the Chat History for Gemini
+    7. Initialize the Chat Session with System Instructions
+    8. Parse structured JSON output
+    9. Build Final Citations List (ONLY for sources confirmed by Gemini)
+    10. Save the new interaction to the database
+    """
     # 1. Embed the user's question using the exact same model
     try:
         query_response = client.models.embed_content(
@@ -256,38 +240,24 @@ def chat_with_documents(
         raise HTTPException(status_code=500, detail=f"Failed to embed query: {str(e)}")
 
     # 2. Perform Vector Similarity Search in PostgreSQL
-    # Use <=> for Cosine Distance (Standard for text embeddings)
     with db_cursor_context() as cursor:
+        # fetching doc_type and dc.test_id, and using LIMIT 30
+        query_sql = """
+            SELECT dc.text_content, td.file_name, td.file_url, td.doc_type, 1 - (dc.embedding <=> %s::vector) as similarity, dc.test_id
+            FROM document_chunks dc
+            JOIN test_documents td ON dc.document_id = td.id
+        """
         if req.test_id:
-            cursor.execute("""
-                SELECT dc.text_content, td.file_name, td.file_url, 1 - (dc.embedding <=> %s::vector) as similarity
-                FROM document_chunks dc
-                JOIN test_documents td ON dc.document_id = td.id
-                WHERE dc.test_id = %s
-                ORDER BY dc.embedding <=> %s::vector
-                LIMIT 5
-            """, (query_vector, str(req.test_id), query_vector))
+            query_sql += " WHERE dc.test_id = %s ORDER BY dc.embedding <=> %s::vector LIMIT 30"
+            cursor.execute(query_sql, (query_vector, str(req.test_id), query_vector))
         elif req.asset_id:
-            # Filter across ALL tests linked to a specific Asset!
-            cursor.execute("""
-                SELECT dc.text_content, td.file_name, td.file_url, 1 - (dc.embedding <=> %s::vector) as similarity
-                FROM document_chunks dc
-                JOIN test_documents td ON dc.document_id = td.id
-                JOIN test_assets ta ON dc.test_id = ta.test_id
-                WHERE ta.asset_id = %s
-                ORDER BY dc.embedding <=> %s::vector
-                LIMIT 5
-            """, (query_vector, str(req.asset_id), query_vector))
+            query_sql += " JOIN test_assets ta ON dc.test_id = ta.test_id WHERE ta.asset_id = %s ORDER BY dc.embedding <=> %s::vector LIMIT 30"
+            cursor.execute(query_sql, (query_vector, str(req.asset_id), query_vector))
         else:
-            cursor.execute("""
-                SELECT dc.text_content, td.file_name, td.file_url, 1 - (dc.embedding <=> %s::vector) as similarity
-                FROM document_chunks dc
-                JOIN test_documents td ON dc.document_id = td.id
-                ORDER BY dc.embedding <=> %s::vector
-                LIMIT 5
-            """, (query_vector, query_vector))
+            query_sql += " ORDER BY dc.embedding <=> %s::vector LIMIT 30"
+            cursor.execute(query_sql, (query_vector, query_vector))
 
-        results = cursor.fetchall()
+        raw_results = cursor.fetchall()
 
         # 3. Fetch previous chat history for this session
         cursor.execute("""
@@ -298,31 +268,51 @@ def chat_with_documents(
         """, (str(req.session_id),))
         history_rows = cursor.fetchall()
 
-    # 4. Assemble the context text
+    # 4. Apply Metadata De-duplication Rules
+    # Rule: If a FULL_TEST_REPORT exists for a test in results, discard VULN_REPORT chunks for that same test.
+    has_full_report_for_test = set()
+    for _, _, _, doc_type, similarity, t_id in raw_results:
+        if similarity > 0.35 and doc_type == 'FULL_TEST_REPORT':
+            has_full_report_for_test.add(t_id)
+
+    filtered_results = []
+    for text_content, file_name, file_url, doc_type, similarity, t_id in raw_results:
+        if similarity <= 0.35:
+            continue
+        # Discard individual vuln report chunks if full test report is present
+        if doc_type == 'VULN_REPORT' and t_id in has_full_report_for_test:
+            continue
+        filtered_results.append((text_content, file_name, file_url, doc_type))
+
+    # 5. Assemble Context & Build Source URL Lookup Map
     context_text = ""
     source_url_map = {}
 
-    if results:
-        for text_content, file_name, file_url, similarity in results:
-            if similarity > 0.40:
-                context_text += f"\n--- Source Document: {file_name} ---\n{text_content}\n"
-                source_url_map[file_name] = file_url
+    # Take the top 5 chunks AFTER we have filtered out the duplicates
+    for text_content, file_name, file_url, doc_type in filtered_results[:15]:
+        context_text += f"\n--- Source Document: [{doc_type}] {file_name} ---\n{text_content}\n"
+        source_url_map[file_name] = file_url
 
     if not context_text:
         context_text = "No relevant context documents were found in the database for this specific query."
 
-    # 5. Format the Chat History for Gemini
+    # 6. Format the Chat History for Gemini
     gemini_history = []
     for past_q, past_a in history_rows:
         gemini_history.append(types.Content(role="user", parts=[types.Part.from_text(text=past_q)]))
         gemini_history.append(types.Content(role="model", parts=[types.Part.from_text(text=past_a)]))
 
-    # 6. Initialize the Chat Session with System Instructions
+    # 7. Initialize the Chat Session with System Instructions
     system_instruction = """
     You are an expert cybersecurity assistant for the Global Offensive Security Team.
     Answer the user's question based strictly on the provided Context Documents and your previous conversation history.
     If the context does not contain the answer, politely state that you do not have that information.
     Do not invent vulnerabilities, scores, or findings.
+    
+    DOCUMENT TAXONOMY & ROUTING RULES:
+    1. Documents tagged [FULL_TEST_REPORT] are the canonical source for overall pentest scope, vulnerability summaries, and official findings.
+    2. Documents tagged [LLM_ANALYSIS] represent deep quality checks (vulnerability grade, validity assessment, evidence completeness, and recommendation accuracy). ALWAYS prioritize [LLM_ANALYSIS] when answering questions about vulnerability quality, false positive status, or grades.
+    3. Documents tagged [PRESENTATION] represent executive slide decks.
     
     STRICT CITATION RULES:
     1. In 'used_sources', ONLY list the exact document filenames from the context that you explicitly extracted facts from to answer the question.
@@ -346,7 +336,7 @@ def chat_with_documents(
         prompt_with_context = f"Context Documents:\n{context_text}\n\nUser Question: {req.query}"
         chat_response = chat.send_message(prompt_with_context)
 
-        # 7. Parse structured JSON output
+        # 8. Parse structured JSON output
         parsed_output = json.loads(chat_response.text)
         answer = parsed_output.get("answer", "I couldn't process an answer.")
         used_sources = parsed_output.get("used_sources", [])
@@ -354,7 +344,7 @@ def chat_with_documents(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to generate answer: {str(e)}")
 
-    # 8. Build Final Citations List (ONLY for sources confirmed by Gemini)
+    # 9. Build Final Citations List (ONLY for sources confirmed by Gemini)
     citations = []
     for file_name in used_sources:
         if file_name in source_url_map:
@@ -363,7 +353,7 @@ def chat_with_documents(
                 "url": source_url_map[file_name]
             })
 
-    # 9. Save the new interaction to the database
+    # 10. Save the new interaction to the database
     with db_cursor_context() as cursor:
         cursor.execute("""
             INSERT INTO rag_chat_logs (id, session_id, user_id, test_id, asset_id, question, answer, timestamp)

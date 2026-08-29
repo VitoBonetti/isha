@@ -116,8 +116,8 @@ async def process_presentation_background(test_id: str, kiss24_id: str, user_id:
             with db_cursor_context() as cursor:
                 if cursor:
                     cursor.execute("""
-                        INSERT INTO test_documents (id, test_id, drive_file_id, file_name, mime_type, file_url, last_modified, synced_at)
-                        VALUES (gen_random_uuid(), %s, %s, %s, 'application/vnd.openxmlformats-officedocument.presentationml.presentation', %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                        INSERT INTO test_documents (id, test_id, drive_file_id, file_name, mime_type, file_url, doc_type, last_modified, synced_at)
+                        VALUES (gen_random_uuid(), %s, %s, %s, 'application/vnd.openxmlformats-officedocument.presentationml.presentation', %s, 'PRESENTATION', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                         ON CONFLICT (drive_file_id) DO UPDATE SET 
                             last_modified = CURRENT_TIMESTAMP, 
                             synced_at = CURRENT_TIMESTAMP
@@ -237,8 +237,8 @@ async def process_report_background(test_id: str, kiss24_id: str, user_id: str, 
         with db_cursor_context() as cursor:
             if cursor:
                 cursor.execute("""
-                    INSERT INTO test_documents (id, test_id, drive_file_id, file_name, mime_type, file_url, last_modified, synced_at)
-                    VALUES (gen_random_uuid(), %s, %s, %s, 'application/pdf', %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    INSERT INTO test_documents (id, test_id, drive_file_id, file_name, mime_type, file_url, doc_type, last_modified, synced_at)
+                    VALUES (gen_random_uuid(), %s, %s, %s, 'application/pdf', %s, 'FULL_TEST_REPORT', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                     ON CONFLICT (drive_file_id) DO UPDATE SET 
                         last_modified = CURRENT_TIMESTAMP, 
                         synced_at = CURRENT_TIMESTAMP
@@ -354,8 +354,8 @@ async def process_vuln_report_background(test_id: str, kiss24_id: str, user_id: 
                 if cursor:
                     # 1. Save to test_documents for the workspace view
                     cursor.execute("""
-                        INSERT INTO test_documents (id, test_id, drive_file_id, file_name, mime_type, file_url, last_modified, synced_at)
-                        VALUES (gen_random_uuid(), %s, %s, %s, 'application/pdf', %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                        INSERT INTO test_documents (id, test_id, drive_file_id, file_name, mime_type, file_url, doc_type, last_modified, synced_at)
+                        VALUES (gen_random_uuid(), %s, %s, %s, 'application/pdf', %s, 'VULN_REPORT', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                         ON CONFLICT (drive_file_id) DO UPDATE SET 
                              last_modified = CURRENT_TIMESTAMP, 
                              synced_at = CURRENT_TIMESTAMP
@@ -447,7 +447,10 @@ async def process_vuln_analysis_background(test_id: str, kiss24_id: str, user_id
         if not stitched_markdown:
             raise ValueError("Cloud Run returned no valid analysis text.")
 
-        # 4. Save to Database
+        # 4. Save to Database (UPDATE test_analyses AND UPSERT INTO test_documents for RAG)
+        virtual_file_id = f"analysis_{test_id}"
+        analysis_filename = f"LLM_Vulnerability_Analysis_{test_name}.md"
+
         with db_cursor_context() as cursor:
             if cursor:
                 cursor.execute("""
@@ -456,6 +459,16 @@ async def process_vuln_analysis_background(test_id: str, kiss24_id: str, user_id
                     WHERE test_id = %s
                 """, (stitched_markdown, test_id))
 
+                # UPSERT virtual LLM_ANALYSIS document for RAG indexing
+                cursor.execute("""
+                    INSERT INTO test_documents (id, test_id, drive_file_id, file_name, mime_type, file_url, doc_type, last_modified, synced_at)
+                    VALUES (gen_random_uuid(), %s, %s, %s, 'text/markdown', %s, 'LLM_ANALYSIS', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    ON CONFLICT (drive_file_id) DO UPDATE SET 
+                        file_name = EXCLUDED.file_name,
+                        last_modified = CURRENT_TIMESTAMP, 
+                        synced_at = CURRENT_TIMESTAMP
+                """, (test_id, virtual_file_id, analysis_filename, f"{BASE_URL}/tests/{test_id}/analysis"))
+
                 cursor.execute("""
                     INSERT INTO test_milestones (id, test_id, step_name, is_completed) 
                     VALUES (gen_random_uuid(), %s, 'Validate Finding', true)
@@ -463,7 +476,13 @@ async def process_vuln_analysis_background(test_id: str, kiss24_id: str, user_id
                 """, (test_id,))
                 cursor.connection.commit()
 
-        # 5. Notify User
+        # 5. Trigger RAG Ingestion for this test immediately
+        try:
+            await asyncio.to_thread(process_test_documents_background, test_id, user_id, "admin")
+        except Exception as rag_err:
+            print(f"RAG ingestion warning (Vulnerability Analysis): {rag_err}")
+
+        # 6. Notify User
         db_message = f"Vulnerability Analysis for '{test_name}' is ready! Link: {BASE_URL}/tests/{test_id}/analysis"
         with db_cursor_context() as cursor:
             if cursor:

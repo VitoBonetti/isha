@@ -55,6 +55,7 @@ class TestDocuments(Base):
     file_name = Column(String(500), nullable=False)
     mime_type = Column(String(255), nullable=True)
     file_url = Column(String(1000), nullable=True)
+    doc_type = Column(String(50), default='MANUAL_UPLOAD', nullable=False)
     last_modified = Column(DateTime(timezone=True), nullable=True)
     synced_at = Column(DateTime(timezone=True), default=aware_utcnow)
 

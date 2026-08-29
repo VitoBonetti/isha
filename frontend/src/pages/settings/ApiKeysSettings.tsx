@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import toast from 'react-hot-toast';
 import ConfirmModal from '../../components/Modals/ConfirmModal';
-import { Key, Trash2, ChevronsUpDown, ChevronUp, ChevronDown } from 'lucide-react';
+import { KeySquare, Trash2, ChevronsUpDown, ChevronUp, ChevronDown} from 'lucide-react';
 
 export default function ApiKeysSettings() {
   const [globalApiKeys, setGlobalApiKeys] = useState<any[]>([]);
@@ -79,7 +79,7 @@ export default function ApiKeysSettings() {
       <div className="flex justify-between items-center mb-6">
         <div>
           <h1 className="text-xl font-bold text-slate-900 dark:text-zinc-100 flex items-center gap-2">
-            <Key size={22} className="text-blue-500" /> Global API Keys
+            <KeySquare size={22} className="text-blue-500" /> Global API Keys
           </h1>
           <p className="text-sm text-slate-500 dark:text-zinc-400 mt-0.5">
             Monitor and revoke active API keys across the entire platform.

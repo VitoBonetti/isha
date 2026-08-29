@@ -2,7 +2,7 @@ import React from 'react';
 import { Outlet, NavLink } from 'react-router-dom';
 import TopNav from '../components/TopNav';
 import {
-  Users, MapPin, LayoutTemplate, Activity, Tags, Globe, Flag, Key,
+  Users, MapPin, LayoutTemplate, Activity, Tags, Globe, Flag, KeySquare,
   Server, BookUser, ShieldCheck, CloudSync, AlertTriangle, LayoutDashboard, GitMerge
 } from 'lucide-react';
 
@@ -20,7 +20,7 @@ export default function ControlPanelLayout() {
     { path: "/settings/kiss24", label: "Kiss 24 Sync", icon: ShieldCheck },
     { path: "/settings/servicenow", label: "ServiceNow Sync", icon: CloudSync },
     { path: "/settings/reconciliation", label: "Asset Reconciliation", icon: GitMerge },
-    { path: "/settings/api-keys", label: "API Keys", icon: Key },
+    { path: "/settings/api-keys", label: "API Keys", icon: KeySquare },
     { path: "/settings/logs", label: "System Logs", icon: Server },
     { path: "/settings/danger", label: "Danger Zone", icon: AlertTriangle, isDanger: true },
   ];
