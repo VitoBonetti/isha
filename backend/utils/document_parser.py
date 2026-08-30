@@ -3,6 +3,7 @@ import zipfile
 import pandas as pd
 import fitz  # PyMuPDF
 from docx import Document
+from pptx import Presentation
 from googleapiclient.discovery import build
 import google.auth
 
@@ -60,6 +61,17 @@ def extract_text_from_drive_file(drive_file_id: str, mime_type: str) -> str:
         doc = Document(file_stream)
         return "\n".join([para.text for para in doc.paragraphs])
 
+    elif mime_type == 'application/vnd.openxmlformats-officedocument.presentationml.presentation':  # .pptx
+        prs = Presentation(file_stream)
+        text_runs = []
+        for slide in prs.slides:
+            for shape in slide.shapes:
+                if shape.has_text_frame:
+                    for paragraph in shape.text_frame.paragraphs:
+                        if paragraph.text.strip():
+                            text_runs.append(paragraph.text.strip())
+        return "\n".join(text_runs)
+
     elif mime_type == 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':  # .xlsx
         df = pd.read_excel(file_stream)
         return df.to_csv(index=False)  # Convert Excel to CSV string for LLM readability
@@ -67,12 +79,19 @@ def extract_text_from_drive_file(drive_file_id: str, mime_type: str) -> str:
     elif mime_type == 'application/zip':
         return parse_zip_file(file_stream)
 
-    elif mime_type.startswith('text/') or mime_type in ['application/json', 'application/javascript']:
-        # Catch-all for .txt, .py, .js, .json, .csv etc.
+    elif mime_type.startswith('text/') or mime_type in [
+        'application/json',
+        'application/javascript',
+        'application/csv',
+        'text/csv',
+        'text/markdown',
+        'text/x-markdown'
+    ]:
+        # Catches .txt, .md, .csv, .json, .py, .js etc.
         return file_bytes.decode('utf-8', errors='ignore')
 
     else:
-        return ""  # Unsupported file type (e.g. images, videos)
+        return ""
 
 
 def parse_zip_file(zip_stream: io.BytesIO) -> str:
