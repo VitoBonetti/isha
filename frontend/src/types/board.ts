@@ -86,3 +86,10 @@ export interface Message {
   timestamp: string;
   isError?: boolean;
 }
+
+export interface FilterItem {
+  type: 'doc_type' | 'asset' | 'test';
+  id: string;
+  name: string;
+  trigger: string;
+}
