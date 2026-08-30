@@ -297,6 +297,16 @@
           font-style: italic !important;
         }
 
+        pre, code {
+          white-space: pre-wrap !important;       /* CSS3 */
+          white-space: -moz-pre-wrap !important;  /* Mozilla */
+          white-space: -pre-wrap !important;      /* Opera 4-6 */
+          white-space: -o-pre-wrap !important;    /* Opera 7 */
+          word-wrap: break-word !important;       /* IE 5.5+ */
+          overflow-wrap: break-word !important;   /* Modern standard */
+          max-width: 100% !important;
+        }
+
         
     
     

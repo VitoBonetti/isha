@@ -89,7 +89,7 @@ export default function DangerZoneSettings() {
           <div>
             <h3 className="font-bold text-slate-900 dark:text-zinc-100">Unlink Drive Folders</h3>
             <p className="text-sm text-slate-500 dark:text-zinc-400 mt-1 max-w-md">
-              Removes the Google Drive folder links from all tests and wipes their synchronized document metadata. The physical files in Google Drive are NOT deleted.
+              Removes the Google Drive folder links from all tests and wipes their synchronized document metadata including LLM Vulnerabilities Analysis. The physical files in Google Drive are NOT deleted.
             </p>
           </div>
           <button onClick={() => {

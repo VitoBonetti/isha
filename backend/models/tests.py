@@ -99,6 +99,7 @@ class RagChatLogs(Base):
 
 class TestAssets(Base):
     __tablename__ = 'test_assets'
+
     test_id = Column(UUID(as_uuid=True), ForeignKey('tests.id', ondelete='CASCADE'), primary_key=True)
     asset_id = Column(UUID(as_uuid=True), ForeignKey('assets.id', ondelete='CASCADE'), primary_key=True)
 
@@ -120,6 +121,7 @@ class Assignments(Base):
 
 class TestAnalysis(Base):
     __tablename__ = "test_analyses"
+
     test_id = Column(UUID(as_uuid=True), ForeignKey('tests.id', ondelete='CASCADE'), primary_key=True)
     status = Column(String, nullable=False) # 'PENDING', 'COMPLETED', 'FAILED'
     analysis_text = Column(Text, nullable=True)

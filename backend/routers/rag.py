@@ -21,10 +21,25 @@ router = APIRouter(prefix="/api/rag", tags=["RAG Intelligence"])
 client = genai.Client(api_key=get_secret(os.environ.get("LUIGI_KEY_NAME")))
 
 
-def chunk_text(text: str, chunk_size: int = 500) -> list[str]:
-    """Splits a large text block into smaller chunks of ~500 words."""
+def chunk_text(text: str, chunk_size: int = 500, overlap: int = 100) -> list[str]:
+    """
+    Splits a large text block into overlapping chunks of words.
+    The overlap prevents critical context from being cut in half at chunk boundaries.
+    """
     words = text.split()
-    return [" ".join(words[i:i + chunk_size]) for i in range(0, len(words), chunk_size)]
+    chunks = []
+
+    if not words:
+        return chunks
+
+    # Step size is how far we move forward for the next chunk
+    step = max(1, chunk_size - overlap)
+
+    for i in range(0, len(words), step):
+        chunk = " ".join(words[i:i + chunk_size])
+        chunks.append(chunk)
+
+    return chunks
 
 
 def extract_relevant_snippet(text: str, query: str, snippet_length: int = 200) -> str:
@@ -102,12 +117,27 @@ def process_test_documents_background(test_id: str, user_id: str, user_role: str
                     if not raw_text.strip():
                         continue
 
-                    # Split strictly by the Markdown separator so each chunk is exactly 1 complete vuln analysis
-                    # We look for "---" which is what your Cloud Run stitching uses
-                    raw_chunks = raw_text.split("\n\n---\n\n")
-                    chunks = [c.strip() for c in raw_chunks if c.strip()]
+                    # 3A. Bulletproof splitting for LLM Analysis
+                    normalized_text = re.sub(r'(?i)(^|\n)\s*Original finding', r'\n|---SPLIT---|\nOriginal finding',
+                                             raw_text)
+                    raw_chunks = [c.strip() for c in normalized_text.split('|---SPLIT---|') if c.strip()]
+
+                    for clean_chunk in raw_chunks:
+                        title_match = re.search(r'Title:\s*([^\n]+)', clean_chunk)
+                        finding_title = title_match.group(1).strip() if title_match else "Unknown Finding"
+
+                        chunk_header = f"[LLM QUALITY ANALYSIS] Finding: {finding_title}\n"
+
+                        # Sub-chunk massive findings so they don't break token limits
+                        if len(clean_chunk.split()) > 500:
+                            sub_chunks = chunk_text(clean_chunk, chunk_size=500, overlap=100)
+                            for sc in sub_chunks:
+                                chunks.append(f"{chunk_header}{sc}")
+                        else:
+                            chunks.append(f"{chunk_header}{clean_chunk}")
+
                 else:
-                    # 3. Extract text from Google Drive
+                    # 3B. Extract text from standard Google Drive files
                     try:
                         raw_text = extract_text_from_drive_file(drive_file_id, mime_type)
                         log_audit_event(user_id=str(user_id), role=str(user_role), action="EXTRACT_TEXT_FROM_DOCUMENT",
@@ -122,34 +152,38 @@ def process_test_documents_background(test_id: str, user_id: str, user_role: str
                     if not raw_text or not raw_text.strip():
                         continue
 
-                    chunks = chunk_text(raw_text)
+                    # Use overlapping chunker for standard documents
+                    chunks = chunk_text(raw_text, chunk_size=500, overlap=100)
                     log_audit_event(user_id=str(user_id), role=str(user_role), action="CHUCK_TEXT", resource_type="RAG",
                                     resource_id=str(doc_id),
-                                    details=f"Split into 500-word chunks Document: {file_name}")
+                                    details=f"Split into {len(chunks)} overlapping chunks Document: {file_name}")
 
                 if not chunks:
                     continue
 
-                # 4. Generate embeddings using Gemini API
-                try:
-                    response = client.models.embed_content(
-                        model='gemini-embedding-2',
-                        contents=chunks,
-                        config=types.EmbedContentConfig(output_dimensionality=768)
-                    )
-                except Exception as e:
-                    log_audit_event(user_id=str(user_id), role=str(user_role), action="GEMINI_MODEL_FAILED",
-                                    resource_type="RAG", resource_id=str(doc_id),
-                                    details=f"Generate embeddings using Gemini API failed for test {doc_id}: {str(e)}")
-                    continue
+                # 4 & 5. Generate embeddings ONE-BY-ONE and insert to bypass SDK array truncation
+                for index, chunk_text_content in enumerate(chunks):
+                    try:
+                        response = client.models.embed_content(
+                            model='gemini-embedding-2',
+                            contents=chunk_text_content,
+                            config=types.EmbedContentConfig(output_dimensionality=768)
+                        )
 
-                # 5. Insert chunks and their vectors into the database
-                for index, (chunk_text_content, embedding_obj) in enumerate(zip(chunks, response.embeddings)):
-                    vector_str = json.dumps(embedding_obj.values)
-                    cursor.execute("""
-                        INSERT INTO document_chunks (id, document_id, test_id, chunk_index, text_content, embedding, created_at)
-                        VALUES (gen_random_uuid(), %s, %s, %s, %s, %s::vector, CURRENT_TIMESTAMP)
-                    """, (doc_id, test_id, index, chunk_text_content, vector_str))
+                        # Extract the single embedding for this specific chunk
+                        embedding_obj = response.embeddings[0]
+                        vector_str = json.dumps(embedding_obj.values)
+
+                        cursor.execute("""
+                            INSERT INTO document_chunks (id, document_id, test_id, chunk_index, text_content, embedding, created_at)
+                            VALUES (gen_random_uuid(), %s, %s, %s, %s, %s::vector, CURRENT_TIMESTAMP)
+                        """, (doc_id, test_id, index, chunk_text_content, vector_str))
+
+                    except Exception as e:
+                        log_audit_event(user_id=str(user_id), role=str(user_role), action="GEMINI_MODEL_FAILED",
+                                        resource_type="RAG", resource_id=str(doc_id),
+                                        details=f"Generate embedding failed for chunk {index} of {doc_id}: {str(e)}")
+                        continue
 
             cursor.connection.commit()
             log_audit_event(user_id=str(user_id), role=str(user_role), action="CHUNK_TEXT_EMBEDED", resource_type="RAG",

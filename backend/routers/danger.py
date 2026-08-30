@@ -93,6 +93,9 @@ def wipe_drive_folders(background_tasks: BackgroundTasks, current_user: dict = D
         # Wipe the documents table
         cursor.execute("TRUNCATE TABLE test_documents CASCADE;")
 
+        # Wipe the LLM vulns analysis table
+        cursor.execute("TRUNCATE TABLE test_analyses CASCADE;")
+
         cursor.connection.commit()
 
         log_audit_event(
