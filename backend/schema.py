@@ -310,6 +310,7 @@ class RagChatRequest(BaseModel):
     session_id: UUID4
     test_id: Optional[UUID4] = None
     asset_id: Optional[UUID4] = None
+    doc_type: Optional[str] = None
 
 class RagAIResponse(BaseModel):
     answer: str = Field(description="The response text to the user's question.")

@@ -258,6 +258,50 @@ async def start_nightly_rag_scheduler():
 
 
 # --- CHATS ---
+@router.get("/filters", summary="Get autocomplete filters for RAG chat")
+def get_rag_filters(current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    filters = []
+
+    # 1. Doc Types (Trigger: /)
+    filters.extend([
+        {"type": "doc_type", "id": "FULL_TEST_REPORT", "name": "Full-Test-Report", "trigger": "/"},
+        {"type": "doc_type", "id": "LLM_ANALYSIS", "name": "LLM-Quality-Analysis", "trigger": "/"},
+        {"type": "doc_type", "id": "VULN_REPORT", "name": "Vulnerability-Report", "trigger": "/"},
+        {"type": "doc_type", "id": "PRESENTATION", "name": "Presentation", "trigger": "/"},
+        {"type": "doc_type", "id": "MANUAL_UPLOAD", "name": "Manual-Upload", "trigger": "/"},
+    ])
+
+    # 2. Assets (Trigger: @)
+    cursor.execute("""
+        SELECT DISTINCT ra.id, ra.name
+        FROM raw_assets ra
+        JOIN assets a ON ra.id = a.raw_asset_id
+        JOIN test_assets ta ON a.id = ta.asset_id
+        JOIN tests t ON ta.test_id = t.id
+        WHERE t.drive_folder_id IS NOT NULL
+        ORDER BY ra.name ASC;
+    """)
+    for row in cursor.fetchall():
+        name = row[1].replace(" ", "-")
+        filters.append({"type": "asset", "id": str(row[0]), "name": name, "trigger": "@"})
+
+    # 3. Tests (Trigger: $)
+    cursor.execute("SELECT id, name FROM tests WHERE drive_folder_id IS NOT NULL ORDER BY name ASC")
+    for row in cursor.fetchall():
+        name = row[1].replace(" ", "-")
+        filters.append({"type": "test", "id": str(row[0]), "name": name, "trigger": "$"})
+
+    return filters
+
+
+@router.get("/stats", summary="Get RAG knowledge base statistics")
+def get_rag_stats(current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    # Count unique documents currently indexed in the vector space
+    cursor.execute("SELECT COUNT(DISTINCT document_id) FROM document_chunks")
+    total = cursor.fetchone()[0]
+    return {"total_sources": total or 0}
+
+
 @router.post("/chat", summary="Query the RAG Knowledge Base (Streaming)")
 def chat_with_documents(
         req: RagChatRequest,
@@ -281,16 +325,38 @@ def chat_with_documents(
             FROM document_chunks dc
             JOIN test_documents td ON dc.document_id = td.id
         """
-        if req.test_id:
-            query_sql += " WHERE dc.test_id = %s ORDER BY dc.embedding <=> %s::vector LIMIT 30"
-            cursor.execute(query_sql, (query_vector, str(req.test_id), query_vector))
-        elif req.asset_id:
-            query_sql += " JOIN test_assets ta ON dc.test_id = ta.test_id WHERE ta.asset_id = %s ORDER BY dc.embedding <=> %s::vector LIMIT 30"
-            cursor.execute(query_sql, (query_vector, str(req.asset_id), query_vector))
-        else:
-            query_sql += " ORDER BY dc.embedding <=> %s::vector LIMIT 30"
-            cursor.execute(query_sql, (query_vector, query_vector))
 
+        where_clauses = []
+        params = [query_vector]
+
+        # If filtering by asset, we must JOIN the test_assets table
+        if req.asset_id:
+            query_sql = """
+                SELECT dc.text_content, td.file_name, td.file_url, td.doc_type, 1 - (dc.embedding <=> %s::vector) as similarity, dc.test_id
+                FROM document_chunks dc
+                JOIN test_documents td ON dc.document_id = td.id
+                JOIN test_assets ta ON dc.test_id = ta.test_id
+            """
+            where_clauses.append("ta.asset_id = %s")
+            params.append(str(req.asset_id))
+        elif req.test_id:
+            where_clauses.append("dc.test_id = %s")
+            params.append(str(req.test_id))
+
+        # Stack the document type filter if requested via '/'
+        if req.doc_type:
+            where_clauses.append("td.doc_type = %s")
+            params.append(req.doc_type)
+
+        # Append WHERE clauses dynamically
+        if where_clauses:
+            query_sql += " WHERE " + " AND ".join(where_clauses)
+
+        # Finalize the order and limit
+        query_sql += " ORDER BY dc.embedding <=> %s::vector LIMIT 30"
+        params.append(query_vector)
+
+        cursor.execute(query_sql, tuple(params))
         raw_results = cursor.fetchall()
 
         cursor.execute("""

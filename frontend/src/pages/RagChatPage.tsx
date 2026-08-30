@@ -1,33 +1,174 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { twMerge } from 'tailwind-merge';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { v4 as uuidv4 } from 'uuid';
-import { Send, Trash2, Bot, User, Link as LinkIcon } from 'lucide-react';
+import { Send, Trash2, Bot, User, Link as LinkIcon, FileText, Database, Box } from 'lucide-react';
 import type { Citation, Message } from "../types/board";
 import toast, { Toaster } from "react-hot-toast";
-import { useAppContext } from "../context/AppContext";
 
+// --- Types for our new Filters ---
+interface FilterItem {
+  type: 'doc_type' | 'asset' | 'test';
+  id: string;
+  name: string;
+  trigger: string;
+}
 
 export default function RagChatPage() {
   const [sessionId, setSessionId] = useState<string>(uuidv4());
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [totalSources, setTotalSources] = useState<number>(0);
+
+  // --- Chat State ---
   const [messages, setMessages] = useState<Message[]>([
     {
       role: 'assistant',
-      content: 'Hello! I am your Luigi Intelligence assistant. Ask me anything about findings, methodologies, or reports across your pentest workspace.',
+      content: 'Hello! I am your Luigi Intelligence assistant. Use `/` for doc types, `@` for assets, and `$` for tests to narrow your search!',
       citations: [],
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     },
   ]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  // --- Autocomplete State ---
+  const [availableFilters, setAvailableFilters] = useState<FilterItem[]>([]);
+  const [activeTrigger, setActiveTrigger] = useState<string | null>(null);
+  const [menuQuery, setMenuQuery] = useState('');
+  const [selectedIndex, setSelectedIndex] = useState(0);
+
+  // --- Selected Payloads ---
+  const [selectedDocType, setSelectedDocType] = useState<string | null>(null);
+  const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
+  const [selectedTestId, setSelectedTestId] = useState<string | null>(null);
+
+  // 1. Fetch Filters and Stats on Mount
+  useEffect(() => {
+    fetch('/api/rag/filters')
+      .then(res => res.json())
+      .then(data => setAvailableFilters(data))
+      .catch(err => console.error("Failed to load filters", err));
+
+    fetch('/api/rag/stats')
+      .then(res => res.json())
+      .then(data => setTotalSources(data.total_sources))
+      .catch(err => console.error("Failed to load stats", err));
+  }, []);
+
+  // Auto-scroll chat
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isLoading]);
+
+  // 2. Filter Menu Logic
+  const filteredMenuOptions = useMemo(() => {
+    if (!activeTrigger) return [];
+    return availableFilters
+      .filter(f => f.trigger === activeTrigger && f.name.toLowerCase().includes(menuQuery.toLowerCase()))
+      .slice(0, 5); // Max 5 suggestions
+  }, [activeTrigger, menuQuery, availableFilters]);
+
+  // Handle Input Changes (Detect Triggers)
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = e.target.value;
+    setInput(val);
+
+    // Auto-resize
+    e.target.style.height = 'auto';
+    e.target.style.height = `${Math.min(e.target.scrollHeight, 200)}px`;
+
+    // Regex to detect if user is currently typing a trigger word at the end of the cursor
+    // e.g., "What are the findings for @" -> trigger '@', query ''
+    const match = val.match(/(?:^|\s)([@$/])([a-zA-Z0-9_-]*)$/);
+
+    if (match) {
+      setActiveTrigger(match[1]);
+      setMenuQuery(match[2]);
+      setSelectedIndex(0); // Reset selection
+    } else {
+      setActiveTrigger(null);
+    }
+  };
+
+  // 3. Handle Menu Selection
+  const applyFilterSelection = (item: FilterItem) => {
+    // Replace the trigger word in the input with the full item name
+    const newVal = input.replace(/(?:^|\s)([@$/])[a-zA-Z0-9_-]*$/, ` $1${item.name} `).trimStart();
+    setInput(newVal);
+    setActiveTrigger(null);
+
+    // Save the UUID to our payload state
+    if (item.type === 'doc_type') setSelectedDocType(item.id);
+    if (item.type === 'asset') setSelectedAssetId(item.id);
+    if (item.type === 'test') setSelectedTestId(item.id);
+
+    // Refocus textarea
+    textareaRef.current?.focus();
+  };
+
+  // Keyboard navigation for the menu and Tag Deletion
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // 1. Menu Navigation
+    if (activeTrigger && filteredMenuOptions.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setSelectedIndex((prev) => (prev + 1) % filteredMenuOptions.length);
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setSelectedIndex((prev) => (prev - 1 + filteredMenuOptions.length) % filteredMenuOptions.length);
+        return;
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault();
+        applyFilterSelection(filteredMenuOptions[selectedIndex]);
+        return;
+      }
+      if (e.key === 'Escape') {
+        setActiveTrigger(null);
+        return;
+      }
+    }
+
+    // 2. Atomic Deletion (Delete full tag on one backspace)
+    if (e.key === 'Backspace' && !activeTrigger) {
+      const cursorPosition = textareaRef.current?.selectionStart;
+      if (cursorPosition) {
+        // Look at the text immediately before the cursor
+        const textBeforeCursor = input.substring(0, cursorPosition);
+
+        // Regex matches a space (or start of line) followed by @, $, or / and any non-space characters
+        const tagMatch = textBeforeCursor.match(/(^|\s)([@$/][^\s]+)\s?$/);
+
+        if (tagMatch) {
+          e.preventDefault();
+          const fullMatch = tagMatch[0]; // e.g., " @Randstad-Digital"
+          const tagToDelete = tagMatch[2]; // e.g., "@Randstad-Digital"
+
+          // Slice the tag out of the input string
+          const newInput = input.substring(0, cursorPosition - fullMatch.length + (tagMatch[1] ? 1 : 0)) + input.substring(cursorPosition);
+          setInput(newInput);
+
+          // Clean up the payload state
+          if (tagToDelete.startsWith('/')) setSelectedDocType(null);
+          if (tagToDelete.startsWith('@')) setSelectedAssetId(null);
+          if (tagToDelete.startsWith('$')) setSelectedTestId(null);
+
+          return;
+        }
+      }
+    }
+
+    // 3. Standard Submit on Enter (unless Shift is held)
+    if (e.key === 'Enter' && !e.shiftKey && !activeTrigger) {
+      e.preventDefault();
+      handleSend();
+      if (textareaRef.current) textareaRef.current.style.height = 'auto';
+    }
+  };
 
   const handleClearChat = () => {
     setSessionId(uuidv4());
@@ -41,12 +182,30 @@ export default function RagChatPage() {
     ]);
   };
 
+  // 4. Send Message Payload
   const handleSend = async (e?: React.FormEvent) => {
     e?.preventDefault();
     if (!input.trim() || isLoading) return;
 
     const userMessage = input.trim();
     setInput('');
+    setActiveTrigger(null);
+
+    // --- Safety Check ---
+    // If the user deleted the tag from the text box before sending, we should clear the UUID from the payload
+    let finalDocType = selectedDocType;
+    let finalAssetId = selectedAssetId;
+    let finalTestId = selectedTestId;
+
+    // A quick robust check: if the active UUID's name is no longer in the text, drop it.
+    const usedDocType = availableFilters.find(f => f.id === selectedDocType);
+    if (usedDocType && !userMessage.includes(`/${usedDocType.name}`)) finalDocType = null;
+
+    const usedAsset = availableFilters.find(f => f.id === selectedAssetId);
+    if (usedAsset && !userMessage.includes(`@${usedAsset.name}`)) finalAssetId = null;
+
+    const usedTest = availableFilters.find(f => f.id === selectedTestId);
+    if (usedTest && !userMessage.includes(`$${usedTest.name}`)) finalTestId = null;
 
     const newMessages: Message[] = [
       ...messages,
@@ -64,18 +223,22 @@ export default function RagChatPage() {
       const response = await fetch('/api/rag/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: userMessage, session_id: sessionId }),
+        body: JSON.stringify({
+          query: userMessage,
+          session_id: sessionId,
+          doc_type: finalDocType,
+          asset_id: finalAssetId,
+          test_id: finalTestId
+        }),
       });
 
       if (!response.ok) throw new Error(`Status ${response.status}`);
       if (!response.body) throw new Error("No readable stream available.");
 
-      // Setup the stream reader
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let assistantMessage = '';
 
-      // Immediately append an empty assistant message to the UI to hold the stream
       setMessages((prev) => [
         ...prev,
         {
@@ -86,7 +249,6 @@ export default function RagChatPage() {
         },
       ]);
 
-      // Stop the bouncing loading dots since the stream is starting
       setIsLoading(false);
 
       while (true) {
@@ -94,21 +256,14 @@ export default function RagChatPage() {
         if (done) break;
 
         const chunkText = decoder.decode(value, { stream: true });
-
-        // Split by newline because multiple JSON lines might arrive in a single packet
         const lines = chunkText.split('\n');
 
         for (const line of lines) {
           if (!line.trim()) continue;
-
           try {
             const data = JSON.parse(line);
+            if (data.error) throw new Error(data.error);
 
-            if (data.error) {
-              throw new Error(data.error);
-            }
-
-            // Append text tokens to the message content
             if (data.text) {
               assistantMessage += data.text;
               setMessages((prev) => {
@@ -118,7 +273,6 @@ export default function RagChatPage() {
               });
             }
 
-            // Apply final citations when the stream ends
             if (data.citations) {
               setMessages((prev) => {
                 const updated = [...prev];
@@ -147,7 +301,7 @@ export default function RagChatPage() {
   };
 
   return (
-    <div className="flex flex-col h-[calc(100vh-12rem)] md:h-[calc(100vh-11rem)] w-full bg-white dark:bg-zinc-950 text-slate-800 dark:text-zinc-100 rounded-2xl shadow-xl border border-slate-200 dark:border-zinc-800/80 overflow-hidden">
+    <div className="flex flex-col h-[calc(100vh-12rem)] md:h-[calc(100vh-11rem)] w-full bg-white dark:bg-zinc-950 text-slate-800 dark:text-zinc-100 rounded-2xl shadow-xl border border-slate-200 dark:border-zinc-800/80 overflow-hidden relative">
       <Toaster position="bottom-right" />
 
       {/* HEADER */}
@@ -159,8 +313,8 @@ export default function RagChatPage() {
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-lg font-bold text-slate-900 dark:text-zinc-100">LUIGI Intelligence</h2>
-              <span className="px-1.5 py-0.5 text-[10px] font-bold bg-amber-100 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400 rounded uppercase tracking-wider">
-                Admin Only
+              <span className="px-1.5 py-0.5 text-[10px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded uppercase tracking-wider border border-slate-200 dark:border-slate-700 shadow-sm">
+                {totalSources} Sources
               </span>
             </div>
             <p className="text-xs text-slate-500 dark:text-zinc-400">Global Knowledge Base Search</p>
@@ -222,8 +376,6 @@ export default function RagChatPage() {
                         ul: ({ node, ...props }) => <ul className="list-disc pl-5 mb-3 space-y-1" {...props} />,
                         ol: ({ node, ...props }) => <ol className="list-decimal pl-5 mb-3 space-y-1" {...props} />,
                         li: ({ node, ...props }) => <li className="text-slate-800 dark:text-zinc-300" {...props} />,
-
-                        // NEW: Table Renderers
                         table: ({ node, ...props }) => (
                           <div className="overflow-x-auto mb-4 border border-slate-200 dark:border-zinc-700 rounded-lg">
                             <table className="min-w-full divide-y divide-slate-200 dark:divide-zinc-700 text-sm" {...props} />
@@ -236,8 +388,6 @@ export default function RagChatPage() {
                         td: ({ node, ...props }) => (
                           <td className="px-4 py-2 border-t border-slate-200 dark:border-zinc-700/50" {...props} />
                         ),
-
-                        // CUSTOM INTERACTIVE CITATION CHIP RENDERER (Snippet Removed)
                         a: ({ node, href, children, ...props }) => {
                           if (href?.startsWith('#cite-')) {
                             const citeIdStr = href.replace('#cite-', '').trim();
@@ -250,16 +400,13 @@ export default function RagChatPage() {
                                   target={citationData?.url ? "_blank" : undefined}
                                   rel="noopener noreferrer"
                                   onClick={(e) => {
-                                    if (!citationData?.url) {
-                                      e.preventDefault();
-                                    }
+                                    if (!citationData?.url) e.preventDefault();
                                   }}
                                   className="inline-flex items-center justify-center px-1.5 py-0.5 text-[10px] font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-100 dark:bg-emerald-500/20 border border-emerald-500/30 rounded cursor-pointer hover:bg-emerald-200 dark:hover:bg-emerald-500/40 transition-colors no-underline shadow-sm"
                                 >
                                   {children}
                                 </a>
 
-                                {/* HOVER TOOLTIP CARD (Simplified) */}
                                 {citationData ? (
                                   <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-max max-w-xs p-2.5 bg-slate-900 dark:bg-zinc-100 text-slate-100 dark:text-zinc-900 text-xs rounded-xl shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-[100] pointer-events-none flex flex-col text-left font-normal normal-case">
                                     <span className="font-bold flex items-center gap-1.5 text-xs text-emerald-400 dark:text-emerald-600">
@@ -279,16 +426,8 @@ export default function RagChatPage() {
                               </span>
                             );
                           }
-
-                          // Standard web links
                           return (
-                            <a
-                              className="text-blue-600 dark:text-blue-400 hover:underline font-medium break-all"
-                              href={href}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              {...props}
-                            >
+                            <a className="text-blue-600 dark:text-blue-400 hover:underline font-medium break-all" href={href} target="_blank" rel="noopener noreferrer" {...props}>
                               {children}
                             </a>
                           );
@@ -304,7 +443,7 @@ export default function RagChatPage() {
                     </ReactMarkdown>
                   </div>
 
-                  {/* CITATIONS SUMMARY LIST AT BOTTOM */}
+                  {/* CITATIONS SUMMARY */}
                   {msg.citations && msg.citations.length > 0 && (
                     <div className="mt-3 pt-3 border-t border-slate-200 dark:border-zinc-800">
                       <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-zinc-500 block mb-2">
@@ -357,30 +496,42 @@ export default function RagChatPage() {
           <div ref={messagesEndRef} />
         </div>
 
-        {/* INPUT FORM */}
-        <form onSubmit={handleSend} className="p-4 bg-slate-50 dark:bg-zinc-900/50 border-t border-slate-200 dark:border-zinc-800">
+        {/* INPUT FORM WITH AUTOCOMPLETE */}
+        <form onSubmit={handleSend} className="p-4 bg-slate-50 dark:bg-zinc-900/50 border-t border-slate-200 dark:border-zinc-800 relative z-20">
+
+          {/* THE COMMAND MENU POPUP */}
+          {activeTrigger && filteredMenuOptions.length > 0 && (
+            <div className="absolute bottom-full mb-2 left-4 w-72 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 shadow-xl rounded-xl overflow-hidden animate-in fade-in slide-in-from-bottom-2">
+              <div className="px-3 py-2 bg-slate-50 dark:bg-zinc-900/50 border-b border-slate-200 dark:border-zinc-800 text-xs font-semibold text-slate-500 dark:text-zinc-400 uppercase tracking-wider">
+                {activeTrigger === '/' ? 'Filter by Document Type' : activeTrigger === '@' ? 'Filter by Asset' : 'Filter by Test'}
+              </div>
+              <ul className="max-h-48 overflow-y-auto">
+                {filteredMenuOptions.map((item, idx) => (
+                  <li
+                    key={item.id}
+                    className={twMerge(
+                      "px-4 py-2.5 flex items-center gap-3 cursor-pointer transition-colors text-sm",
+                      idx === selectedIndex
+                        ? "bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                        : "text-slate-700 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-800"
+                    )}
+                    onClick={() => applyFilterSelection(item)}
+                  >
+                    {item.type === 'doc_type' ? <FileText size={16} className="text-emerald-500" /> : item.type === 'asset' ? <Database size={16} className="text-blue-500" /> : <Box size={16} className="text-amber-500" />}
+                    <span className="truncate">{item.name}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           <div className="relative flex items-end">
             <textarea
               ref={textareaRef}
               value={input}
-              onChange={(e) => {
-                setInput(e.target.value);
-                // Auto-resize magic
-                e.target.style.height = 'auto';
-                e.target.style.height = `${Math.min(e.target.scrollHeight, 200)}px`;
-              }}
-              onKeyDown={(e) => {
-                // Submit on Enter (unless Shift is held)
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  handleSend(e);
-                  // Reset height after sending
-                  if (textareaRef.current) {
-                    textareaRef.current.style.height = 'auto';
-                  }
-                }
-              }}
-              placeholder="Ask a question about findings, scope, leads... (Shift+Enter for new line)"
+              onChange={handleInputChange}
+              onKeyDown={handleKeyDown}
+              placeholder="Ask a question... Use / for documents, @ for assets, $ for tests"
               className="w-full bg-white dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 placeholder-slate-400 dark:placeholder-zinc-600 text-sm rounded-3xl pl-6 pr-14 py-4 border border-slate-300 dark:border-zinc-700 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 resize-none overflow-y-auto [&::-webkit-scrollbar]:hidden"
               rows={1}
               style={{ minHeight: '54px', maxHeight: '200px' }}
