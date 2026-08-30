@@ -3,13 +3,16 @@ import { twMerge } from 'tailwind-merge';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { v4 as uuidv4 } from 'uuid';
-import { Send, Trash2, Bot, User, Link as LinkIcon, FileText, Database, Box, Square, Copy, Check } from 'lucide-react';
-import type { Citation, Message } from "../types/board";
+import { Send, Trash2, Bot, User, Link as LinkIcon, FileText, Database, Box, Square, Copy, Check, MessageSquare } from 'lucide-react';
 import toast, { Toaster } from "react-hot-toast";
 import { useAppContext } from "../context/AppContext";
 import greenStainIcon from '../assets/greenstain-icon.png';
+import type { Citation, Message } from "../types/board";
 
-// --- Types for our new Filters ---
+// NEW: Syntax Highlighter
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
+
 interface FilterItem {
   type: 'doc_type' | 'asset' | 'test';
   id: string;
@@ -17,12 +20,15 @@ interface FilterItem {
   trigger: string;
 }
 
+const ICEBREAKERS = [
+  "Summarize the latest critical findings",
+  "What are is the last white box pentest?"
+];
+
 export default function RagChatPage() {
   const { currentUser } = useAppContext();
   const [sessionId, setSessionId] = useState<string>(uuidv4());
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-
-  // Controller to abort the streaming request
   const abortControllerRef = useRef<AbortController | null>(null);
 
   // --- Chat State ---
@@ -36,8 +42,11 @@ export default function RagChatPage() {
   ]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+  const [copiedId, setCopiedId] = useState<string | number | null>(null);
+
+  // --- Auto-Scroll State ---
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [isUserScrolling, setIsUserScrolling] = useState(false);
 
   // --- Autocomplete State ---
   const [availableFilters, setAvailableFilters] = useState<FilterItem[]>([]);
@@ -46,12 +55,10 @@ export default function RagChatPage() {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [totalSources, setTotalSources] = useState<number>(0);
 
-  // --- Selected Payloads ---
   const [selectedDocType, setSelectedDocType] = useState<string | null>(null);
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
   const [selectedTestId, setSelectedTestId] = useState<string | null>(null);
 
-  // 1. Fetch Filters and Stats on Mount
   useEffect(() => {
     fetch('/api/rag/filters')
       .then(res => res.json())
@@ -64,112 +71,80 @@ export default function RagChatPage() {
       .catch(err => console.error("Failed to load stats", err));
   }, []);
 
-  // Auto-scroll chat
+  // SMART AUTO-SCROLL
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isLoading]);
+    if (!isUserScrolling) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages, isLoading, isUserScrolling]);
 
-  // 2. Filter Menu Logic
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
+    // If user scrolls up more than 50px from the bottom, they are manually scrolling
+    const isAtBottom = scrollHeight - scrollTop - clientHeight < 50;
+    setIsUserScrolling(!isAtBottom);
+  };
+
   const filteredMenuOptions = useMemo(() => {
     if (!activeTrigger) return [];
     return availableFilters
       .filter(f => f.trigger === activeTrigger && f.name.toLowerCase().includes(menuQuery.toLowerCase()))
-      .slice(0, 5); // Max 5 suggestions
+      .slice(0, 5);
   }, [activeTrigger, menuQuery, availableFilters]);
 
-  // Handle Input Changes (Detect Triggers)
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value;
     setInput(val);
-
-    // Auto-resize
     e.target.style.height = 'auto';
     e.target.style.height = `${Math.min(e.target.scrollHeight, 200)}px`;
 
-    // Regex to detect if user is currently typing a trigger word at the end of the cursor
-    // e.g., "What are the findings for @" -> trigger '@', query ''
     const match = val.match(/(?:^|\s)([@$/])([a-zA-Z0-9_-]*)$/);
-
     if (match) {
       setActiveTrigger(match[1]);
       setMenuQuery(match[2]);
-      setSelectedIndex(0); // Reset selection
+      setSelectedIndex(0);
     } else {
       setActiveTrigger(null);
     }
   };
 
-  // 3. Handle Menu Selection
   const applyFilterSelection = (item: FilterItem) => {
-    // Replace the trigger word in the input with the full item name
     const newVal = input.replace(/(?:^|\s)([@$/])[a-zA-Z0-9_-]*$/, ` $1${item.name} `).trimStart();
     setInput(newVal);
     setActiveTrigger(null);
-
-    // Save the UUID to our payload state
     if (item.type === 'doc_type') setSelectedDocType(item.id);
     if (item.type === 'asset') setSelectedAssetId(item.id);
     if (item.type === 'test') setSelectedTestId(item.id);
-
-    // Refocus textarea
     textareaRef.current?.focus();
   };
 
-  // Keyboard navigation for the menu and Tag Deletion
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    // 1. Menu Navigation
     if (activeTrigger && filteredMenuOptions.length > 0) {
-      if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        setSelectedIndex((prev) => (prev + 1) % filteredMenuOptions.length);
-        return;
-      }
-      if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        setSelectedIndex((prev) => (prev - 1 + filteredMenuOptions.length) % filteredMenuOptions.length);
-        return;
-      }
-      if (e.key === 'Enter' || e.key === 'Tab') {
-        e.preventDefault();
-        applyFilterSelection(filteredMenuOptions[selectedIndex]);
-        return;
-      }
-      if (e.key === 'Escape') {
-        setActiveTrigger(null);
-        return;
-      }
+      if (e.key === 'ArrowDown') { e.preventDefault(); setSelectedIndex((prev) => (prev + 1) % filteredMenuOptions.length); return; }
+      if (e.key === 'ArrowUp') { e.preventDefault(); setSelectedIndex((prev) => (prev - 1 + filteredMenuOptions.length) % filteredMenuOptions.length); return; }
+      if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); applyFilterSelection(filteredMenuOptions[selectedIndex]); return; }
+      if (e.key === 'Escape') { setActiveTrigger(null); return; }
     }
 
-    // 2. Atomic Deletion (Delete full tag on one backspace)
     if (e.key === 'Backspace' && !activeTrigger) {
       const cursorPosition = textareaRef.current?.selectionStart;
       if (cursorPosition) {
-        // Look at the text immediately before the cursor
         const textBeforeCursor = input.substring(0, cursorPosition);
-
-        // Regex matches a space (or start of line) followed by @, $, or / and any non-space characters
         const tagMatch = textBeforeCursor.match(/(^|\s)([@$/][^\s]+)\s?$/);
-
         if (tagMatch) {
           e.preventDefault();
-          const fullMatch = tagMatch[0]; // e.g., " @Randstad-Digital"
-          const tagToDelete = tagMatch[2]; // e.g., "@Randstad-Digital"
-
-          // Slice the tag out of the input string
+          const fullMatch = tagMatch[0];
+          const tagToDelete = tagMatch[2];
           const newInput = input.substring(0, cursorPosition - fullMatch.length + (tagMatch[1] ? 1 : 0)) + input.substring(cursorPosition);
           setInput(newInput);
-
-          // Clean up the payload state
           if (tagToDelete.startsWith('/')) setSelectedDocType(null);
           if (tagToDelete.startsWith('@')) setSelectedAssetId(null);
           if (tagToDelete.startsWith('$')) setSelectedTestId(null);
-
           return;
         }
       }
     }
 
-    // 3. Standard Submit on Enter (unless Shift is held)
     if (e.key === 'Enter' && !e.shiftKey && !activeTrigger) {
       e.preventDefault();
       handleSend();
@@ -187,13 +162,16 @@ export default function RagChatPage() {
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       },
     ]);
+    setSelectedDocType(null);
+    setSelectedAssetId(null);
+    setSelectedTestId(null);
   };
 
-  const handleCopy = (text: string, index: number) => {
+  const handleCopy = (text: string, id: string | number) => {
     navigator.clipboard.writeText(text);
-    setCopiedIndex(index);
+    setCopiedId(id);
     toast.success('Copied to clipboard');
-    setTimeout(() => setCopiedIndex(null), 2000);
+    setTimeout(() => setCopiedId(null), 2000);
   };
 
   const handleStop = () => {
@@ -204,36 +182,40 @@ export default function RagChatPage() {
     }
   };
 
-  // 4. Send Message Payload
-  const handleSend = async (e?: React.FormEvent) => {
-    e?.preventDefault();
-    if (!input.trim() || isLoading) return;
+  const handleIcebreaker = (prompt: string) => {
+    setInput(prompt);
+    // Give state a tick to update before submitting
+    setTimeout(() => {
+      // Simulate form submission
+      handleSend(undefined, prompt);
+    }, 0);
+  };
 
-    const userMessage = input.trim();
+  const handleSend = async (e?: React.FormEvent, overrideInput?: string) => {
+    e?.preventDefault();
+    const payloadQuery = (overrideInput || input).trim();
+    if (!payloadQuery || isLoading) return;
+
     setInput('');
     setActiveTrigger(null);
+    setIsUserScrolling(false); // Snap back to bottom on new message
 
-    // --- Safety Check ---
-    // If the user deleted the tag from the text box before sending, we should clear the UUID from the payload
     let finalDocType = selectedDocType;
     let finalAssetId = selectedAssetId;
     let finalTestId = selectedTestId;
 
-    // A quick robust check: if the active UUID's name is no longer in the text, drop it.
     const usedDocType = availableFilters.find(f => f.id === selectedDocType);
-    if (usedDocType && !userMessage.includes(`/${usedDocType.name}`)) finalDocType = null;
-
+    if (usedDocType && !payloadQuery.includes(`/${usedDocType.name}`)) finalDocType = null;
     const usedAsset = availableFilters.find(f => f.id === selectedAssetId);
-    if (usedAsset && !userMessage.includes(`@${usedAsset.name}`)) finalAssetId = null;
-
+    if (usedAsset && !payloadQuery.includes(`@${usedAsset.name}`)) finalAssetId = null;
     const usedTest = availableFilters.find(f => f.id === selectedTestId);
-    if (usedTest && !userMessage.includes(`$${usedTest.name}`)) finalTestId = null;
+    if (usedTest && !payloadQuery.includes(`$${usedTest.name}`)) finalTestId = null;
 
     const newMessages: Message[] = [
       ...messages,
       {
         role: 'user',
-        content: userMessage,
+        content: payloadQuery,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       },
     ];
@@ -248,7 +230,7 @@ export default function RagChatPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          query: userMessage,
+          query: payloadQuery,
           session_id: sessionId,
           doc_type: finalDocType,
           asset_id: finalAssetId,
@@ -311,11 +293,7 @@ export default function RagChatPage() {
         }
       }
     } catch (error: any) {
-      if (error.name === 'AbortError') {
-        console.log('Stream stopped by user');
-        // Optional:  can append "[Stopped]" to the message if we want
-        return;
-      }
+      if (error.name === 'AbortError') return;
       setIsLoading(false);
       setMessages((prev) => [
         ...prev,
@@ -338,7 +316,7 @@ export default function RagChatPage() {
       <Toaster position="bottom-right" />
 
       {/* HEADER */}
-      <div className="flex items-center justify-between px-6 py-4 bg-slate-50 dark:bg-zinc-900/50 border-b border-slate-200 dark:border-zinc-800">
+      <div className="flex items-center justify-between px-6 py-4 bg-slate-50 dark:bg-zinc-900/50 border-b border-slate-200 dark:border-zinc-800 shadow-sm z-10">
         <div className="flex items-center gap-3">
           <div className="p-2 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-lg border border-emerald-500/20">
             <Bot size={24} />
@@ -364,7 +342,7 @@ export default function RagChatPage() {
       </div>
 
         {/* MESSAGES VIEWPORT */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        <div className="flex-1 overflow-y-auto p-6 space-y-6" onScroll={handleScroll}>
           {messages.map((msg, index) => {
             const isUser = msg.role === 'user';
             return (
@@ -378,7 +356,7 @@ export default function RagChatPage() {
                 {/* AVATAR */}
                 <div
                   className={twMerge(
-                    'w-9 h-9 rounded-full flex items-center justify-center shrink-0 shadow-sm font-bold text-sm',
+                    'w-9 h-9 rounded-full flex items-center justify-center shrink-0 shadow-sm font-bold text-sm mt-1',
                     isUser
                       ? 'bg-gradient-to-tr from-emerald-500 to-indigo-500 text-white'
                       : 'bg-slate-100 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 p-1.5'
@@ -403,7 +381,6 @@ export default function RagChatPage() {
                         )
                   )}
                 >
-
                   <div className="text-sm leading-relaxed">
                     <ReactMarkdown
                       urlTransform={(url) => url}
@@ -426,6 +403,55 @@ export default function RagChatPage() {
                         td: ({ node, ...props }) => (
                           <td className="px-4 py-2 border-t border-slate-200 dark:border-zinc-700/50" {...props} />
                         ),
+
+                        // NEW: Custom Syntax Highlighter for Code Blocks
+                        code(props) {
+                          const {children, className, node, ...rest} = props;
+                          const match = /language-(\w+)/.exec(className || '');
+
+                          // If it lacks a language tag and has no newlines, treat it as inline code
+                          const isInline = !match && !String(children).includes('\n');
+
+                          if (isInline) {
+                            return (
+                              <code className="bg-slate-200 dark:bg-zinc-800 text-pink-600 dark:text-pink-400 px-1.5 py-0.5 rounded text-[11px] font-mono whitespace-pre-wrap" {...rest}>
+                                {children}
+                              </code>
+                            );
+                          }
+
+                          // If it's a block of code, use SyntaxHighlighter
+                          const codeString = String(children).replace(/\n$/, '');
+                          const blockId = `${index}-${match?.[1] || 'code'}`;
+
+                          return (
+                            <div className="relative group my-4 rounded-lg overflow-hidden border border-slate-700">
+                              {/* Top Bar for Code Block */}
+                              <div className="flex items-center justify-between px-4 py-1.5 bg-[#1e1e1e] border-b border-slate-700/50 select-none">
+                                <span className="text-[10px] text-slate-400 font-mono lowercase">{match?.[1] || 'text'}</span>
+                                <button
+                                  onClick={() => handleCopy(codeString, blockId)}
+                                  className="flex items-center gap-1.5 text-[10px] text-slate-400 hover:text-emerald-400 transition-colors"
+                                >
+                                  {copiedId === blockId ? (
+                                    <><Check size={12} /><span>Copied</span></>
+                                  ) : (
+                                    <><Copy size={12} /><span>Copy code</span></>
+                                  )}
+                                </button>
+                              </div>
+                              <SyntaxHighlighter
+                                {...rest}
+                                children={codeString}
+                                style={vscDarkPlus}
+                                language={match?.[1] || 'text'}
+                                PreTag="div"
+                                customStyle={{ margin: 0, borderRadius: 0, fontSize: '0.75rem' }}
+                              />
+                            </div>
+                          );
+                        },
+
                         a: ({ node, href, children, ...props }) => {
                           if (href?.startsWith('#cite-')) {
                             const citeIdStr = href.replace('#cite-', '').trim();
@@ -478,18 +504,13 @@ export default function RagChatPage() {
                             </a>
                           );
                         },
-                        code: ({ node, ...props }) => <code className="bg-slate-200 dark:bg-zinc-800 text-pink-600 dark:text-pink-400 px-1.5 py-0.5 rounded text-xs font-mono" {...props} />,
-                        pre: ({ node, ...props }) => <pre className="bg-slate-800 text-slate-50 p-3 rounded-lg overflow-x-auto text-xs mb-3" {...props} />,
-                        h1: ({ node, ...props }) => <h1 className="text-lg font-bold mb-2 mt-4 text-slate-900 dark:text-white" {...props} />,
-                        h2: ({ node, ...props }) => <h2 className="text-base font-bold mb-2 mt-3 text-slate-900 dark:text-white" {...props} />,
-                        h3: ({ node, ...props }) => <h3 className="text-sm font-bold mb-2 mt-3 text-slate-900 dark:text-white" {...props} />
                       }}
                     >
                       {msg.content}
                     </ReactMarkdown>
                   </div>
 
-                  {/* CITATIONS SUMMARY */}
+                  {/* CITATIONS SUMMARY (Collapsible Accordion) */}
                   {msg.citations && msg.citations.length > 0 && (
                     <details className="mt-3 pt-3 border-t border-slate-200 dark:border-zinc-800 group">
                       <summary className="text-[11px] font-bold uppercase tracking-wider text-slate-500 hover:text-emerald-600 dark:text-zinc-500 dark:hover:text-emerald-400 cursor-pointer list-none flex items-center gap-1.5 select-none transition-colors">
@@ -524,22 +545,17 @@ export default function RagChatPage() {
                     </details>
                   )}
 
+                  {/* FOOTER: COPY BUTTON & TIMESTAMP */}
                   <div className="flex items-center justify-end gap-3 mt-1 pt-1">
                     <button
                       onClick={() => handleCopy(msg.content, index)}
                       className="flex items-center gap-1 text-[10px] text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors"
-                      title="Copy message"
+                      title="Copy message text"
                     >
-                      {copiedIndex === index ? (
-                        <>
-                          <Check size={12} className="text-emerald-500" />
-                          <span className="text-emerald-500 font-medium">Copied</span>
-                        </>
+                      {copiedId === index ? (
+                        <><Check size={12} className="text-emerald-500" /><span className="text-emerald-500 font-medium">Copied</span></>
                       ) : (
-                        <>
-                          <Copy size={12} />
-                          <span>Copy</span>
-                        </>
+                        <><Copy size={12} /><span>Copy</span></>
                       )}
                     </button>
 
@@ -557,13 +573,29 @@ export default function RagChatPage() {
             );
           })}
 
+          {/* ICEBREAKER PROMPTS (Only shows when chat has 1 message) */}
+          {messages.length === 1 && !isLoading && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-w-3xl mt-4 animate-in fade-in slide-in-from-bottom-2">
+              {ICEBREAKERS.map((prompt, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => handleIcebreaker(prompt)}
+                  className="flex items-center gap-3 p-4 text-left bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 hover:border-emerald-500 dark:hover:border-emerald-500 rounded-xl shadow-sm hover:shadow-md transition-all group"
+                >
+                  <MessageSquare size={16} className="text-emerald-500 shrink-0 opacity-70 group-hover:opacity-100" />
+                  <span className="text-sm text-slate-700 dark:text-zinc-300 font-medium">{prompt}</span>
+                </button>
+              ))}
+            </div>
+          )}
+
           {/* LOADING INDICATOR */}
           {isLoading && (
-            <div className="flex gap-4 max-w-3xl mr-auto">
+            <div className="flex gap-4 max-w-3xl mr-auto mt-2">
               <div className="w-9 h-9 rounded-full bg-slate-100 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 flex items-center justify-center p-1.5 shrink-0">
                 <img src={greenStainIcon} alt="Luigi Logo" className="w-full h-full object-contain animate-pulse" />
               </div>
-              <div className="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-2xl rounded-tl-none px-5 py-4 flex items-center gap-2">
+              <div className="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-2xl rounded-tl-none px-5 py-4 flex items-center gap-2 shadow-sm">
                 <span className="w-2 h-2 bg-emerald-500 rounded-full animate-bounce"></span>
                 <span className="w-2 h-2 bg-emerald-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></span>
                 <span className="w-2 h-2 bg-emerald-500 rounded-full animate-bounce" style={{ animationDelay: '0.4s' }}></span>
