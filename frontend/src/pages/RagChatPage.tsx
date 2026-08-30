@@ -3,9 +3,11 @@ import { twMerge } from 'tailwind-merge';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { v4 as uuidv4 } from 'uuid';
-import { Send, Trash2, Bot, User, Link as LinkIcon, FileText, Database, Box } from 'lucide-react';
+import { Send, Trash2, Bot, User, Link as LinkIcon, FileText, Database, Box, Square, Copy, Check } from 'lucide-react';
 import type { Citation, Message } from "../types/board";
 import toast, { Toaster } from "react-hot-toast";
+import { useAppContext } from "../context/AppContext";
+import greenStainIcon from '../assets/greenstain-icon.png';
 
 // --- Types for our new Filters ---
 interface FilterItem {
@@ -16,9 +18,12 @@ interface FilterItem {
 }
 
 export default function RagChatPage() {
+  const { currentUser } = useAppContext();
   const [sessionId, setSessionId] = useState<string>(uuidv4());
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const [totalSources, setTotalSources] = useState<number>(0);
+
+  // Controller to abort the streaming request
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // --- Chat State ---
   const [messages, setMessages] = useState<Message[]>([
@@ -31,6 +36,7 @@ export default function RagChatPage() {
   ]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // --- Autocomplete State ---
@@ -38,6 +44,7 @@ export default function RagChatPage() {
   const [activeTrigger, setActiveTrigger] = useState<string | null>(null);
   const [menuQuery, setMenuQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [totalSources, setTotalSources] = useState<number>(0);
 
   // --- Selected Payloads ---
   const [selectedDocType, setSelectedDocType] = useState<string | null>(null);
@@ -182,6 +189,21 @@ export default function RagChatPage() {
     ]);
   };
 
+  const handleCopy = (text: string, index: number) => {
+    navigator.clipboard.writeText(text);
+    setCopiedIndex(index);
+    toast.success('Copied to clipboard');
+    setTimeout(() => setCopiedIndex(null), 2000);
+  };
+
+  const handleStop = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+      setIsLoading(false);
+    }
+  };
+
   // 4. Send Message Payload
   const handleSend = async (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -219,6 +241,8 @@ export default function RagChatPage() {
     setMessages(newMessages);
     setIsLoading(true);
 
+    abortControllerRef.current = new AbortController();
+
     try {
       const response = await fetch('/api/rag/chat', {
         method: 'POST',
@@ -230,6 +254,7 @@ export default function RagChatPage() {
           asset_id: finalAssetId,
           test_id: finalTestId
         }),
+        signal: abortControllerRef.current.signal,
       });
 
       if (!response.ok) throw new Error(`Status ${response.status}`);
@@ -286,6 +311,11 @@ export default function RagChatPage() {
         }
       }
     } catch (error: any) {
+      if (error.name === 'AbortError') {
+        console.log('Stream stopped by user');
+        // Optional:  can append "[Stopped]" to the message if we want
+        return;
+      }
       setIsLoading(false);
       setMessages((prev) => [
         ...prev,
@@ -297,6 +327,9 @@ export default function RagChatPage() {
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         },
       ]);
+    } finally {
+      setIsLoading(false);
+      abortControllerRef.current = null;
     }
   };
 
@@ -345,19 +378,23 @@ export default function RagChatPage() {
                 {/* AVATAR */}
                 <div
                   className={twMerge(
-                    'w-9 h-9 rounded-full flex items-center justify-center shrink-0 shadow-sm',
+                    'w-9 h-9 rounded-full flex items-center justify-center shrink-0 shadow-sm font-bold text-sm',
                     isUser
                       ? 'bg-gradient-to-tr from-emerald-500 to-indigo-500 text-white'
-                      : 'bg-slate-100 dark:bg-zinc-800 text-emerald-600 dark:text-emerald-400 border border-slate-200 dark:border-zinc-700'
+                      : 'bg-slate-100 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 p-1.5'
                   )}
                 >
-                  {isUser ? <User size={16} /> : <Bot size={18} />}
+                  {isUser ? (
+                    currentUser?.name ? currentUser.name.charAt(0).toUpperCase() : <User size={16} />
+                  ) : (
+                    <img src={greenStainIcon} alt="Luigi Logo" className="w-full h-full object-contain" />
+                  )}
                 </div>
 
                 {/* CHAT BUBBLE */}
                 <div
                   className={twMerge(
-                    'flex flex-col gap-2 rounded-2xl px-5 py-4 shadow-sm relative',
+                    'flex flex-col gap-2 rounded-2xl px-5 py-4 shadow-sm relative min-w-[120px]',
                     isUser
                       ? 'bg-slate-100 dark:bg-zinc-800 text-slate-900 dark:text-zinc-100 rounded-tr-none border border-slate-200 dark:border-zinc-700'
                       : twMerge(
@@ -366,6 +403,7 @@ export default function RagChatPage() {
                         )
                   )}
                 >
+
                   <div className="text-sm leading-relaxed">
                     <ReactMarkdown
                       urlTransform={(url) => url}
@@ -394,7 +432,15 @@ export default function RagChatPage() {
                             const citationData = msg.citations?.find(c => String(c.id) === citeIdStr);
 
                             return (
-                              <span className="relative inline-block group mx-0.5 font-sans align-baseline">
+                              <span className="relative inline-block hover-group mx-0.5 font-sans align-baseline"
+                                    onMouseEnter={(e) => {
+                                      const tooltip = e.currentTarget.querySelector('.citation-tooltip');
+                                      if (tooltip) tooltip.classList.remove('invisible', 'opacity-0');
+                                    }}
+                                    onMouseLeave={(e) => {
+                                      const tooltip = e.currentTarget.querySelector('.citation-tooltip');
+                                      if (tooltip) tooltip.classList.add('invisible', 'opacity-0');
+                                    }}>
                                 <a
                                   href={citationData?.url || undefined}
                                   target={citationData?.url ? "_blank" : undefined}
@@ -408,7 +454,7 @@ export default function RagChatPage() {
                                 </a>
 
                                 {citationData ? (
-                                  <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-max max-w-xs p-2.5 bg-slate-900 dark:bg-zinc-100 text-slate-100 dark:text-zinc-900 text-xs rounded-xl shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-[100] pointer-events-none flex flex-col text-left font-normal normal-case">
+                                  <span className="citation-tooltip absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-max max-w-xs p-2.5 bg-slate-900 dark:bg-zinc-100 text-slate-100 dark:text-zinc-900 text-xs rounded-xl shadow-xl opacity-0 invisible transition-all duration-200 z-[100] pointer-events-none flex flex-col text-left font-normal normal-case">
                                     <span className="font-bold flex items-center gap-1.5 text-xs text-emerald-400 dark:text-emerald-600">
                                       <LinkIcon size={12} className="shrink-0" />
                                       <span className="truncate">{citationData.file_name}</span>
@@ -419,7 +465,7 @@ export default function RagChatPage() {
                                     <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-slate-900 dark:bg-zinc-100 rotate-45 block"></span>
                                   </span>
                                 ) : (
-                                  <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-max px-2.5 py-1.5 bg-slate-900 dark:bg-zinc-100 text-slate-100 dark:text-zinc-900 text-[10px] rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-[100] pointer-events-none">
+                                  <span className="citation-tooltip absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-max px-2.5 py-1.5 bg-slate-900 dark:bg-zinc-100 text-slate-100 dark:text-zinc-900 text-[10px] rounded-lg shadow-xl opacity-0 invisible transition-all z-[100] pointer-events-none">
                                     Processing source...
                                   </span>
                                 )}
@@ -445,11 +491,22 @@ export default function RagChatPage() {
 
                   {/* CITATIONS SUMMARY */}
                   {msg.citations && msg.citations.length > 0 && (
-                    <div className="mt-3 pt-3 border-t border-slate-200 dark:border-zinc-800">
-                      <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-zinc-500 block mb-2">
-                        Sources
-                      </span>
-                      <div className="flex flex-wrap gap-2">
+                    <details className="mt-3 pt-3 border-t border-slate-200 dark:border-zinc-800 group">
+                      <summary className="text-[11px] font-bold uppercase tracking-wider text-slate-500 hover:text-emerald-600 dark:text-zinc-500 dark:hover:text-emerald-400 cursor-pointer list-none flex items-center gap-1.5 select-none transition-colors">
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          width="12" height="12"
+                          viewBox="0 0 24 24" fill="none"
+                          stroke="currentColor" strokeWidth="2"
+                          strokeLinecap="round" strokeLinejoin="round"
+                          className="group-open:rotate-90 transition-transform duration-200"
+                        >
+                          <path d="m9 18 6-6-6-6"/>
+                        </svg>
+                        {msg.citations.length} Source{msg.citations.length !== 1 && 's'}
+                      </summary>
+
+                      <div className="flex flex-wrap gap-2 mt-3 animate-in fade-in slide-in-from-top-1 duration-200">
                         {msg.citations.map((cite) => (
                           <a
                             key={cite.id}
@@ -464,17 +521,37 @@ export default function RagChatPage() {
                           </a>
                         ))}
                       </div>
-                    </div>
+                    </details>
                   )}
 
-                  <span
-                    className={twMerge(
-                      'text-[10px] self-end mt-1',
-                      isUser ? 'text-slate-400 dark:text-zinc-500' : 'text-slate-400 dark:text-zinc-600'
-                    )}
-                  >
-                    {msg.timestamp}
-                  </span>
+                  <div className="flex items-center justify-end gap-3 mt-1 pt-1">
+                    <button
+                      onClick={() => handleCopy(msg.content, index)}
+                      className="flex items-center gap-1 text-[10px] text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors"
+                      title="Copy message"
+                    >
+                      {copiedIndex === index ? (
+                        <>
+                          <Check size={12} className="text-emerald-500" />
+                          <span className="text-emerald-500 font-medium">Copied</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy size={12} />
+                          <span>Copy</span>
+                        </>
+                      )}
+                    </button>
+
+                    <span
+                      className={twMerge(
+                        'text-[10px]',
+                        isUser ? 'text-slate-400 dark:text-zinc-500' : 'text-slate-400 dark:text-zinc-600'
+                      )}
+                    >
+                      {msg.timestamp}
+                    </span>
+                  </div>
                 </div>
               </div>
             );
@@ -483,8 +560,8 @@ export default function RagChatPage() {
           {/* LOADING INDICATOR */}
           {isLoading && (
             <div className="flex gap-4 max-w-3xl mr-auto">
-              <div className="w-9 h-9 rounded-full bg-slate-100 dark:bg-zinc-800 text-emerald-600 dark:text-emerald-400 border border-slate-200 dark:border-zinc-700 flex items-center justify-center shrink-0">
-                <Bot size={18} />
+              <div className="w-9 h-9 rounded-full bg-slate-100 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 flex items-center justify-center p-1.5 shrink-0">
+                <img src={greenStainIcon} alt="Luigi Logo" className="w-full h-full object-contain animate-pulse" />
               </div>
               <div className="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-2xl rounded-tl-none px-5 py-4 flex items-center gap-2">
                 <span className="w-2 h-2 bg-emerald-500 rounded-full animate-bounce"></span>
@@ -536,13 +613,25 @@ export default function RagChatPage() {
               rows={1}
               style={{ minHeight: '54px', maxHeight: '200px' }}
             />
-            <button
-              type="submit"
-              disabled={!input.trim() || isLoading}
-              className="absolute right-2 bottom-2 p-2 text-white bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:hover:bg-emerald-600 rounded-full transition-all mb-[5px]"
-            >
-              <Send size={18} />
-            </button>
+            {/* TOGGLE BUTTON: STOP vs SEND */}
+            {isLoading && abortControllerRef.current ? (
+              <button
+                type="button"
+                onClick={handleStop}
+                className="absolute right-2 bottom-2 p-2 text-slate-400 bg-white dark:bg-zinc-950 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 border border-slate-200 dark:border-zinc-700 rounded-full transition-all mb-[5px] shadow-sm"
+                title="Stop Generating"
+              >
+                <Square size={16} fill="currentColor" />
+              </button>
+            ) : (
+              <button
+                type="submit"
+                disabled={!input.trim() || isLoading}
+                className="absolute right-2 bottom-2 p-2 text-white bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:hover:bg-emerald-600 rounded-full transition-all mb-[5px]"
+              >
+                <Send size={18} />
+              </button>
+            )}
           </div>
         </form>
       </div>

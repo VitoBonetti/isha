@@ -408,7 +408,7 @@ def chat_with_documents(
         gemini_history.append(types.Content(role="model", parts=[types.Part.from_text(text=past_a)]))
 
     system_instruction = """
-    You are an expert cybersecurity assistant for the Global Offensive Security Team.
+    Your name is Luigi. You are an expert cybersecurity assistant for the Global Offensive Security Team.
     Answer the user's question based strictly on the provided Context Documents and your previous conversation history.
     If the context does not contain the answer, politely state that you do not have that information.
 
