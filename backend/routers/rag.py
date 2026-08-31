@@ -13,7 +13,8 @@ from routers.auth import require_admin
 from utils.document_parser import extract_text_from_drive_file
 from utils.secret_manager import get_secret
 from audit_logger import log_audit_event
-from schema import RagChatRequest, RagAIResponse
+from schema import RagChatRequest, RagAIResponse, RagChatBulkDeleteRequest
+
 
 router = APIRouter(prefix="/api/rag", tags=["RAG Intelligence"])
 
@@ -507,3 +508,94 @@ def rag_chat_logs(current_user: dict = Depends(require_admin), cursor=Depends(ge
         "SELECT * FROM rag_chat_logs")
     columns = [col[0] for col in cursor.description]
     return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+
+# --- SESSIONS ---
+@router.get("/sessions", summary="Get user chat sessions")
+def get_chat_sessions(current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    # Groups chat logs by session, uses the first question as the title, and sorts by newest
+    cursor.execute("""
+        SELECT session_id, MAX(timestamp) as last_updated,
+               (ARRAY_AGG(question ORDER BY timestamp ASC))[1] as title
+        FROM rag_chat_logs
+        WHERE user_id = %s AND is_session_active = TRUE
+        GROUP BY session_id
+        ORDER BY last_updated DESC
+        LIMIT 50
+    """, (str(current_user["id"]),))
+    columns = [col[0] for col in cursor.description]
+    return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+
+@router.get("/sessions/{session_id}", summary="Get messages for a specific session")
+def get_session_messages(session_id: str, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    # Rebuilds the chat history for a specific session
+    cursor.execute("""
+        SELECT question, answer, timestamp 
+        FROM rag_chat_logs 
+        WHERE session_id = %s AND user_id = %s AND is_session_active = TRUE
+        ORDER BY timestamp ASC
+    """, (session_id, str(current_user["id"])))
+
+    messages = []
+    for q, a, t in cursor.fetchall():
+        time_str = t.strftime("%I:%M %p") if t else ""
+        messages.append({
+            "role": "user",
+            "content": q,
+            "timestamp": time_str
+        })
+        messages.append({
+            "role": "assistant",
+            "content": a,
+            "citations": [],  # Note: Citations are kept inline in the text
+            "timestamp": time_str
+        })
+    return messages
+
+
+@router.delete("/sessions/{session_id}", summary="Soft delete a single chat session")
+def delete_chat_session(session_id: str, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    if session_id == "all":
+        # Bulk delete all
+        cursor.execute("""
+            UPDATE rag_chat_logs 
+            SET is_session_active = FALSE 
+            WHERE user_id = %s
+        """, (str(current_user["id"]),))
+    else:
+        # Delete single session
+        cursor.execute("""
+            UPDATE rag_chat_logs 
+            SET is_session_active = FALSE 
+            WHERE session_id = %s AND user_id = %s
+        """, (session_id, str(current_user["id"])))
+
+    cursor.connection.commit()
+    return {"status": "success"}
+
+
+@router.post("/sessions/bulk-delete", summary="Soft delete multiple chat sessions")
+def bulk_delete_chat_sessions(request: RagChatBulkDeleteRequest, current_user: dict = Depends(require_admin),
+                              cursor=Depends(get_db_cursor)):
+    if not request.session_ids:
+        return {"status": "success"}
+
+    if "all" in request.session_ids:
+        # Delete all
+        cursor.execute("""
+            UPDATE rag_chat_logs 
+            SET is_session_active = FALSE 
+            WHERE user_id = %s
+        """, (str(current_user["id"]),))
+    else:
+        # Delete selected
+        format_strings = ','.join(['%s'] * len(request.session_ids))
+        cursor.execute(f"""
+            UPDATE rag_chat_logs 
+            SET is_session_active = FALSE 
+            WHERE session_id IN ({format_strings}) AND user_id = %s
+        """, tuple(request.session_ids + [str(current_user["id"])]))
+
+    cursor.connection.commit()
+    return {"status": "success"}

@@ -315,3 +315,6 @@ class RagChatRequest(BaseModel):
 class RagAIResponse(BaseModel):
     answer: str = Field(description="The response text to the user's question.")
     used_sources: List[str] = Field(description="List of exact document file names actually used to answer the question. Empty if no sources were used or no answer was found.")
+
+class RagChatBulkDeleteRequest(BaseModel):
+    session_ids: List[str]

@@ -93,3 +93,9 @@ export interface FilterItem {
   name: string;
   trigger: string;
 }
+
+export interface ChatSession {
+  session_id: string;
+  title: string;
+  last_updated: string;
+}

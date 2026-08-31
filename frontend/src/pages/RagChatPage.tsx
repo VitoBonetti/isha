@@ -5,12 +5,13 @@ import remarkGfm from 'remark-gfm';
 import { v4 as uuidv4 } from 'uuid';
 import {
   Send, Trash2, Bot, User, Link as LinkIcon, FileText, Database,
-  Box, Square, Copy, Check, MessageSquare, RefreshCw, Pencil, X, PanelLeft, Plus
+  Box, Square, Copy, Check, MessageSquare, RefreshCw, Pencil, X, PanelLeft, Plus, CheckSquare, ListChecks
 } from 'lucide-react';
 import toast, { Toaster } from "react-hot-toast";
 import { useAppContext } from "../context/AppContext";
 import greenStainIcon from '../assets/greenstain-icon.png';
 import type { Citation, Message, FilterItem, ChatSession  } from "../types/board";
+import ConfirmModal from '../components/Modals/ConfirmModal';
 
 // Syntax Highlighter
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -28,8 +29,20 @@ export default function RagChatPage() {
   const abortControllerRef = useRef<AbortController | null>(null);
 
   // --- Sidebar & Sessions State ---
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth >= 768);
   const [sessions, setSessions] = useState<ChatSession[]>([]);
+  const [isSelectionMode, setIsSelectionMode] = useState(false);
+  const [selectedSessions, setSelectedSessions] = useState<Set<string>>(new Set());
+
+  // --- Modal State ---
+  const [modalConfig, setModalConfig] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    confirmText?: string;
+    variant?: 'danger' | 'warning' | 'info' | 'secure';
+    onConfirm: () => void;
+  }>({ isOpen: false, title: '', message: '', onConfirm: () => {} });
 
   // --- Chat State ---
   const initialWelcomeMessage: Message = {
@@ -63,11 +76,17 @@ export default function RagChatPage() {
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
   const [selectedTestId, setSelectedTestId] = useState<string | null>(null);
 
-  // INITIAL MOUNT FETCHES
   useEffect(() => {
     fetch('/api/rag/filters').then(res => res.json()).then(data => setAvailableFilters(data)).catch(err => console.error("Failed to load filters", err));
     fetch('/api/rag/stats').then(res => res.json()).then(data => setTotalSources(data.total_sources)).catch(err => console.error("Failed to load stats", err));
     loadSessions();
+
+    const handleResize = () => {
+      if (window.innerWidth >= 768 && !isSidebarOpen) setIsSidebarOpen(true);
+      if (window.innerWidth < 768 && isSidebarOpen) setIsSidebarOpen(false);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
   }, []);
 
   const loadSessions = () => {
@@ -80,6 +99,11 @@ export default function RagChatPage() {
   };
 
   const loadSessionHistory = async (targetSessionId: string) => {
+    if (isSelectionMode) {
+      toggleSessionSelection(targetSessionId);
+      return;
+    }
+
     try {
       setIsLoading(true);
       const res = await fetch(`/api/rag/sessions/${targetSessionId}`);
@@ -92,7 +116,7 @@ export default function RagChatPage() {
       } else {
         setMessages([initialWelcomeMessage]);
       }
-      if (window.innerWidth < 768) setIsSidebarOpen(false); // Auto-close sidebar on mobile
+      if (window.innerWidth < 768) setIsSidebarOpen(false);
     } catch (error) {
       toast.error("Failed to load chat history");
     } finally {
@@ -100,40 +124,77 @@ export default function RagChatPage() {
     }
   };
 
-  const handleDeleteSession = async (targetSessionId: string, e: React.MouseEvent) => {
-    e.stopPropagation(); // Prevents loading the session when clicking the trash can
-    try {
-      const res = await fetch(`/api/rag/sessions/${targetSessionId}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error("Failed to delete session");
+  const toggleSelectionMode = () => {
+    setIsSelectionMode(!isSelectionMode);
+    setSelectedSessions(new Set());
+  };
 
-      // Remove from UI state
-      setSessions(prev => prev.filter(s => s.session_id !== targetSessionId));
-      toast.success("Session deleted");
+  const toggleSessionSelection = (id: string) => {
+    const newSet = new Set(selectedSessions);
+    if (newSet.has(id)) newSet.delete(id);
+    else newSet.add(id);
+    setSelectedSessions(newSet);
+  };
 
-      // If the user deleted the session they are currently viewing, clear the screen
-      if (sessionId === targetSessionId) {
-        handleClearChat();
+  const handleBulkDelete = () => {
+    if (selectedSessions.size === 0) return;
+
+    setModalConfig({
+      isOpen: true,
+      title: 'Delete Selected Chats',
+      message: `Are you sure you want to delete ${selectedSessions.size} selected session(s)? This action cannot be undone.`,
+      confirmText: 'Delete',
+      variant: 'danger',
+      onConfirm: async () => {
+        setModalConfig(prev => ({ ...prev, isOpen: false }));
+        try {
+          const ids = Array.from(selectedSessions);
+          const res = await fetch(`/api/rag/sessions/bulk-delete`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session_ids: ids })
+          });
+          if (!res.ok) throw new Error("Failed to delete sessions");
+
+          setSessions(prev => prev.filter(s => !selectedSessions.has(s.session_id)));
+          toast.success(`${selectedSessions.size} session(s) deleted`);
+
+          if (selectedSessions.has(sessionId)) handleClearChat();
+          toggleSelectionMode();
+        } catch (error) {
+          toast.error("Failed to delete sessions");
+        }
       }
-    } catch (error) {
-      toast.error("Failed to delete session");
-    }
+    });
   };
 
-  const handleClearAllSessions = async () => {
-    if (!window.confirm("Are you sure you want to delete all chat history?")) return;
-    try {
-      const res = await fetch(`/api/rag/sessions/all`, { method: 'DELETE' });
-      if (!res.ok) throw new Error("Failed to clear sessions");
+  const handleClearAllSessions = () => {
+    setModalConfig({
+      isOpen: true,
+      title: 'Clear All History',
+      message: 'Are you sure you want to permanently delete all chat history? This action cannot be undone.',
+      confirmText: 'Clear All',
+      variant: 'danger',
+      onConfirm: async () => {
+        setModalConfig(prev => ({ ...prev, isOpen: false }));
+        try {
+          const res = await fetch(`/api/rag/sessions/bulk-delete`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session_ids: ["all"] })
+          });
+          if (!res.ok) throw new Error("Failed to clear sessions");
 
-      setSessions([]);
-      handleClearChat();
-      toast.success("All history cleared");
-    } catch (error) {
-      toast.error("Failed to clear history");
-    }
+          setSessions([]);
+          handleClearChat();
+          toast.success("All history cleared");
+        } catch (error) {
+          toast.error("Failed to clear history");
+        }
+      }
+    });
   };
 
-  // SMART AUTO-SCROLL
   useEffect(() => {
     if (!isUserScrolling) {
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -245,7 +306,6 @@ export default function RagChatPage() {
     }, 0);
   };
 
-  // --- CORE STREAMING API CALL ---
   const executeChatStream = async (queryText: string, baseMessages: Message[]) => {
     setIsLoading(true);
     setIsUserScrolling(false);
@@ -332,7 +392,6 @@ export default function RagChatPage() {
         }
       }
 
-      // Refresh the sidebar history so the new chat shows up
       loadSessions();
 
     } catch (error: any) {
@@ -410,6 +469,25 @@ export default function RagChatPage() {
     <div className="flex h-[calc(100vh-12rem)] md:h-[calc(100vh-11rem)] w-full bg-white dark:bg-zinc-950 text-slate-800 dark:text-zinc-100 rounded-2xl shadow-xl border border-slate-200 dark:border-zinc-800/80 overflow-hidden relative">
       <Toaster position="bottom-right" />
 
+      {/* CONFIRMATION MODAL */}
+      <ConfirmModal
+        isOpen={modalConfig.isOpen}
+        title={modalConfig.title}
+        message={modalConfig.message}
+        confirmText={modalConfig.confirmText}
+        variant={modalConfig.variant}
+        onConfirm={modalConfig.onConfirm}
+        onCancel={() => setModalConfig(prev => ({ ...prev, isOpen: false }))}
+      />
+
+      {/* MOBILE BACKDROP OVERLAY */}
+      {isSidebarOpen && (
+        <div
+          className="md:hidden absolute inset-0 bg-slate-900/50 dark:bg-zinc-950/80 z-20 backdrop-blur-sm transition-opacity"
+          onClick={() => setIsSidebarOpen(false)}
+        />
+      )}
+
       {/* --- COLLAPSIBLE LEFT SIDEBAR --- */}
       <div
         className={twMerge(
@@ -427,52 +505,94 @@ export default function RagChatPage() {
         </div>
 
         <div className="flex flex-col flex-1 overflow-hidden">
-          <div className="flex-1 overflow-y-auto p-3 space-y-1">
-            <div className="text-xs font-bold text-slate-400 dark:text-zinc-500 uppercase tracking-wider mb-2 px-2">Recent Chats</div>
-            {sessions.length === 0 && (
-              <div className="text-xs text-slate-500 px-2 italic">No recent history found.</div>
+          <div className="flex items-center justify-between px-4 pt-3 pb-1">
+            <div className="text-xs font-bold text-slate-400 dark:text-zinc-500 uppercase tracking-wider">Recent Chats</div>
+            {sessions.length > 0 && (
+              <button
+                onClick={toggleSelectionMode}
+                className="text-xs font-medium text-emerald-600 hover:text-emerald-500 transition-colors"
+              >
+                {isSelectionMode ? "Done" : "Select"}
+              </button>
             )}
-            {sessions.map(session => (
-              <div key={session.session_id} className="relative group">
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-2 space-y-1">
+            {sessions.length === 0 && (
+              <div className="text-xs text-slate-500 px-2 mt-2 italic">No recent history found.</div>
+            )}
+            {sessions.map(session => {
+              const isSelected = selectedSessions.has(session.session_id);
+              return (
                 <button
+                  key={session.session_id}
                   onClick={() => loadSessionHistory(session.session_id)}
                   className={twMerge(
-                    "flex items-center gap-3 w-full text-left px-3 py-2.5 rounded-lg text-sm transition-colors pr-10",
-                    sessionId === session.session_id
+                    "flex items-center gap-3 w-full text-left px-2 py-2.5 rounded-lg text-sm transition-colors group",
+                    sessionId === session.session_id && !isSelectionMode
                       ? "bg-slate-200 dark:bg-zinc-800 text-slate-900 dark:text-white font-medium"
                       : "text-slate-600 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800/50"
                   )}
                 >
-                  <MessageSquare size={14} className="shrink-0 opacity-70 group-hover:opacity-100" />
+                  {isSelectionMode ? (
+                    <div className={twMerge(
+                      "shrink-0 flex items-center justify-center w-4 h-4 rounded-sm border transition-colors",
+                      isSelected
+                        ? "bg-emerald-500 border-emerald-500 text-white"
+                        : "border-slate-300 dark:border-zinc-600"
+                    )}>
+                      {isSelected && <Check size={12} strokeWidth={3} />}
+                    </div>
+                  ) : (
+                    <MessageSquare size={14} className="shrink-0 opacity-70 group-hover:opacity-100" />
+                  )}
                   <span className="truncate flex-1">{session.title}</span>
                 </button>
-                <button
-                  onClick={(e) => handleDeleteSession(session.session_id, e)}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-slate-400 hover:text-red-500 dark:hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity rounded-md hover:bg-white dark:hover:bg-zinc-900"
-                  title="Delete session"
-                >
-                  <Trash2 size={14} />
-                </button>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
-          {/* CLEAR ALL BUTTON AT BOTTOM OF SIDEBAR */}
+          {/* BULK ACTIONS OR CLEAR ALL */}
           {sessions.length > 0 && (
             <div className="p-3 border-t border-slate-200 dark:border-zinc-800 shrink-0">
-              <button
-                onClick={handleClearAllSessions}
-                className="flex items-center justify-center gap-2 w-full px-4 py-2 text-xs font-medium text-slate-500 hover:text-red-600 hover:bg-red-50 dark:hover:text-red-400 dark:hover:bg-red-950/30 rounded-lg transition-colors"
-              >
-                <Trash2 size={14} /> Clear All History
-              </button>
+              {isSelectionMode ? (
+                <div className="flex items-center justify-between gap-2">
+                  <button
+                    onClick={() => {
+                      if (selectedSessions.size === sessions.length) {
+                        setSelectedSessions(new Set());
+                      } else {
+                        setSelectedSessions(new Set(sessions.map(s => s.session_id)));
+                      }
+                    }}
+                    className="p-2 text-slate-500 hover:text-slate-800 dark:hover:text-zinc-300 bg-slate-100 dark:bg-zinc-800 rounded-lg transition-colors"
+                    title="Select All"
+                  >
+                    <ListChecks size={16} />
+                  </button>
+                  <button
+                    onClick={handleBulkDelete}
+                    disabled={selectedSessions.size === 0}
+                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2 text-xs font-medium text-white bg-red-600 hover:bg-red-500 disabled:bg-slate-300 dark:disabled:bg-zinc-800 disabled:text-slate-500 rounded-lg transition-colors"
+                  >
+                    <Trash2 size={14} /> Delete ({selectedSessions.size})
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={handleClearAllSessions}
+                  className="flex items-center justify-center gap-2 w-full px-4 py-2 text-xs font-medium text-slate-500 hover:text-red-600 hover:bg-red-50 dark:hover:text-red-400 dark:hover:bg-red-950/30 rounded-lg transition-colors"
+                >
+                  <Trash2 size={14} /> Clear All History
+                </button>
+              )}
             </div>
           )}
         </div>
       </div>
 
       {/* --- MAIN CHAT AREA --- */}
-      <div className="flex flex-col flex-1 min-w-0 bg-white dark:bg-zinc-950 relative z-20">
+      <div className="flex flex-col flex-1 min-w-0 bg-white dark:bg-zinc-950 relative z-10">
 
         {/* HEADER */}
         <div className="flex items-center justify-between px-4 md:px-6 py-4 bg-slate-50 dark:bg-zinc-900/50 border-b border-slate-200 dark:border-zinc-800 shadow-sm z-10">
@@ -503,6 +623,7 @@ export default function RagChatPage() {
           {messages.map((msg, index) => {
             const isUser = msg.role === 'user';
             const isEditingThis = editingIndex === index;
+            const isCurrentlyStreaming = isLoading && index === messages.length - 1;
 
             return (
               <div
@@ -635,9 +756,6 @@ export default function RagChatPage() {
                             if (href?.startsWith('#cite-')) {
                               const citeIdStr = href.replace('#cite-', '').trim();
                               const citationData = msg.citations?.find(c => String(c.id) === citeIdStr);
-
-                              // Check if this is a live generation or historical history
-                              const isCurrentlyStreaming = isLoading && index === messages.length - 1;
 
                               return (
                                 <span className="relative inline-block hover-group mx-0.5 font-sans align-baseline"
