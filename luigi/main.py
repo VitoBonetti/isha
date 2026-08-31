@@ -4,6 +4,8 @@ import json
 import re
 import uuid
 import requests
+import io
+from PIL import Image
 from fastapi import FastAPI, Request, HTTPException
 from google.cloud import secretmanager, storage
 import google.generativeai as genai
@@ -24,7 +26,7 @@ def get_gemini_key():
     client = secretmanager.SecretManagerServiceClient()
     name = f"projects/{PROJECT_ID}/secrets/{GEMINI_KEY_NAME}/versions/latest"
     response = client.access_secret_version(request={"name": name})
-    return response.payload.data.decode("UTF-8")
+    return response.payload.data.decode("UTF-8").strip()
 
 
 # --- Security: Dynamic IAM Token for Backend ---
@@ -55,34 +57,61 @@ def sub_luigi_vision(gcs_uri: str, specific_question: str) -> str:
     """
     Analyzes an evidence image from Google Cloud Storage to verify specific technical claims.
 
-    Args:
-        gcs_uri: The Google Cloud Storage URI of the image (e.g., gs://bucket/path/to/image.png).
-        specific_question: A highly specific question about what to look for in the image to verify the fix.
+    CRITICAL USAGE RULES:
+    You must ask a highly specific, technical question about what to look for in the image to verify the fix.
     """
-    print(f"👀 Tool Called: Inspecting {gcs_uri} for '{specific_question}'")
+    print(f"👀 Tool Called: Inspecting {gcs_uri}")
+    print(f"❓ Question asked by Main Agent: '{specific_question}'")
+
     try:
         storage_client = storage.Client()
         parts = gcs_uri.replace("gs://", "").split("/", 1)
         bucket = storage_client.bucket(parts[0])
         blob = bucket.blob(parts[1])
 
-        # Use a random UUID to prevent collisions if multiple tools run concurrently
-        temp_file_path = f"/tmp/{uuid.uuid4().hex}_{parts[1].split('/')[-1]}"
-        blob.download_to_filename(temp_file_path)
+        # 1. Download raw bytes to memory (No temp files needed)
+        raw_image_bytes = blob.download_as_bytes()
+        original_size = len(raw_image_bytes) / 1024
 
-        g_file = genai.upload_file(temp_file_path)
+        # 2. Aggressively compress and resize the image using Pillow
+        with Image.open(io.BytesIO(raw_image_bytes)) as img:
+            # Convert to RGB to strip heavy alpha channels and support JPEG compression
+            if img.mode != "RGB":
+                img = img.convert("RGB")
 
+            # Downscale massive images (e.g., 4K monitors) to max 1600x1600 while maintaining aspect ratio
+            img.thumbnail((1600, 1600), Image.Resampling.LANCZOS)
+
+            # Save the optimized image to a new buffer
+            optimized_buffer = io.BytesIO()
+            img.save(optimized_buffer, format="JPEG", quality=85)
+            optimized_bytes = optimized_buffer.getvalue()
+
+        optimized_size = len(optimized_bytes) / 1024
+        print(f"📉 Image optimized in memory: {original_size:.1f}KB -> {optimized_size:.1f}KB")
+
+        # 3. Safely pass the tiny payload inline, avoiding the broken REST upload API entirely
+        image_part = {
+            "mime_type": "image/jpeg",
+            "data": optimized_bytes
+        }
+
+        # 4. Generate content via the working gRPC transport
+        genai.configure(api_key=get_gemini_key())
         vision_model = genai.GenerativeModel('gemini-2.5-pro')
-        response = vision_model.generate_content([specific_question, g_file])
+
+        response = vision_model.generate_content([specific_question, image_part])
         analysis = response.text.strip()
 
-        genai.delete_file(g_file.name)
-        if os.path.exists(temp_file_path):
-            os.remove(temp_file_path)
+        print(f"🖼️ Vision AI Response:\n{analysis}")
 
+        print("✅ Vision Tool successfully analyzed the compressed image.")
         return analysis
+
     except Exception as e:
-        return f"Failed to analyze image: {str(e)}"
+        error_msg = f"Failed to analyze image: {str(e)}"
+        print(f"🚨 VISION TOOL ERROR: {error_msg}")
+        return error_msg
 
 
 # --- Subagent: MITRE Mapper ---
@@ -127,6 +156,7 @@ def sub_luigi_mitre_mapper(pentester_notes: str) -> str:
     except Exception as e:
         print(f"Failed to map MITRE IDs: {str(e)}")
         return ""
+
 
 # --- Main Logic Trigger ---
 @app.post("/")
