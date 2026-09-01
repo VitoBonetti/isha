@@ -99,3 +99,8 @@ export interface ChatSession {
   title: string;
   last_updated: string;
 }
+
+export interface ExtendedMessage extends Message {
+  log_id?: string;
+  feedback?: boolean | null;
+}

@@ -393,7 +393,7 @@ export default function TestDetailsView() {
                     {test.assets.map((a: any) => (
                       <Link
                         key={a.asset_id}
-                        to={`/raw/${a.raw_asset_id}`}
+                        to={`/assets/raw/${a.raw_asset_id}`}
                         state={{ from: `/tests/${test.id}`, label: 'Test Details' }}
                         className="flex items-center gap-1 px-2 py-1 rounded bg-slate-100 hover:bg-emerald-50 text-slate-600 hover:text-emerald-600 dark:bg-zinc-800 dark:hover:bg-emerald-900/30 dark:text-zinc-300 dark:hover:text-emerald-400 text-xs font-medium border border-slate-200 dark:border-zinc-700 transition-colors"
                       >

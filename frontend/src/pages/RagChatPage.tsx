@@ -5,12 +5,13 @@ import remarkGfm from 'remark-gfm';
 import { v4 as uuidv4 } from 'uuid';
 import {
   Send, Trash2, Bot, User, Link as LinkIcon, FileText, Database,
-  Box, Square, Copy, Check, MessageSquare, RefreshCw, Pencil, X, PanelLeft, Plus, CheckSquare, ListChecks
+  Box, Square, Copy, Check, MessageSquare, RefreshCw, Pencil, X, PanelLeft, Plus, CheckSquare, ListChecks,
+  ThumbsUp, ThumbsDown
 } from 'lucide-react';
 import toast, { Toaster } from "react-hot-toast";
 import { useAppContext } from "../context/AppContext";
 import greenStainIcon from '../assets/greenstain-icon.png';
-import type { Citation, Message, FilterItem, ChatSession  } from "../types/board";
+import type { Citation, Message, FilterItem, ChatSession, ExtendedMessage  } from "../types/board";
 import ConfirmModal from '../components/Modals/ConfirmModal';
 
 // Syntax Highlighter
@@ -29,7 +30,7 @@ export default function RagChatPage() {
   const abortControllerRef = useRef<AbortController | null>(null);
 
   // --- Sidebar & Sessions State ---
-  const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth >= 768);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [selectedSessions, setSelectedSessions] = useState<Set<string>>(new Set());
@@ -52,7 +53,7 @@ export default function RagChatPage() {
     timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
   };
 
-  const [messages, setMessages] = useState<Message[]>([initialWelcomeMessage]);
+  const [messages, setMessages] = useState<ExtendedMessage[]>([initialWelcomeMessage]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [copiedId, setCopiedId] = useState<string | number | null>(null);
@@ -82,12 +83,12 @@ export default function RagChatPage() {
     loadSessions();
 
     const handleResize = () => {
-      if (window.innerWidth >= 768 && !isSidebarOpen) setIsSidebarOpen(true);
-      if (window.innerWidth < 768 && isSidebarOpen) setIsSidebarOpen(false);
-    };
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
+    // Auto-close on small screens when shrinking, but do NOT auto-open on desktop
+    if (window.innerWidth < 768 && isSidebarOpen) setIsSidebarOpen(false);
+  };
+  window.addEventListener('resize', handleResize);
+  return () => window.removeEventListener('resize', handleResize);
+}, [isSidebarOpen]);
 
   const loadSessions = () => {
     fetch('/api/rag/sessions')
@@ -291,6 +292,24 @@ export default function RagChatPage() {
     setTimeout(() => setCopiedId(null), 2000);
   };
 
+  const handleFeedback = async (index: number, logId: string, isGood: boolean) => {
+    try {
+      await fetch(`/api/rag/logs/${logId}/feedback`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_good: isGood })
+      });
+      setMessages(prev => {
+        const updated = [...prev];
+        updated[index].feedback = isGood;
+        return updated;
+      });
+      toast.success("Feedback submitted");
+    } catch (error) {
+      toast.error("Failed to submit feedback");
+    }
+  };
+
   const handleStop = () => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
@@ -383,6 +402,7 @@ export default function RagChatPage() {
               setMessages((prev) => {
                 const updated = [...prev];
                 updated[updated.length - 1].citations = data.citations;
+                if (data.log_id) updated[updated.length - 1].log_id = data.log_id; // Capture ID
                 return updated;
               });
             }
@@ -686,7 +706,7 @@ export default function RagChatPage() {
                       </div>
                     </div>
                   ) : (
-                    <div className="text-sm leading-relaxed overflow-hidden">
+                    <div className="text-sm leading-relaxed break-words">
                       <ReactMarkdown
                         urlTransform={(url) => url}
                         remarkPlugins={[remarkGfm]}
@@ -756,17 +776,20 @@ export default function RagChatPage() {
                             if (href?.startsWith('#cite-')) {
                               const citeIdStr = href.replace('#cite-', '').trim();
                               const citationData = msg.citations?.find(c => String(c.id) === citeIdStr);
+                              const isCurrentlyStreaming = isLoading && index === messages.length - 1;
 
                               return (
-                                <span className="relative inline-block hover-group mx-0.5 font-sans align-baseline"
-                                      onMouseEnter={(e) => {
-                                        const tooltip = e.currentTarget.querySelector('.citation-tooltip');
-                                        if (tooltip) tooltip.classList.remove('invisible', 'opacity-0');
-                                      }}
-                                      onMouseLeave={(e) => {
-                                        const tooltip = e.currentTarget.querySelector('.citation-tooltip');
-                                        if (tooltip) tooltip.classList.add('invisible', 'opacity-0');
-                                      }}>
+                                <span
+                                  className="relative inline-block hover-group mx-0.5 font-sans align-baseline hover:z-50"
+                                  onMouseEnter={(e) => {
+                                    const tooltip = e.currentTarget.querySelector('.citation-tooltip');
+                                    if (tooltip) tooltip.classList.remove('invisible', 'opacity-0');
+                                  }}
+                                  onMouseLeave={(e) => {
+                                    const tooltip = e.currentTarget.querySelector('.citation-tooltip');
+                                    if (tooltip) tooltip.classList.add('invisible', 'opacity-0');
+                                  }}
+                                >
                                   <a
                                     href={citationData?.url || undefined}
                                     target={citationData?.url ? "_blank" : undefined}
@@ -788,7 +811,7 @@ export default function RagChatPage() {
                                   </a>
 
                                   {citationData ? (
-                                    <span className="citation-tooltip absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-max max-w-xs p-2.5 bg-slate-900 dark:bg-zinc-100 text-slate-100 dark:text-zinc-900 text-xs rounded-xl shadow-xl opacity-0 invisible transition-all duration-200 z-[100] pointer-events-none flex flex-col text-left font-normal normal-case">
+                                    <span className="citation-tooltip absolute bottom-full left-0 mb-1.5 w-max max-w-[280px] sm:max-w-xs p-2.5 bg-slate-900 dark:bg-zinc-100 text-slate-100 dark:text-zinc-900 text-xs rounded-xl shadow-xl opacity-0 invisible transition-all duration-200 z-[100] pointer-events-none flex flex-col text-left font-normal normal-case">
                                       <span className="font-bold flex items-center gap-1.5 text-xs text-emerald-400 dark:text-emerald-600">
                                         <LinkIcon size={12} className="shrink-0" />
                                         <span className="truncate">{citationData.file_name}</span>
@@ -796,10 +819,10 @@ export default function RagChatPage() {
                                       <span className="mt-1 text-[10px] text-slate-400 dark:text-slate-500 font-semibold text-right block">
                                         Click to open document ↗
                                       </span>
-                                      <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-slate-900 dark:bg-zinc-100 rotate-45 block"></span>
+                                      <span className="absolute -bottom-1 left-3 w-2 h-2 bg-slate-900 dark:bg-zinc-100 rotate-45 block"></span>
                                     </span>
                                   ) : (
-                                    <span className="citation-tooltip absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-max px-2.5 py-1.5 bg-slate-900 dark:bg-zinc-100 text-slate-100 dark:text-zinc-900 text-[10px] rounded-lg shadow-xl opacity-0 invisible transition-all z-[100] pointer-events-none">
+                                    <span className="citation-tooltip absolute bottom-full left-0 mb-1.5 w-max px-2.5 py-1.5 bg-slate-900 dark:bg-zinc-100 text-slate-100 dark:text-zinc-900 text-[10px] rounded-lg shadow-xl opacity-0 invisible transition-all z-[100] pointer-events-none">
                                       {isCurrentlyStreaming ? "Processing source..." : `Source [${citeIdStr}] (Archived)`}
                                     </span>
                                   )}
@@ -811,7 +834,7 @@ export default function RagChatPage() {
                                 {children}
                               </a>
                             );
-                          },
+                          }
                         }}
                       >
                         {msg.content}
@@ -892,6 +915,40 @@ export default function RagChatPage() {
                           <><Copy size={12} /><span>Copy</span></>
                         )}
                       </button>
+
+                      {!isUser && msg.log_id && (
+                        <>
+                          <button
+                            onClick={() => handleFeedback(index, msg.log_id!, true)}
+                            disabled={isLoading}
+                            className={twMerge(
+                              "flex items-center gap-1 text-[10px] transition-colors disabled:opacity-30",
+                              msg.feedback === true
+                                ? "text-emerald-600 dark:text-emerald-400"
+                                : "text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400"
+                            )}
+                            title="Good response"
+                          >
+                            <ThumbsUp size={12} className={msg.feedback === true ? "fill-current" : ""} />
+                          </button>
+
+                          <button
+                            onClick={() => handleFeedback(index, msg.log_id!, false)}
+                            disabled={isLoading}
+                            className={twMerge(
+                              "flex items-center gap-1 text-[10px] transition-colors disabled:opacity-30",
+                              msg.feedback === false
+                                ? "text-red-500 dark:text-red-400"
+                                : "text-slate-400 hover:text-red-500 dark:hover:text-red-400"
+                            )}
+                            title="Bad response"
+                          >
+                            <ThumbsDown size={12} className={msg.feedback === false ? "fill-current" : ""} />
+                          </button>
+
+                          <span className="w-px h-3 bg-slate-300 dark:bg-zinc-700 mx-1"></span>
+                        </>
+                      )}
 
                       <span
                         className={twMerge(

@@ -318,3 +318,6 @@ class RagAIResponse(BaseModel):
 
 class RagChatBulkDeleteRequest(BaseModel):
     session_ids: List[str]
+
+class FeedbackRequest(BaseModel):
+    is_good: bool

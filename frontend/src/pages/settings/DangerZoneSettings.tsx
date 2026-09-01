@@ -10,7 +10,14 @@ export default function DangerZoneSettings() {
 
   const [nukeModalOpen, setNukeModalOpen] = useState(false);
   const [nukeText, setNukeText] = useState("");
-  const [actionModal, setActionModal] = useState<{isOpen: boolean, title: string, message: string, confirmText: string, variant: 'danger'|'warning', onConfirm: () => void} | null>(null);
+  const [actionModal, setActionModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    confirmText: string;
+    variant: 'danger' | 'warning';
+    onConfirm: () => void;
+  } | null>(null);
 
   const inputClasses = "w-full mt-1.5 p-2.5 border border-slate-200 dark:border-zinc-800 rounded-xl bg-slate-50 dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 focus:ring-2 focus:ring-blue-500 outline-none text-sm transition-colors";
 
@@ -23,7 +30,7 @@ export default function DangerZoneSettings() {
         message={actionModal?.message || ""}
         confirmText={actionModal?.confirmText}
         variant={actionModal?.variant}
-        onConfirm={() => { if(actionModal) actionModal.onConfirm(); setActionModal(null); }}
+        onConfirm={() => { if (actionModal) actionModal.onConfirm(); setActionModal(null); }}
         onCancel={() => setActionModal(null)}
       />
 
@@ -46,13 +53,26 @@ export default function DangerZoneSettings() {
               <label className="block text-sm font-bold text-slate-700 dark:text-zinc-300 mb-2 text-center sm:text-left">
                 Type <strong className="text-red-500 select-all">NUKE</strong> to confirm:
               </label>
-              <input type="text" className={inputClasses} value={nukeText} onChange={(e) => setNukeText(e.target.value)} placeholder="NUKE" />
+              <input
+                type="text"
+                className={inputClasses}
+                value={nukeText}
+                onChange={(e) => setNukeText(e.target.value)}
+                placeholder="NUKE"
+              />
             </div>
             <div className="flex flex-col sm:flex-row justify-end gap-3 mt-8">
-              <button onClick={() => {setNukeModalOpen(false); setNukeText("");}} className="w-full sm:w-auto px-5 py-3 sm:py-2.5 text-sm font-bold bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-300 rounded-xl transition-colors order-2 sm:order-1 flex justify-center items-center">
+              <button
+                onClick={() => { setNukeModalOpen(false); setNukeText(""); }}
+                className="w-full sm:w-auto px-5 py-3 sm:py-2.5 text-sm font-bold bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-300 rounded-xl transition-colors order-2 sm:order-1 flex justify-center items-center"
+              >
                 Cancel
               </button>
-              <button onClick={() => { if(nukeText === 'NUKE') { handleWipeSystem(); setNukeModalOpen(false); setNukeText(""); } }} disabled={nukeText !== 'NUKE'} className="w-full sm:w-auto px-5 py-3 sm:py-2.5 text-sm font-bold bg-red-600 hover:bg-red-700 disabled:bg-slate-200 dark:disabled:bg-zinc-800 disabled:text-slate-400 text-white rounded-xl shadow-sm transition-colors order-1 sm:order-2 flex justify-center items-center">
+              <button
+                onClick={() => { if (nukeText === 'NUKE') { handleWipeSystem(); setNukeModalOpen(false); setNukeText(""); } }}
+                disabled={nukeText !== 'NUKE'}
+                className="w-full sm:w-auto px-5 py-3 sm:py-2.5 text-sm font-bold bg-red-600 hover:bg-red-700 disabled:bg-slate-200 dark:disabled:bg-zinc-800 disabled:text-slate-400 text-white rounded-xl shadow-sm transition-colors order-1 sm:order-2 flex justify-center items-center"
+              >
                 Execute Reset
               </button>
             </div>
@@ -69,90 +89,129 @@ export default function DangerZoneSettings() {
         </p>
       </div>
 
-      <div className="bg-white dark:bg-zinc-900 border border-red-200 dark:border-red-900/50 p-6 md:p-8 rounded-3xl shadow-sm max-w-3xl flex flex-col gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 w-full">
 
-        {/* Reset Database */}
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-100 dark:border-zinc-800 pb-6">
+        {/* Card 1: Unlink Drive Folders */}
+        <div className="bg-white dark:bg-zinc-900 border border-red-200 dark:border-red-900/50 p-6 rounded-3xl shadow-sm flex flex-col justify-between h-full">
           <div>
-            <h3 className="font-bold text-slate-900 dark:text-zinc-100">Factory Reset Database</h3>
-            <p className="text-sm text-slate-500 dark:text-zinc-400 mt-1 max-w-md">
-              Purges all tests, assets, and assignments. Keeps configuration settings (Services, Countries, Users).
+            <h3 className="font-bold text-slate-900 dark:text-zinc-100 text-base">Unlink Drive Folders</h3>
+            <p className="text-sm text-slate-500 dark:text-zinc-400 mt-2">
+              Removes the Google Drive folder links from all tests and wipes their synchronized document metadata including LLM Vulnerabilities Analysis. Physical files in Google Drive are NOT deleted.
             </p>
           </div>
-          <button onClick={() => setNukeModalOpen(true)} className="w-full md:w-auto shrink-0 bg-red-600 hover:bg-red-700 text-white font-bold py-2.5 px-6 rounded-xl shadow-sm transition-colors text-sm">
-            Execute Factory Reset
-          </button>
-        </div>
-
-        {/* Unlink Drive Folders */}
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-100 dark:border-zinc-800 pb-6">
-          <div>
-            <h3 className="font-bold text-slate-900 dark:text-zinc-100">Unlink Drive Folders</h3>
-            <p className="text-sm text-slate-500 dark:text-zinc-400 mt-1 max-w-md">
-              Removes the Google Drive folder links from all tests and wipes their synchronized document metadata including LLM Vulnerabilities Analysis. The physical files in Google Drive are NOT deleted.
-            </p>
-          </div>
-          <button onClick={() => {
-            setActionModal({
-              isOpen: true, variant: 'danger', confirmText: "Unlink Folders", title: "Unlink All Drive Folders",
-              message: "Are you sure you want to unlink all Google Drive folders and wipe the document cache? Links will have to be manually re-established for each test.",
-              onConfirm: async () => {
-                try {
-                  await axios.delete('/api/danger/tests/wipe-google-drive-workspace');
-                  toast.success("Drive folders unlinked and documents wiped.");
-                } catch (err) { toast.error("Failed to wipe drive folders."); }
-              }
-            });
-          }} className="w-full md:w-auto shrink-0 bg-red-500 hover:bg-red-600 text-white font-bold py-2.5 px-6 rounded-xl shadow-sm transition-colors text-sm">
+          <button
+            onClick={() => {
+              setActionModal({
+                isOpen: true, variant: 'danger', confirmText: "Unlink Folders", title: "Unlink All Drive Folders",
+                message: "Are you sure you want to unlink all Google Drive folders and wipe the document cache? Links will have to be manually re-established for each test.",
+                onConfirm: async () => {
+                  try {
+                    await axios.delete('/api/danger/tests/wipe-google-drive-workspace');
+                    toast.success("Drive folders unlinked and documents wiped.");
+                  } catch (err) { toast.error("Failed to wipe drive folders."); }
+                }
+              });
+            }}
+            className="w-full mt-6 bg-red-500 hover:bg-red-600 text-white font-bold py-2.5 px-4 rounded-xl shadow-sm transition-colors text-sm"
+          >
             Unlink Folders
           </button>
         </div>
 
-        {/* Wipe Documents */}
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-100 dark:border-zinc-800 pb-6">
+        {/* Card 2: Wipe Synced Documents */}
+        <div className="bg-white dark:bg-zinc-900 border border-red-200 dark:border-red-900/50 p-6 rounded-3xl shadow-sm flex flex-col justify-between h-full">
           <div>
-            <h3 className="font-bold text-slate-900 dark:text-zinc-100">Wipe Synced Documents</h3>
-            <p className="text-sm text-slate-500 dark:text-zinc-400 mt-1 max-w-md">
+            <h3 className="font-bold text-slate-900 dark:text-zinc-100 text-base">Wipe Synced Documents</h3>
+            <p className="text-sm text-slate-500 dark:text-zinc-400 mt-2">
               Wipes the cached Google Drive file records from the database. Parent folder links are preserved. You will need to click "Resync Files" on active tests to rebuild the cache.
             </p>
           </div>
-          <button onClick={() => {
-            setActionModal({
-              isOpen: true, variant: 'warning', confirmText: "Wipe Documents", title: "Wipe Synced Documents",
-              message: "Are you sure you want to empty the synchronized document cache? This action is safe, but requires manual resyncs on active tests.",
-              onConfirm: async () => {
-                try {
-                  await axios.delete('/api/danger/tests/wipe-documents');
-                  toast.success("Document cache wiped.");
-                } catch (err) { toast.error("Failed to wipe document cache."); }
-              }
-            });
-          }} className="w-full md:w-auto shrink-0 bg-orange-500 hover:bg-orange-600 text-white font-bold py-2.5 px-6 rounded-xl shadow-sm transition-colors text-sm">
+          <button
+            onClick={() => {
+              setActionModal({
+                isOpen: true, variant: 'warning', confirmText: "Wipe Documents", title: "Wipe Synced Documents",
+                message: "Are you sure you want to empty the synchronized document cache? This action is safe, but requires manual resyncs on active tests.",
+                onConfirm: async () => {
+                  try {
+                    await axios.delete('/api/danger/tests/wipe-documents');
+                    toast.success("Document cache wiped.");
+                  } catch (err) { toast.error("Failed to wipe document cache."); }
+                }
+              });
+            }}
+            className="w-full mt-6 bg-orange-500 hover:bg-orange-600 text-white font-bold py-2.5 px-4 rounded-xl shadow-sm transition-colors text-sm"
+          >
             Wipe Documents
           </button>
         </div>
 
-        {/* Wipe Secrets */}
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        {/* Card 3: Wipe Rag Chat Logs */}
+        <div className="bg-white dark:bg-zinc-900 border border-red-200 dark:border-red-900/50 p-6 rounded-3xl shadow-sm flex flex-col justify-between h-full">
           <div>
-            <h3 className="font-bold text-slate-900 dark:text-zinc-100">Wipe All Secure Notes</h3>
-            <p className="text-sm text-slate-500 dark:text-zinc-400 mt-1 max-w-md">
+            <h3 className="font-bold text-slate-900 dark:text-zinc-100 text-base">Wipe Rag Chat Logs</h3>
+            <p className="text-sm text-slate-500 dark:text-zinc-400 mt-2">
+              Wipes the Rag Chat Logs records from the database. All the logs will be permanently deleted. It will be impossible recover any session.
+            </p>
+          </div>
+          <button
+            onClick={() => {
+              setActionModal({
+                isOpen: true, variant: 'warning', confirmText: "Wipe Rag Chat Logs", title: "Wipe Rag Chat Logs",
+                message: "Are you sure you want to delete the Rag Chat Logs? This action cannot be reversed.",
+                onConfirm: async () => {
+                  try {
+                    await axios.delete('/api/danger/tests/wipe-rag-chat-logs');
+                    toast.success("Rag Chat Logs wiped.");
+                  } catch (err) { toast.error("Failed to wipe Rag Chat Logs."); }
+                }
+              });
+            }}
+            className="w-full mt-6 bg-orange-500 hover:bg-orange-600 text-white font-bold py-2.5 px-4 rounded-xl shadow-sm transition-colors text-sm"
+          >
+            Wipe Rag Chat Logs
+          </button>
+        </div>
+
+        {/* Card 4: Wipe Secure Notes */}
+        <div className="bg-white dark:bg-zinc-900 border border-red-200 dark:border-red-900/50 p-6 rounded-3xl shadow-sm flex flex-col justify-between h-full">
+          <div>
+            <h3 className="font-bold text-slate-900 dark:text-zinc-100 text-base">Wipe All Secure Notes</h3>
+            <p className="text-sm text-slate-500 dark:text-zinc-400 mt-2">
               Permanently destroys all E2EE encrypted pentester notes from the vault. Keys cannot be recovered.
             </p>
           </div>
-          <button onClick={() => {
-            setActionModal({
-              isOpen: true, variant: 'danger', confirmText: "Wipe Secrets", title: "Wipe All Secure Notes",
-              message: "Are you sure you want to permanently wipe ALL encrypted notes from the vault? This action cannot be reversed.",
-              onConfirm: async () => {
-                try {
-                  await axios.delete('/api/danger/secrets-note/wipe-secrets');
-                  toast.success("Notes wiped.");
-                } catch (err) { toast.error("Failed to wipe notes."); }
-              }
-            });
-          }} className="w-full md:w-auto shrink-0 bg-red-600 hover:bg-red-700 text-white font-bold py-2.5 px-6 rounded-xl shadow-sm transition-colors text-sm">
+          <button
+            onClick={() => {
+              setActionModal({
+                isOpen: true, variant: 'danger', confirmText: "Wipe Secrets", title: "Wipe All Secure Notes",
+                message: "Are you sure you want to permanently wipe ALL encrypted notes from the vault? This action cannot be reversed.",
+                onConfirm: async () => {
+                  try {
+                    await axios.delete('/api/danger/secrets-note/wipe-secrets');
+                    toast.success("Notes wiped.");
+                  } catch (err) { toast.error("Failed to wipe notes."); }
+                }
+              });
+            }}
+            className="w-full mt-6 bg-red-600 hover:bg-red-700 text-white font-bold py-2.5 px-4 rounded-xl shadow-sm transition-colors text-sm"
+          >
             Wipe Secure Notes
+          </button>
+        </div>
+
+        {/* Card 5: Factory Reset Database */}
+        <div className="bg-white dark:bg-zinc-900 border border-red-200 dark:border-red-900/50 p-6 rounded-3xl shadow-sm flex flex-col justify-between h-full">
+          <div>
+            <h3 className="font-bold text-slate-900 dark:text-zinc-100 text-base">Factory Reset Database</h3>
+            <p className="text-sm text-slate-500 dark:text-zinc-400 mt-2">
+              Purges all tests, assets, and assignments. Keeps configuration settings (Services, Countries, Users).
+            </p>
+          </div>
+          <button
+            onClick={() => setNukeModalOpen(true)}
+            className="w-full mt-6 bg-red-600 hover:bg-red-700 text-white font-bold py-2.5 px-4 rounded-xl shadow-sm transition-colors text-sm"
+          >
+            Execute Factory Reset
           </button>
         </div>
 

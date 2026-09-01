@@ -2,6 +2,7 @@ import os
 import json
 import asyncio
 import re
+import uuid
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse
@@ -13,7 +14,7 @@ from routers.auth import require_admin
 from utils.document_parser import extract_text_from_drive_file
 from utils.secret_manager import get_secret
 from audit_logger import log_audit_event
-from schema import RagChatRequest, RagAIResponse, RagChatBulkDeleteRequest
+from schema import RagChatRequest, RagAIResponse, RagChatBulkDeleteRequest, FeedbackRequest
 
 
 router = APIRouter(prefix="/api/rag", tags=["RAG Intelligence"])
@@ -388,7 +389,7 @@ def chat_with_documents(
             query_sql += " WHERE " + " AND ".join(where_clauses)
 
         # Finalize the order and limit
-        query_sql += " ORDER BY dc.embedding <=> %s::vector LIMIT 30"
+        query_sql += " ORDER BY dc.embedding <=> %s::vector"
         params.append(query_vector)
 
         cursor.execute(query_sql, tuple(params))
@@ -397,20 +398,20 @@ def chat_with_documents(
         cursor.execute("""
             SELECT question, answer 
             FROM rag_chat_logs 
-            WHERE session_id = %s 
+            WHERE session_id = %s AND user_id = %s
             ORDER BY timestamp ASC LIMIT 10
-        """, (str(req.session_id),))
+        """, (str(req.session_id), str(current_user["id"])))
         history_rows = cursor.fetchall()
 
     # 3. Apply Metadata De-duplication Rules
     has_full_report_for_test = set()
     for _, _, _, doc_type, similarity, t_id in raw_results:
-        if similarity > 0.35 and doc_type == 'FULL_TEST_REPORT':
+        if similarity > 0.5 and doc_type == 'FULL_TEST_REPORT':
             has_full_report_for_test.add(t_id)
 
     filtered_results = []
     for text_content, file_name, file_url, doc_type, similarity, t_id in raw_results:
-        if similarity <= 0.35:
+        if similarity <= 0.5:
             continue
         if doc_type == 'VULN_REPORT' and t_id in has_full_report_for_test:
             continue
@@ -483,14 +484,16 @@ def chat_with_documents(
                                     resource_type="RAG", resource_id=str(cite_id),
                                     details=f"[RAG DEBUG] Confirmed Citation {cite_id}: {cite_data['file_name']}. Snippet: {cite_data['snippet']}")
 
-            yield json.dumps({"citations": confirmed_citations}) + "\n"
+            new_log_id = str(uuid.uuid4())
+
+            yield json.dumps({"citations": confirmed_citations, "log_id": new_log_id}) + "\n"
 
             with db_cursor_context() as stream_cursor:
                 stream_cursor.execute("""
-                    INSERT INTO rag_chat_logs (id, session_id, user_id, test_id, asset_id, question, answer, timestamp)
-                    VALUES (gen_random_uuid(), %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
-                """, (
-                    str(req.session_id), str(current_user["id"]),
+                        INSERT INTO rag_chat_logs (id, session_id, user_id, test_id, asset_id, question, answer, timestamp)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                    """, (
+                    new_log_id, str(req.session_id), str(current_user["id"]),
                     str(req.test_id) if req.test_id else None, str(req.asset_id) if req.asset_id else None,
                     req.query, full_answer
                 ))
@@ -531,14 +534,14 @@ def get_chat_sessions(current_user: dict = Depends(require_admin), cursor=Depend
 def get_session_messages(session_id: str, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     # Rebuilds the chat history for a specific session
     cursor.execute("""
-        SELECT question, answer, timestamp 
+        SELECT id, question, answer, timestamp, user_feedback 
         FROM rag_chat_logs 
         WHERE session_id = %s AND user_id = %s AND is_session_active = TRUE
         ORDER BY timestamp ASC
     """, (session_id, str(current_user["id"])))
 
     messages = []
-    for q, a, t in cursor.fetchall():
+    for log_id, q, a, t, feedback in cursor.fetchall():
         time_str = t.strftime("%I:%M %p") if t else ""
         messages.append({
             "role": "user",
@@ -548,10 +551,23 @@ def get_session_messages(session_id: str, current_user: dict = Depends(require_a
         messages.append({
             "role": "assistant",
             "content": a,
-            "citations": [],  # Note: Citations are kept inline in the text
-            "timestamp": time_str
+            "citations": [],  # Citations are kept inline in the text
+            "timestamp": time_str,
+            "log_id": str(log_id),
+            "feedback": feedback
         })
     return messages
+
+
+@router.post("/logs/{log_id}/feedback", summary="Submit feedback for a response")
+def submit_rag_feedback(log_id: str, request: FeedbackRequest, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    cursor.execute("""
+        UPDATE rag_chat_logs 
+        SET user_feedback = %s 
+        WHERE id = %s AND user_id = %s
+    """, (request.is_good, log_id, str(current_user["id"])))
+    cursor.connection.commit()
+    return {"status": "success"}
 
 
 @router.delete("/sessions/{session_id}", summary="Soft delete a single chat session")

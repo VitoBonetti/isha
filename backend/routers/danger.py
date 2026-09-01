@@ -139,3 +139,29 @@ def wipe_all_documents(background_tasks: BackgroundTasks, current_user: dict = D
         cursor.connection.rollback()
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to wipe documents.")
 
+
+@router.delete("/tests/wipe-rag-chat-logs", summary="[Admin Only]")
+def wipe_all_rag_chat_logs(background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin),
+                       cursor=Depends(get_db_cursor)):
+    """
+    Admin-Only endpoint to wipe only the rag_chat_logs table.
+    """
+    try:
+        cursor.execute("TRUNCATE TABLE rag_chat_logs CASCADE;")
+        cursor.connection.commit()
+
+        log_audit_event(
+            user_id=str(current_user["id"]),
+            role=current_user["role"],
+            action="WIPE_RAG_CHAT_LOGS",
+            resource_type="DATABASE",
+            resource_id="N/A",
+            details="Administrator wiped all rag chat logs."
+        )
+
+        background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+        return {"message": "All rag chat logs wiped successfully."}
+    except Exception as e:
+        cursor.connection.rollback()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to wipe rag chat logs.")
+

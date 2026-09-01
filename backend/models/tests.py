@@ -92,6 +92,7 @@ class RagChatLogs(Base):
     answer = Column(Text, nullable=False)
     timestamp = Column(DateTime(timezone=True), default=aware_utcnow)
     is_session_active = Column(Boolean, nullable=False, default=True)
+    user_feedback = Column(Boolean, nullable=True)
 
     # Optional relationships
     users = relationship("Users", back_populates="rag_chat_logs")
