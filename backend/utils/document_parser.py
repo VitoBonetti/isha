@@ -30,8 +30,28 @@ def get_drive_service():
 def extract_text_from_drive_file(drive_file_id: str, mime_type: str) -> str:
     """
     Downloads or exports a file from Google Drive and extracts all text.
+    Includes a strict memory cap to prevent OOM panics from oversized blobs.
     """
     service = get_drive_service()
+
+    # Enforce 25MB File Size Limit
+    try:
+        file_metadata = service.files().get(fileId=drive_file_id, fields="size").execute()
+        # Native Google Docs/Sheets don't return a 'size' field, so we default to 0
+        file_size_bytes = int(file_metadata.get('size', 0))
+
+        MAX_FILE_SIZE_MB = 25
+        if file_size_bytes > (MAX_FILE_SIZE_MB * 1024 * 1024):
+            raise ValueError(
+                f"File exceeds maximum allowed ingestion size of {MAX_FILE_SIZE_MB}MB "
+                f"(Detected: {file_size_bytes / (1024 * 1024):.1f}MB). "
+                f"Parsing aborted to prevent memory exhaustion."
+            )
+    except ValueError as ve:
+        raise ve  # Rethrow our explicit size limit error
+    except Exception:
+        # Ignore standard API fetch errors and proceed to download attempt
+        pass
 
     # 1. HANDLE NATIVE GOOGLE WORKSPACE FILES (EXPORT)
     if mime_type == GOOGLE_MIME_TYPES['doc']:

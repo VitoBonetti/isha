@@ -165,3 +165,30 @@ def wipe_all_rag_chat_logs(background_tasks: BackgroundTasks, current_user: dict
         cursor.connection.rollback()
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to wipe rag chat logs.")
 
+
+@router.delete("/tests/wipe-test-analyses", summary="[Admin Only]")
+def wipe_all_test_analyses(background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin),
+                       cursor=Depends(get_db_cursor)):
+    """
+    Admin-Only endpoint to wipe only the test_analyses table.
+    """
+    try:
+        cursor.execute("TRUNCATE TABLE test_analyses CASCADE;")
+        cursor.execute("DELETE FROM test_documents WHERE is_virtual=TRUE;")
+        cursor.connection.commit()
+
+        log_audit_event(
+            user_id=str(current_user["id"]),
+            role=current_user["role"],
+            action="WIPE_TEST_ANALYSIS",
+            resource_type="DATABASE",
+            resource_id="N/A",
+            details="Administrator wiped all test_analyses."
+        )
+
+        background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+        return {"message": "All test_analyses wiped successfully."}
+    except Exception as e:
+        cursor.connection.rollback()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to wipe test_analyses.")
+

@@ -23,70 +23,49 @@ router = APIRouter(prefix="/api/rag", tags=["RAG Intelligence"])
 client = genai.Client(api_key=get_secret(os.environ.get("LUIGI_KEY_NAME")))
 
 
-def chunk_text(text: str, chunk_size: int = 500, overlap: int = 100) -> list[str]:
+def structure_aware_chunking(text: str, max_words: int = 500, overlap_words: int = 100) -> list[str]:
     """
-    Splits a large text block into overlapping chunks of words.
-    The overlap prevents critical context from being cut in half at chunk boundaries.
+    Splits documents based on semantic boundaries (Markdown headers, titles) rather than blind word counts.
+    Massive sections are sub-chunked, but the section header is retained across all sub-chunks.
     """
-    words = text.split()
     chunks = []
 
-    if not words:
-        return chunks
+    # Split on Markdown headers (# to ######) or specific report keywords
+    # (?m) enables multiline mode so ^ matches the start of any line
+    pattern = r'(?m)(?=^(?:#{1,6}\s+|Title:\s*|Original finding\s*))'
+    sections = [s.strip() for s in re.split(pattern, text) if s.strip()]
 
-    # Step size is how far we move forward for the next chunk
-    step = max(1, chunk_size - overlap)
+    if not sections:
+        # Fallback if no structure is found
+        sections = [text]
 
-    for i in range(0, len(words), step):
-        chunk = " ".join(words[i:i + chunk_size])
-        chunks.append(chunk)
+    for section in sections:
+        words = section.split()
+        if len(words) <= max_words:
+            chunks.append(section)
+        else:
+            # Recursive overlap for massive sections, preserving the header context
+            header = " ".join(words[:15])  # Extract the heading line
+            step = max(1, max_words - overlap_words)
+            for i in range(0, len(words), step):
+                sub_chunk = " ".join(words[i:i + max_words])
+
+                # If this is a subsequent sub-chunk, prepend the section header
+                if i > 0 and not sub_chunk.startswith(header):
+                    sub_chunk = f"[Section Context: {header}...]\n{sub_chunk}"
+
+                chunks.append(sub_chunk)
 
     return chunks
 
 
-def extract_relevant_snippet(text: str, query: str, snippet_length: int = 200) -> str:
-    """Finds the 200-character window in a chunk that best matches the user's query."""
-    text = " ".join(text.split())
-    if len(text) <= snippet_length:
-        return text
-
-    # Extract meaningful words from the query
-    stop_words = {"can", "you", "the", "a", "is", "what", "how", "give", "me", "some", "about", "please", "for", "of",
-                  "in", "to"}
-    query_words = set(re.findall(r'\w+', query.lower())) - stop_words
-
-    if not query_words:
-        return text[:snippet_length] + "..."
-
-    best_score = 0
-    best_start = 0
-
-    # Slide a 200-character window across the text, stepping by 50 characters
-    for i in range(0, len(text) - snippet_length, 50):
-        window_text = text[i:i + snippet_length]
-        window_words = set(re.findall(r'\w+', window_text.lower()))
-
-        # Score based on how many unique query words appear in this window
-        score = len(query_words.intersection(window_words))
-
-        if score > best_score:
-            best_score = score
-            best_start = i
-
-    snippet = text[best_start:best_start + snippet_length]
-    prefix = "..." if best_start > 0 else ""
-    suffix = "..." if best_start + snippet_length < len(text) else ""
-
-    return prefix + snippet.strip() + suffix
-
-
 def process_test_documents_background(test_id: str, user_id: str, user_role: str):
-    """Background task to extract, embed, and store document chunks."""
+    """Background task to extract, embed, and store document chunks using structural splitting."""
     with db_cursor_context() as cursor:
         try:
-            # 1. Fetch all documents associated with this test
+            # Fetch the is_virtual flag directly from the database schema
             cursor.execute("""
-                SELECT id, drive_file_id, mime_type, file_name, doc_type 
+                SELECT id, drive_file_id, mime_type, file_name, doc_type, is_virtual 
                 FROM test_documents 
                 WHERE test_id = %s
             """, (test_id,))
@@ -94,24 +73,20 @@ def process_test_documents_background(test_id: str, user_id: str, user_role: str
 
             if not documents:
                 log_audit_event(
-                    user_id=str(user_id),
-                    role=str(user_role),
-                    action="RAG_SYNC_SKIPPED",
-                    resource_type="RAG",
-                    resource_id=str(test_id),
+                    user_id=str(user_id), role=str(user_role), action="RAG_NO_DOC_FOUND",
+                    resource_type="RAG", resource_id=str(test_id),
                     details="No documents found in the database for this test to index."
                 )
                 return
 
-            # 2. Wipe existing chunks for this test to prevent duplicates on resync
             cursor.execute("DELETE FROM document_chunks WHERE test_id = %s", (test_id,))
 
             for doc in documents:
-                doc_id, drive_file_id, mime_type, file_name, doc_type = doc
+                doc_id, drive_file_id, mime_type, file_name, doc_type, is_virtual = doc
                 chunks = []
 
-                # Handle Virtual LLM_ANALYSIS (Stored in Postgres) vs Drive Files
-                if doc_type == 'LLM_ANALYSIS' or drive_file_id.startswith("analysis_"):
+                # Safely route virtual docs without faking Google Drive IDs
+                if is_virtual:
                     cursor.execute("SELECT analysis_text FROM test_analyses WHERE test_id = %s", (test_id,))
                     analysis_row = cursor.fetchone()
                     raw_text = analysis_row[0] if analysis_row and analysis_row[0] else ""
@@ -119,51 +94,41 @@ def process_test_documents_background(test_id: str, user_id: str, user_role: str
                     if not raw_text.strip():
                         continue
 
-                    # 3A. Bulletproof splitting for LLM Analysis
-                    normalized_text = re.sub(r'(?i)(^|\n)\s*Original finding', r'\n|---SPLIT---|\nOriginal finding',
-                                             raw_text)
-                    raw_chunks = [c.strip() for c in normalized_text.split('|---SPLIT---|') if c.strip()]
-
-                    for clean_chunk in raw_chunks:
-                        title_match = re.search(r'Title:\s*([^\n]+)', clean_chunk)
-                        finding_title = title_match.group(1).strip() if title_match else "Unknown Finding"
-
-                        chunk_header = f"[LLM QUALITY ANALYSIS] Finding: {finding_title}\n"
-
-                        # Sub-chunk massive findings so they don't break token limits
-                        if len(clean_chunk.split()) > 500:
-                            sub_chunks = chunk_text(clean_chunk, chunk_size=500, overlap=100)
-                            for sc in sub_chunks:
-                                chunks.append(f"{chunk_header}{sc}")
-                        else:
-                            chunks.append(f"{chunk_header}{clean_chunk}")
+                    # Prepend an explicit identifier so the structural chunker grabs it
+                    raw_text = f"# [LLM QUALITY ANALYSIS]\n{raw_text}"
+                    chunks = structure_aware_chunking(raw_text)
 
                 else:
-                    # 3B. Extract text from standard Google Drive files
+                    # External Google Drive file
                     try:
                         raw_text = extract_text_from_drive_file(drive_file_id, mime_type)
-                        log_audit_event(user_id=str(user_id), role=str(user_role), action="EXTRACT_TEXT_FROM_DOCUMENT",
-                                        resource_type="RAG", resource_id=str(doc_id),
-                                        details=f"Extract text from Google Drive Document: {file_name}")
+                        log_audit_event(
+                            user_id=str(user_id), role=str(user_role), action="EXTRACT_TEXT_FROM_DOCUMENT",
+                            resource_type="RAG", resource_id=str(doc_id),
+                            details=f"Extract text from Google Drive Document: {file_name}"
+                        )
                     except Exception as e:
-                        log_audit_event(user_id=str(user_id), role=str(user_role),
-                                        action="EXTRACT_TEXT_FROM_DOCUMENT_FAILED", resource_type="RAG",
-                                        resource_id=str(doc_id), details=f"Failed to parse {file_name}: {e}")
+                        log_audit_event(
+                            user_id=str(user_id), role=str(user_role), action="EXTRACT_TEXT_FROM_DOCUMENT_FAILED",
+                            resource_type="RAG", resource_id=str(doc_id),
+                            details=f"Failed to parse {file_name}: {e}"
+                        )
                         continue
 
                     if not raw_text or not raw_text.strip():
                         continue
 
-                    # Use overlapping chunker for standard documents
-                    chunks = chunk_text(raw_text, chunk_size=500, overlap=100)
-                    log_audit_event(user_id=str(user_id), role=str(user_role), action="CHUCK_TEXT", resource_type="RAG",
-                                    resource_id=str(doc_id),
-                                    details=f"Split into {len(chunks)} overlapping chunks Document: {file_name}")
+                    # Use structure-aware chunking for all external documents
+                    chunks = structure_aware_chunking(raw_text)
+                    log_audit_event(
+                        user_id=str(user_id), role=str(user_role), action="CHUNK_TEXT",
+                        resource_type="RAG", resource_id=str(doc_id),
+                        details=f"Split into {len(chunks)} structural chunks Document: {file_name}"
+                    )
 
                 if not chunks:
                     continue
 
-                # 4 & 5. Generate embeddings ONE-BY-ONE and insert to bypass SDK array truncation
                 for index, chunk_text_content in enumerate(chunks):
                     try:
                         response = client.models.embed_content(
@@ -172,7 +137,6 @@ def process_test_documents_background(test_id: str, user_id: str, user_role: str
                             config=types.EmbedContentConfig(output_dimensionality=768)
                         )
 
-                        # Extract the single embedding for this specific chunk
                         embedding_obj = response.embeddings[0]
                         vector_str = json.dumps(embedding_obj.values)
 
@@ -182,20 +146,26 @@ def process_test_documents_background(test_id: str, user_id: str, user_role: str
                         """, (doc_id, test_id, index, chunk_text_content, vector_str))
 
                     except Exception as e:
-                        log_audit_event(user_id=str(user_id), role=str(user_role), action="GEMINI_MODEL_FAILED",
-                                        resource_type="RAG", resource_id=str(doc_id),
-                                        details=f"Generate embedding failed for chunk {index} of {doc_id}: {str(e)}")
+                        log_audit_event(
+                            user_id=str(user_id), role=str(user_role), action="RAG_EMBEDDING_FAILED",
+                            resource_type="RAG", resource_id=str(doc_id),
+                            details=f"Generate embedding failed for chunk {index} of {doc_id}: {str(e)}"
+                        )
                         continue
 
             cursor.connection.commit()
-            log_audit_event(user_id=str(user_id), role=str(user_role), action="CHUNK_TEXT_EMBEDED", resource_type="RAG",
-                            resource_id=str(test_id),
-                            details=f"Generate embeddings using Gemini API Successful for test {test_id}")
+            log_audit_event(
+                user_id=str(user_id), role=str(user_role), action="CHUNK_TEXT_EMBEDDED",
+                resource_type="RAG", resource_id=str(test_id),
+                details=f"Generate embeddings using Gemini API Successful for test {test_id}"
+            )
         except Exception as e:
             cursor.connection.rollback()
-            log_audit_event(user_id=str(user_id), role=str(user_role), action="RAG_SYNC_FAILED", resource_type="RAG",
-                            resource_id=str(test_id), details=f"RAG Sync failed for test {test_id}: {str(e)}")
-
+            log_audit_event(
+                user_id=str(user_id), role=str(user_role), action="RAG_SYNC_FAILED",
+                resource_type="RAG", resource_id=str(test_id),
+                details=f"RAG Sync failed for test {test_id}: {str(e)}"
+            )
 
 @router.get("/", summary="[Admin] Testing endpoint for check the chunck")
 def check_chunks(current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
@@ -343,7 +313,6 @@ def chat_with_documents(
         req: RagChatRequest,
         current_user: dict = Depends(require_admin)
 ):
-    # 1. Embed the user's question
     try:
         query_response = client.models.embed_content(
             model='gemini-embedding-2',
@@ -354,10 +323,10 @@ def chat_with_documents(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to embed query: {str(e)}")
 
-    # 2. Perform Vector Similarity Search
     with db_cursor_context() as cursor:
+        #  We now explicitly SELECT dc.id (the permanent UUID of the chunk)
         query_sql = """
-            SELECT dc.text_content, td.file_name, td.file_url, td.doc_type, 1 - (dc.embedding <=> %s::vector) as similarity, dc.test_id
+            SELECT dc.id, dc.text_content, td.id, td.file_name, td.file_url, td.doc_type, 1 - (dc.embedding <=> %s::vector) as similarity, dc.test_id
             FROM document_chunks dc
             JOIN test_documents td ON dc.document_id = td.id
         """
@@ -365,10 +334,9 @@ def chat_with_documents(
         where_clauses = []
         params = [query_vector]
 
-        # If filtering by asset, we must JOIN the test_assets table
         if req.asset_id:
             query_sql = """
-                SELECT dc.text_content, td.file_name, td.file_url, td.doc_type, 1 - (dc.embedding <=> %s::vector) as similarity, dc.test_id
+                SELECT dc.id, dc.text_content, td.id, td.file_name, td.file_url, td.doc_type, 1 - (dc.embedding <=> %s::vector) as similarity, dc.test_id
                 FROM document_chunks dc
                 JOIN test_documents td ON dc.document_id = td.id
                 JOIN test_assets ta ON dc.test_id = ta.test_id
@@ -379,60 +347,64 @@ def chat_with_documents(
             where_clauses.append("dc.test_id = %s")
             params.append(str(req.test_id))
 
-        # Stack the document type filter if requested via '/'
         if req.doc_type:
             where_clauses.append("td.doc_type = %s")
             params.append(req.doc_type)
 
-        # Append WHERE clauses dynamically
         if where_clauses:
             query_sql += " WHERE " + " AND ".join(where_clauses)
 
-        # Finalize the order and limit
-        query_sql += " ORDER BY dc.embedding <=> %s::vector"
+        query_sql += " ORDER BY dc.embedding <=> %s::vector LIMIT 30"
         params.append(query_vector)
 
         cursor.execute(query_sql, tuple(params))
         raw_results = cursor.fetchall()
 
+        # Limit history to the last 3 turns (6 messages) to prevent 30k token blowout.
+        # We order by DESC to get the latest, then reverse in Python to keep chronological order.
         cursor.execute("""
             SELECT question, answer 
             FROM rag_chat_logs 
             WHERE session_id = %s AND user_id = %s
-            ORDER BY timestamp ASC LIMIT 10
+            ORDER BY timestamp DESC LIMIT 3
         """, (str(req.session_id), str(current_user["id"])))
-        history_rows = cursor.fetchall()
+        history_rows = reversed(cursor.fetchall())
 
-    # 3. Apply Metadata De-duplication Rules
     has_full_report_for_test = set()
-    for _, _, _, doc_type, similarity, t_id in raw_results:
+    # Unpack the new td.id (doc_id)
+    for chunk_id, text_content, doc_id, file_name, file_url, doc_type, similarity, t_id in raw_results:
         if similarity > 0.5 and doc_type == 'FULL_TEST_REPORT':
             has_full_report_for_test.add(t_id)
 
     filtered_results = []
-    for text_content, file_name, file_url, doc_type, similarity, t_id in raw_results:
+    for chunk_id, text_content, doc_id, file_name, file_url, doc_type, similarity, t_id in raw_results:
         if similarity <= 0.5:
             continue
         if doc_type == 'VULN_REPORT' and t_id in has_full_report_for_test:
             continue
-        filtered_results.append((text_content, file_name, file_url, doc_type))
+        filtered_results.append((text_content, str(doc_id), file_name, file_url, doc_type))
 
-    # 4. Assemble Context & Map
     context_text = ""
-    citations_map = {}  # Maps '1', '2', etc. to their data payload
+    citations_map = {}
+    doc_uuid_to_index = {}
+    current_idx = 1
 
-    # Enumerate starting at 1 to give each chunk a clear ID
-    for idx, (text_content, file_name, file_url, doc_type) in enumerate(filtered_results[:15], start=1):
-        context_text += f"\n--- Source Document [{idx}]: [{doc_type}] {file_name} ---\n{text_content}\n"
+    for text_content, doc_id_str, file_name, file_url, doc_type in filtered_results[:15]:
+        # Assign a clean sequential index (1, 2, 3...) to each UNIQUE document
+        if doc_id_str not in doc_uuid_to_index:
+            doc_uuid_to_index[doc_id_str] = current_idx
+            current_idx += 1
 
-        # USE THE SMART SNIPPET EXTRACTOR HERE
-        snippet = extract_relevant_snippet(text_content, req.query, 200)
+        doc_idx = doc_uuid_to_index[doc_id_str]
 
-        citations_map[str(idx)] = {
-            "id": idx,
+        # Pass the clean index and the permanent doc ID to the LLM
+        context_text += f"\n--- Source Document [{doc_idx}] (ID: {doc_id_str}): [{doc_type}] {file_name} ---\n{text_content}\n"
+
+        # Key the map by Document UUID. This naturally deduplicates chunks from the same file!
+        citations_map[doc_id_str] = {
+            "id": doc_id_str,
             "file_name": file_name,
-            "url": file_url,
-            "snippet": snippet
+            "url": file_url
         }
 
     if not context_text:
@@ -443,6 +415,7 @@ def chat_with_documents(
         gemini_history.append(types.Content(role="user", parts=[types.Part.from_text(text=past_q)]))
         gemini_history.append(types.Content(role="model", parts=[types.Part.from_text(text=past_a)]))
 
+    # Strict UUID enforcement via Markdown
     system_instruction = """
     Your name is Luigi. You are an expert cybersecurity assistant for the Global Offensive Security Team.
     Answer the user's question based strictly on the provided Context Documents and your previous conversation history.
@@ -454,15 +427,13 @@ def chat_with_documents(
 
     CITATION INSTRUCTIONS:
     When using information from the context, you MUST append an inline citation directly after the relevant sentence. 
-    Format the citation EXACTLY as a Markdown link pointing to '#cite-ID'.
-    For example: "The vulnerability allows privilege escalation [[1]](#cite-1)."
+    Format the citation EXACTLY as a Markdown link pointing to '#cite-ID', using the bracketed Document Index for the display text and the Document ID for the link URL.
+    For example: "The vulnerability allows privilege escalation [[1]](#cite-123e4567-e89b-12d3-a456-426614174000)."
+    DO NOT invent citation IDs. Only use the exact Document Indexes and IDs provided in the Source Document headers..
     """
 
-    config = types.GenerateContentConfig(
-        system_instruction=system_instruction
-    )
+    config = types.GenerateContentConfig(system_instruction=system_instruction)
 
-    # 5. Define the NDJSON Generator
     def event_generator():
         try:
             chat = client.chats.create(model='gemini-3.5-flash', history=gemini_history, config=config)
@@ -475,27 +446,27 @@ def chat_with_documents(
                     full_answer += chunk.text
                     yield json.dumps({"text": chunk.text}) + "\n"
 
-            # Evaluate which sources were actually mentioned (look for 'cite:X' in output)
+            #  Safely regex extract the exact UUIDs the model decided to cite
             confirmed_citations = []
-            for cite_id, cite_data in citations_map.items():
-                if f"#cite-{cite_id}" in full_answer:
-                    confirmed_citations.append(cite_data)
-                    log_audit_event(user_id="LUIGI", role="LUIGI", action="CHECK_CITATIONS",
-                                    resource_type="RAG", resource_id=str(cite_id),
-                                    details=f"[RAG DEBUG] Confirmed Citation {cite_id}: {cite_data['file_name']}. Snippet: {cite_data['snippet']}")
+            cited_uuids = set(re.findall(r'#cite-([a-f0-9\-]{36})', full_answer))
+            for cid in cited_uuids:
+                if cid in citations_map:
+                    confirmed_citations.append(citations_map[cid])
 
             new_log_id = str(uuid.uuid4())
+            citations_json = json.dumps(confirmed_citations)
 
             yield json.dumps({"citations": confirmed_citations, "log_id": new_log_id}) + "\n"
 
             with db_cursor_context() as stream_cursor:
+                # Store the exact citations array into our new JSONB column
                 stream_cursor.execute("""
-                        INSERT INTO rag_chat_logs (id, session_id, user_id, test_id, asset_id, question, answer, timestamp)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                        INSERT INTO rag_chat_logs (id, session_id, user_id, test_id, asset_id, question, answer, timestamp, citations)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, %s)
                     """, (
                     new_log_id, str(req.session_id), str(current_user["id"]),
                     str(req.test_id) if req.test_id else None, str(req.asset_id) if req.asset_id else None,
-                    req.query, full_answer
+                    req.query, full_answer, citations_json
                 ))
                 stream_cursor.connection.commit()
 
@@ -532,16 +503,16 @@ def get_chat_sessions(current_user: dict = Depends(require_admin), cursor=Depend
 
 @router.get("/sessions/{session_id}", summary="Get messages for a specific session")
 def get_session_messages(session_id: str, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
-    # Rebuilds the chat history for a specific session
+    #  Read the stored citations JSON directly so links survive page reloads
     cursor.execute("""
-        SELECT id, question, answer, timestamp, user_feedback 
+        SELECT id, question, answer, timestamp, user_feedback, citations 
         FROM rag_chat_logs 
         WHERE session_id = %s AND user_id = %s AND is_session_active = TRUE
         ORDER BY timestamp ASC
     """, (session_id, str(current_user["id"])))
 
     messages = []
-    for log_id, q, a, t, feedback in cursor.fetchall():
+    for log_id, q, a, t, feedback, citations in cursor.fetchall():
         time_str = t.strftime("%I:%M %p") if t else ""
         messages.append({
             "role": "user",
@@ -551,7 +522,7 @@ def get_session_messages(session_id: str, current_user: dict = Depends(require_a
         messages.append({
             "role": "assistant",
             "content": a,
-            "citations": [],  # Citations are kept inline in the text
+            "citations": citations if citations else [],
             "timestamp": time_str,
             "log_id": str(log_id),
             "feedback": feedback

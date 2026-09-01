@@ -461,8 +461,8 @@ async def process_vuln_analysis_background(test_id: str, kiss24_id: str, user_id
 
                 # UPSERT virtual LLM_ANALYSIS document for RAG indexing
                 cursor.execute("""
-                    INSERT INTO test_documents (id, test_id, drive_file_id, file_name, mime_type, file_url, doc_type, last_modified, synced_at)
-                    VALUES (gen_random_uuid(), %s, %s, %s, 'text/markdown', %s, 'LLM_ANALYSIS', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    INSERT INTO test_documents (id, test_id, drive_file_id, file_name, mime_type, file_url, doc_type, last_modified, synced_at, is_virtual)
+                    VALUES (gen_random_uuid(), %s, %s, %s, 'text/markdown', %s, 'LLM_ANALYSIS', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, TRUE)
                     ON CONFLICT (drive_file_id) DO UPDATE SET 
                         file_name = EXCLUDED.file_name,
                         last_modified = CURRENT_TIMESTAMP, 

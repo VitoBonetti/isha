@@ -639,7 +639,7 @@ export default function RagChatPage() {
         </div>
 
         {/* MESSAGES VIEWPORT */}
-        <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6" onScroll={handleScroll}>
+        <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-6 space-y-6" onScroll={handleScroll}>
           {messages.map((msg, index) => {
             const isUser = msg.role === 'user';
             const isEditingThis = editingIndex === index;
@@ -717,7 +717,7 @@ export default function RagChatPage() {
                           ol: ({ node, ...props }) => <ol className="list-decimal pl-5 mb-3 space-y-1" {...props} />,
                           li: ({ node, ...props }) => <li className="text-slate-800 dark:text-zinc-300" {...props} />,
                           table: ({ node, ...props }) => (
-                            <div className="overflow-x-auto mb-4 border border-slate-200 dark:border-zinc-700 rounded-lg">
+                            <div className="overflow-x-auto hover:overflow-visible mb-4 border border-slate-200 dark:border-zinc-700 rounded-lg">
                               <table className="min-w-full divide-y divide-slate-200 dark:divide-zinc-700 text-sm" {...props} />
                             </div>
                           ),
@@ -811,7 +811,7 @@ export default function RagChatPage() {
                                   </a>
 
                                   {citationData ? (
-                                    <span className="citation-tooltip absolute bottom-full left-0 mb-1.5 w-max max-w-[280px] sm:max-w-xs p-2.5 bg-slate-900 dark:bg-zinc-100 text-slate-100 dark:text-zinc-900 text-xs rounded-xl shadow-xl opacity-0 invisible transition-all duration-200 z-[100] pointer-events-none flex flex-col text-left font-normal normal-case">
+                                    <span className="citation-tooltip absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-max max-w-[240px] sm:max-w-xs p-2.5 bg-slate-900 dark:bg-zinc-100 text-slate-100 dark:text-zinc-900 text-xs rounded-xl shadow-xl opacity-0 invisible transition-all duration-200 z-[100] pointer-events-none flex flex-col text-left font-normal normal-case">
                                       <span className="font-bold flex items-center gap-1.5 text-xs text-emerald-400 dark:text-emerald-600">
                                         <LinkIcon size={12} className="shrink-0" />
                                         <span className="truncate">{citationData.file_name}</span>
@@ -819,10 +819,11 @@ export default function RagChatPage() {
                                       <span className="mt-1 text-[10px] text-slate-400 dark:text-slate-500 font-semibold text-right block">
                                         Click to open document ↗
                                       </span>
-                                      <span className="absolute -bottom-1 left-3 w-2 h-2 bg-slate-900 dark:bg-zinc-100 rotate-45 block"></span>
+                                      {/* The centered triangle pointer */}
+                                      <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-slate-900 dark:bg-zinc-100 rotate-45 block"></span>
                                     </span>
                                   ) : (
-                                    <span className="citation-tooltip absolute bottom-full left-0 mb-1.5 w-max px-2.5 py-1.5 bg-slate-900 dark:bg-zinc-100 text-slate-100 dark:text-zinc-900 text-[10px] rounded-lg shadow-xl opacity-0 invisible transition-all z-[100] pointer-events-none">
+                                    <span className="citation-tooltip absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-max px-2.5 py-1.5 bg-slate-900 dark:bg-zinc-100 text-slate-100 dark:text-zinc-900 text-[10px] rounded-lg shadow-xl opacity-0 invisible transition-all z-[100] pointer-events-none">
                                       {isCurrentlyStreaming ? "Processing source..." : `Source [${citeIdStr}] (Archived)`}
                                     </span>
                                   )}

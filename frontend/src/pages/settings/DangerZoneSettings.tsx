@@ -172,7 +172,34 @@ export default function DangerZoneSettings() {
           </button>
         </div>
 
-        {/* Card 4: Wipe Secure Notes */}
+        {/* Card 4: Wipe All Vulnerability Analysis */}
+        <div className="bg-white dark:bg-zinc-900 border border-red-200 dark:border-red-900/50 p-6 rounded-3xl shadow-sm flex flex-col justify-between h-full">
+          <div>
+            <h3 className="font-bold text-slate-900 dark:text-zinc-100 text-base">Wipe Vulnerability Analysis</h3>
+            <p className="text-sm text-slate-500 dark:text-zinc-400 mt-2">
+              Wipes permanently the Vulnerability Analysis records from the database.
+            </p>
+          </div>
+          <button
+            onClick={() => {
+              setActionModal({
+                isOpen: true, variant: 'warning', confirmText: "Wipe Vulnerability Analysis", title: "Wipe Vulnerability Analysis",
+                message: "Are you sure you want to delete the Vulnerability Analysis? This action cannot be reversed.",
+                onConfirm: async () => {
+                  try {
+                    await axios.delete('/api/danger/tests/wipe-test-analyses');
+                    toast.success("Vulnerability Analysis wiped.");
+                  } catch (err) { toast.error("Failed to wipe Vulnerability Analysis."); }
+                }
+              });
+            }}
+            className="w-full mt-6 bg-orange-500 hover:bg-orange-600 text-white font-bold py-2.5 px-4 rounded-xl shadow-sm transition-colors text-sm"
+          >
+            Wipe  Vulnerability Analysis
+          </button>
+        </div>
+
+        {/* Card 5: Wipe Secure Notes */}
         <div className="bg-white dark:bg-zinc-900 border border-red-200 dark:border-red-900/50 p-6 rounded-3xl shadow-sm flex flex-col justify-between h-full">
           <div>
             <h3 className="font-bold text-slate-900 dark:text-zinc-100 text-base">Wipe All Secure Notes</h3>
@@ -199,7 +226,7 @@ export default function DangerZoneSettings() {
           </button>
         </div>
 
-        {/* Card 5: Factory Reset Database */}
+        {/* Card 6: Factory Reset Database */}
         <div className="bg-white dark:bg-zinc-900 border border-red-200 dark:border-red-900/50 p-6 rounded-3xl shadow-sm flex flex-col justify-between h-full">
           <div>
             <h3 className="font-bold text-slate-900 dark:text-zinc-100 text-base">Factory Reset Database</h3>

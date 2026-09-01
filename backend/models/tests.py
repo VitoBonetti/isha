@@ -1,7 +1,7 @@
 import uuid
 import enum
 from sqlalchemy import Column, String, Integer, ForeignKey, REAL, Enum, DateTime, Boolean, Text, UniqueConstraint
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 from pgvector.sqlalchemy import Vector
 from database import Base
@@ -58,6 +58,7 @@ class TestDocuments(Base):
     doc_type = Column(String(50), default='MANUAL_UPLOAD', nullable=False)
     last_modified = Column(DateTime(timezone=True), nullable=True)
     synced_at = Column(DateTime(timezone=True), default=aware_utcnow)
+    is_virtual = Column(Boolean, default=False, nullable=False)
 
     # relationships
     tests = relationship("Tests", back_populates="documents")
@@ -93,6 +94,7 @@ class RagChatLogs(Base):
     timestamp = Column(DateTime(timezone=True), default=aware_utcnow)
     is_session_active = Column(Boolean, nullable=False, default=True)
     user_feedback = Column(Boolean, nullable=True)
+    citations = Column(JSONB, nullable=True, default=list)
 
     # Optional relationships
     users = relationship("Users", back_populates="rag_chat_logs")
