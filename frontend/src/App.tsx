@@ -31,6 +31,7 @@ import ServiceNowSyncSettings from './pages/settings/ServiceNowSyncSettings';
 import DangerZoneSettings from './pages/settings/DangerZoneSettings';
 import ContactsSettings from './pages/settings/ContactsSettings';
 import Kiss24SyncSettings from './pages/settings/Kiss24SyncSettings';
+import AssetCriteriaSettings from './pages/settings/AssetCriteriaSettings';
 import AssetsLayout from './layouts/AssetsLayout';
 
 function AppContent() {
@@ -67,6 +68,7 @@ function AppContent() {
           <Route path="users" element={<UsersSettings />} />
           <Route path="locations" element={<LocationsSettings />} />
           <Route path="asset-types" element={<AssetTypesSettings />} />
+          <Route path="asset-criteria" element={<AssetCriteriaSettings />} />
           <Route path="services" element={<ServicesSettings />} />
           <Route path="categories" element={<CategoriesSettings />} />
           <Route path="regions" element={<RegionsSettings />} />

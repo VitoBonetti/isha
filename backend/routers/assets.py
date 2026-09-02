@@ -142,6 +142,7 @@ def get_raw_assets(
         service_id: Optional[str] = None, category_id: Optional[str] = None,
         asset_type_id: Optional[str] = None, facing_internet: Optional[bool] = None,
         business_critical: Optional[int] = None, status: Optional[str] = None,
+        is_kpi: Optional[bool] = None, is_critical: Optional[bool] = None,
         sort_by: Optional[str] = "name", sort_dir: Optional[str] = "asc",
         current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)
 ):
@@ -174,6 +175,13 @@ def get_raw_assets(
         where_clauses.append("r.business_critical >= %s")
         params.append(business_critical)
 
+    if is_kpi is not None:
+        where_clauses.append("r.is_kpi = %s")
+        params.append(is_kpi)
+    if is_critical is not None:
+        where_clauses.append("r.is_critical = %s")
+        params.append(is_critical)
+
     if status == 'raw':
         where_clauses.append("a.id IS NULL")
     elif status == 'pool':
@@ -199,7 +207,7 @@ def get_raw_assets(
 
     query = f"""
         SELECT r.id, r.name, c.code as country_code, c.name as country_name, s.name as service_name, cat.name as category_name,
-               at.name as asset_type_name, r.facing_internet, r.business_critical,
+               at.name as asset_type_name, r.facing_internet, r.business_critical, r.snow_active,
                CASE WHEN a.id IS NOT NULL THEN true ELSE false END as is_promoted
         FROM raw_assets r
         LEFT JOIN countries c ON r.country_id = c.id
@@ -243,13 +251,14 @@ def create_manual_raw_asset(asset: RawAssetCreate, background_tasks: BackgroundT
         INSERT INTO raw_assets (
             id, name, description, business_critical, 
             confidentiality_rating, integrity_rating, availability_rating, 
-            country_id, service_forecast_id, category_id, asset_type_id, facing_internet, duplicate_allowed, create_date
+            country_id, service_forecast_id, category_id, asset_type_id, facing_internet, duplicate_allowed, is_kpi, is_critical, create_date
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP) RETURNING id
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP) RETURNING id
     """, (
         new_raw_assets_id, asset.name, asset.description, asset.business_critical,
         asset.confidentiality_rating, asset.integrity_rating, asset.availability_rating,
-        c_id, s_id, cat_id, at_id, asset.facing_internet, asset.duplicate_allowed
+        c_id, s_id, cat_id, at_id, asset.facing_internet, asset.duplicate_allowed, asset.is_kpi,
+        asset.is_critical
     ))
 
     log_audit_event(
@@ -280,7 +289,7 @@ def get_single_raw_asset(raw_id: str, current_user: dict = Depends(get_current_u
         SELECT r.id, r.name, r.description, r.business_critical, r.confidentiality_rating, 
             r.integrity_rating, r.availability_rating, r.country_id, r.service_forecast_id, 
             r.category_id, r.asset_type_id, r.facing_internet, r.duplicate_allowed, r.create_date, r.update_date,
-            r.snow_number, r.team_note, r.kiss24_asset_id, m.snow_data,
+            r.snow_number, r.team_note, r.kiss24_asset_id, r.is_kpi, r.is_critical, r.snow_active, m.snow_data,
             CASE WHEN a.id IS NOT NULL THEN true ELSE false END as is_promoted,
             a.is_archived, a.archived_years
         FROM raw_assets r
@@ -338,7 +347,7 @@ def update_raw_asset(raw_id: str, asset: RawAssetCreate, background_tasks: Backg
     cursor.execute("""
             SELECT r.name, r.facing_internet, r.duplicate_allowed, r.confidentiality_rating, r.integrity_rating, r.availability_rating,
                    c.name as country_name, s.name as service_name, cat.name as category_name, at.name as type_name,
-                   r.snow_number, r.team_note, r.kiss24_asset_id
+                   r.snow_number, r.team_note, r.kiss24_asset_id, r.is_kpi, r.is_critical, r.snow_active
             FROM raw_assets r
             LEFT JOIN countries c ON r.country_id = c.id
             LEFT JOIN services_lanes s ON r.service_forecast_id = s.id
@@ -351,7 +360,7 @@ def update_raw_asset(raw_id: str, asset: RawAssetCreate, background_tasks: Backg
         raise HTTPException(status_code=404, detail="Asset not found")
 
     # Unpack old state and handle NULLs gracefully
-    old_name, old_internet, old_duplicate_allowed, old_c, old_i, old_a, old_country, old_service, old_category, old_type, old_snow_number, old_team_note, old_kiss24_asset_id = old_state
+    old_name, old_internet, old_duplicate_allowed, old_c, old_i, old_a, old_country, old_service, old_category, old_type, old_snow_number, old_team_note, old_kiss24_asset_id, old_is_kpi, old_is_critical, old_snow_active = old_state
     old_country = old_country or "None"
     old_service = old_service or "None"
     old_category = old_category or "None"
@@ -388,13 +397,13 @@ def update_raw_asset(raw_id: str, asset: RawAssetCreate, background_tasks: Backg
         SET name=%s, description=%s, business_critical=%s, 
             confidentiality_rating=%s, integrity_rating=%s, availability_rating=%s, 
             country_id=%s, service_forecast_id=%s, category_id=%s, asset_type_id=%s, facing_internet=%s, duplicate_allowed=%s,
-            snow_number=%s, team_note=%s, kiss24_asset_id=%s,  update_date=CURRENT_TIMESTAMP
+            snow_number=%s, team_note=%s, kiss24_asset_id=%s, is_kpi=%s, is_critical=%s, snow_active=%s,  update_date=CURRENT_TIMESTAMP
         WHERE id=%s
     """, (
         asset.name, asset.description, asset.business_critical,
         asset.confidentiality_rating, asset.integrity_rating, asset.availability_rating,
         c_id, s_id, cat_id, at_id, asset.facing_internet, asset.duplicate_allowed, asset.snow_number, asset.team_note, asset.kiss24_asset_id,
-        raw_id
+        asset.is_kpi, asset.is_critical, asset.snow_active, raw_id
     ))
 
     log_audit_event(
@@ -424,6 +433,12 @@ def update_raw_asset(raw_id: str, asset: RawAssetCreate, background_tasks: Backg
     if old_snow_number != asset.snow_number: changes.append(f"SNOW ID: '{old_snow_number}' ➔ '{asset.snow_number}'")
     if old_team_note != asset.team_note: changes.append(f"Team Note was updated")
     if old_kiss24_asset_id != asset.kiss24_asset_id: changes.append(f"Kiss 24 asset uuid was updated")
+    if old_is_kpi != asset.is_kpi: changes.append(
+        f"Asset in KPI: {old_is_kpi} ➔ {asset.is_kpi}")
+    if old_is_critical != asset.is_critical: changes.append(
+        f"Critical Asset: {old_is_critical} ➔ {asset.is_critical}")
+    if old_snow_active != asset.snow_active: changes.append(
+        f"Snow Active: {old_snow_active} ➔ {asset.snow_active}")
 
     details_str = " | ".join(changes) if changes else "Description Updated."
 

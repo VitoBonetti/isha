@@ -192,3 +192,29 @@ def wipe_all_test_analyses(background_tasks: BackgroundTasks, current_user: dict
         cursor.connection.rollback()
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to wipe test_analyses.")
 
+
+# Reset is_critical and is_kpi field of raw_assets table to False
+@router.put("/reset-asset-kpi-criteria", summary="[Admin Only]")
+def reset_asset_kpi_criteria(background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin),
+                             cursor=Depends(get_db_cursor)):
+    """
+    Admin-Only endpoint to Reset is_critical and is_kpi field of raw_assets table to False
+    """
+    try:
+        cursor.execute("UPDATE raw_assets SET is_kpi = FALSE, is_critical = FALSE;")
+        cursor.connection.commit()
+        log_audit_event(
+            user_id=str(current_user["id"]),
+            role=current_user["role"],
+            action="RESET_KPI_CRITERIA_FROM_RAW_ASSETS",
+            resource_type="RAW_ASSETS",
+            resource_id="N/A",
+            details="Administrator reset all KPI Criteria from the raw_assets table."
+        )
+
+        background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+        return {"message": "All KPI Criteria from the raw_assets table reset successfully."}
+    except Exception as e:
+        cursor.connection.rollback()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to reset KPI Criteria from the raw_assets.")
+

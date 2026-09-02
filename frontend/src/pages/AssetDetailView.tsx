@@ -3,7 +3,7 @@ import { useParams, useNavigate, useLocation } from "react-router-dom";
 import axios from "axios";
 import ConfirmModal from "../components/Modals/ConfirmModal";
 import toast, { Toaster } from "react-hot-toast";
-import { ChevronLeft, Save, Trash2, ShieldAlert, FileText, Edit2, X, History, ChevronDown, ChevronRight, Clock, CheckCircle, HelpCircle, Database, RefreshCw, Shield, Code, MapPin, Server, ExternalLink } from "lucide-react";
+import { ChevronLeft, Save, Trash2, ShieldAlert, FileText, Edit2, X, History, ChevronDown, ChevronRight, Clock, CheckCircle, HelpCircle, Database, RefreshCw, Shield, Code, MapPin, Server, ExternalLink, Activity, AlertTriangle } from "lucide-react";
 import { useAppContext } from "../context/AppContext";
 
 export default function AssetDetailView() {
@@ -12,7 +12,7 @@ export default function AssetDetailView() {
   const location = useLocation();
   const { currentUser } = useAppContext();
   const isAdmin = currentUser?.role === 'admin';
-  const backPath = location.state?.from || "/assets/raw"; // Updated default fallback to the new route
+  const backPath = location.state?.from || "/assets/raw";
   const backLabel = location.state?.label || "Raw Assets";
 
   const [loading, setLoading] = useState(true);
@@ -41,7 +41,6 @@ export default function AssetDetailView() {
 
   const currentYear = new Date().getFullYear();
 
-  // 1. Initial Load
   useEffect(() => {
     Promise.all([
       axios.get(`/api/assets/raw/${id}`),
@@ -64,7 +63,6 @@ export default function AssetDetailView() {
     }).finally(() => setLoading(false));
   }, [id, navigate]);
 
-  // 2. Dynamically fetch Country Contacts whenever the asset's country changes
   useEffect(() => {
     if (asset?.country_id) {
       axios.get(`/api/contacts/country/${asset.country_id}`)
@@ -107,6 +105,8 @@ export default function AssetDetailView() {
         ...asset,
         facing_internet: !!asset.facing_internet,
         duplicate_allowed: !!asset.duplicate_allowed,
+        is_kpi: !!asset.is_kpi,
+        is_critical: !!asset.is_critical,
         business_critical: businessCritical,
         country_id: asset.country_id === "" ? null : asset.country_id,
         service_forecast_id: asset.service_forecast_id === "" ? null : asset.service_forecast_id,
@@ -201,13 +201,9 @@ export default function AssetDetailView() {
         )}
       </div>
 
-      {/* TWO-COLUMN WIDE LAYOUT */}
       <div className="flex flex-col lg:flex-row gap-6 md:gap-8 items-start w-full">
-
-        {/* LEFT COLUMN: Editable Form (2/3 width) */}
+        {/* LEFT COLUMN: Editable Form */}
         <div className="w-full lg:w-2/3 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-2xl p-5 md:p-8 shadow-sm">
-
-          {/* Header Section */}
           <div className="flex flex-col md:flex-row justify-between items-start gap-4 md:gap-0 mb-6 md:mb-8 border-b border-slate-100 dark:border-zinc-800 pb-6">
             <div>
               <div className="flex items-center gap-2 mt-2 xl:mt-0">
@@ -228,7 +224,6 @@ export default function AssetDetailView() {
               </div>
             </div>
 
-            {/* Status Badges */}
             <div className="flex flex-row md:flex-col flex-wrap items-start md:items-end gap-2 w-full md:w-auto">
               {isArchivedThisYear ? (
                 <span className="px-3 py-1 bg-slate-100 dark:bg-zinc-800 text-slate-500 dark:text-zinc-400 font-bold text-xs rounded-full uppercase tracking-wider border border-slate-200 dark:border-zinc-700 flex items-center gap-1.5">
@@ -286,30 +281,48 @@ export default function AssetDetailView() {
                 <textarea disabled={!isEditing} placeholder="Add internal pentesting notes or context here..." className={`${inputClasses} resize-none ${isEditing ? 'h-32' : 'h-auto min-h-[100px]'}`} value={asset.team_note || ""} onChange={e => setAsset({...asset, team_note: e.target.value})} />
               </div>
 
-              <div className="sm:col-span-2 flex flex-col sm:flex-row gap-4 md:gap-6">
-                <div className="w-full sm:w-auto shrink-0">
+              {/* Toggles Grid (4 columns desktop, 2 columns mobile) */}
+              <div className="sm:col-span-2 grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+                <div className="w-full">
                   <SyncLabel label="Facing Internet" />
                   <label className={`flex items-center w-full gap-3 p-3 rounded-lg transition-colors ${isEditing ? 'bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800/50' : 'bg-transparent'}`}>
                     <input type="checkbox" disabled={!isEditing} className="h-4 w-4 rounded text-emerald-500 border-slate-300 disabled:opacity-70" checked={asset.facing_internet} onChange={e => setAsset({...asset, facing_internet: e.target.checked})} />
                     <span className="text-sm font-bold text-slate-700 dark:text-zinc-300 pr-2">Yes</span>
                   </label>
                 </div>
-                <div className="w-full sm:w-auto shrink-0">
+                <div className="w-full">
                   <label className="text-sm font-bold text-slate-700 dark:text-zinc-300 block mb-1">Allow Duplicates</label>
                   <label className={`flex items-center w-full gap-3 p-3 rounded-lg transition-colors ${isEditing ? 'bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800/50' : 'bg-transparent '}`}>
                     <input type="checkbox" disabled={!isEditing} className="h-4 w-4 rounded text-blue-500 border-slate-300 disabled:opacity-70" checked={asset.duplicate_allowed || false} onChange={e => setAsset({...asset, duplicate_allowed: e.target.checked})} />
                     <span className="text-sm font-bold text-slate-700 dark:text-zinc-300 pr-2">Yes</span>
                   </label>
                 </div>
-                <div className="w-full sm:flex-1 min-w-[200px]">
-                  <div className="flex items-center gap-1.5 mb-1">
-                    <label className="text-sm font-bold text-slate-700 dark:text-zinc-300">Kiss24 UUID</label>
-                  </div>
-                  <input disabled={!isEditing} className={inputClasses} placeholder="123a45bc-6d7e-..." value={asset.kiss24_asset_id || ""} onChange={e => setAsset({...asset, kiss24_asset_id: e.target.value})} />
+                <div className="w-full">
+                  <label className="text-sm font-bold text-slate-700 dark:text-zinc-300 block mb-1">Is KPI</label>
+                  <label className={`flex items-center w-full gap-3 p-3 rounded-lg transition-colors ${isEditing ? 'bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800/50' : 'bg-transparent '}`}>
+                    <input type="checkbox" disabled={!isEditing} className="h-4 w-4 rounded text-purple-500 border-slate-300 disabled:opacity-70" checked={asset.is_kpi || false} onChange={e => setAsset({...asset, is_kpi: e.target.checked})} />
+                    <span className="text-sm font-bold text-slate-700 dark:text-zinc-300 pr-2">Yes</span>
+                  </label>
                 </div>
+                <div className="w-full">
+                  <label className="text-sm font-bold text-slate-700 dark:text-zinc-300 block mb-1">Is Critical</label>
+                  <label className={`flex items-center w-full gap-3 p-3 rounded-lg transition-colors ${isEditing ? 'bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800/50' : 'bg-transparent '}`}>
+                    <input type="checkbox" disabled={!isEditing} className="h-4 w-4 rounded text-red-500 border-slate-300 disabled:opacity-70" checked={asset.is_critical || false} onChange={e => setAsset({...asset, is_critical: e.target.checked})} />
+                    <span className="text-sm font-bold text-slate-700 dark:text-zinc-300 pr-2">Yes</span>
+                  </label>
+                </div>
+              </div>
+
+              {/* Kiss24 UUID Row */}
+              <div className="sm:col-span-2">
+                <div className="flex items-center gap-1.5 mb-1">
+                  <label className="text-sm font-bold text-slate-700 dark:text-zinc-300">Kiss24 UUID</label>
+                </div>
+                <input disabled={!isEditing} className={inputClasses} placeholder="123a45bc-6d7e-..." value={asset.kiss24_asset_id || ""} onChange={e => setAsset({...asset, kiss24_asset_id: e.target.value})} />
               </div>
             </div>
 
+            {/* Ratings (CIA Triad & Business Criticality) */}
             <div className={`p-4 md:p-6 rounded-xl border ${isEditing ? 'bg-slate-50 dark:bg-zinc-950/50 border-slate-200 dark:border-zinc-800' : 'border-slate-100 dark:border-zinc-800/50'}`}>
               <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500 dark:text-zinc-400 mb-4 flex items-center gap-2"><ShieldAlert size={16}/> Risk Ratings</h3>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6">
@@ -376,7 +389,7 @@ export default function AssetDetailView() {
           </form>
         </div>
 
-        {/* RIGHT COLUMN: Accordions (1/3 width) */}
+        {/* RIGHT COLUMN: Accordions */}
         <div className="w-full lg:w-1/3 flex flex-col gap-4">
 
           {/* ASSET CONTACTS */}

@@ -91,34 +91,7 @@ export default function DangerZoneSettings() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 w-full">
 
-        {/* Card 1: Unlink Drive Folders */}
-        <div className="bg-white dark:bg-zinc-900 border border-red-200 dark:border-red-900/50 p-6 rounded-3xl shadow-sm flex flex-col justify-between h-full">
-          <div>
-            <h3 className="font-bold text-slate-900 dark:text-zinc-100 text-base">Unlink Drive Folders</h3>
-            <p className="text-sm text-slate-500 dark:text-zinc-400 mt-2">
-              Removes the Google Drive folder links from all tests and wipes their synchronized document metadata including LLM Vulnerabilities Analysis. Physical files in Google Drive are NOT deleted.
-            </p>
-          </div>
-          <button
-            onClick={() => {
-              setActionModal({
-                isOpen: true, variant: 'danger', confirmText: "Unlink Folders", title: "Unlink All Drive Folders",
-                message: "Are you sure you want to unlink all Google Drive folders and wipe the document cache? Links will have to be manually re-established for each test.",
-                onConfirm: async () => {
-                  try {
-                    await axios.delete('/api/danger/tests/wipe-google-drive-workspace');
-                    toast.success("Drive folders unlinked and documents wiped.");
-                  } catch (err) { toast.error("Failed to wipe drive folders."); }
-                }
-              });
-            }}
-            className="w-full mt-6 bg-red-500 hover:bg-red-600 text-white font-bold py-2.5 px-4 rounded-xl shadow-sm transition-colors text-sm"
-          >
-            Unlink Folders
-          </button>
-        </div>
-
-        {/* Card 2: Wipe Synced Documents */}
+        {/* Card 1: Wipe Synced Documents */}
         <div className="bg-white dark:bg-zinc-900 border border-red-200 dark:border-red-900/50 p-6 rounded-3xl shadow-sm flex flex-col justify-between h-full">
           <div>
             <h3 className="font-bold text-slate-900 dark:text-zinc-100 text-base">Wipe Synced Documents</h3>
@@ -145,7 +118,7 @@ export default function DangerZoneSettings() {
           </button>
         </div>
 
-        {/* Card 3: Wipe Rag Chat Logs */}
+        {/* Card 2: Wipe Rag Chat Logs */}
         <div className="bg-white dark:bg-zinc-900 border border-red-200 dark:border-red-900/50 p-6 rounded-3xl shadow-sm flex flex-col justify-between h-full">
           <div>
             <h3 className="font-bold text-slate-900 dark:text-zinc-100 text-base">Wipe Rag Chat Logs</h3>
@@ -172,7 +145,7 @@ export default function DangerZoneSettings() {
           </button>
         </div>
 
-        {/* Card 4: Wipe All Vulnerability Analysis */}
+        {/* Card 3: Wipe All Vulnerability Analysis */}
         <div className="bg-white dark:bg-zinc-900 border border-red-200 dark:border-red-900/50 p-6 rounded-3xl shadow-sm flex flex-col justify-between h-full">
           <div>
             <h3 className="font-bold text-slate-900 dark:text-zinc-100 text-base">Wipe Vulnerability Analysis</h3>
@@ -196,6 +169,33 @@ export default function DangerZoneSettings() {
             className="w-full mt-6 bg-orange-500 hover:bg-orange-600 text-white font-bold py-2.5 px-4 rounded-xl shadow-sm transition-colors text-sm"
           >
             Wipe  Vulnerability Analysis
+          </button>
+        </div>
+
+        {/* Card 4: Unlink Drive Folders */}
+        <div className="bg-white dark:bg-zinc-900 border border-red-200 dark:border-red-900/50 p-6 rounded-3xl shadow-sm flex flex-col justify-between h-full">
+          <div>
+            <h3 className="font-bold text-slate-900 dark:text-zinc-100 text-base">Unlink Drive Folders</h3>
+            <p className="text-sm text-slate-500 dark:text-zinc-400 mt-2">
+              Removes the Google Drive folder links from all tests and wipes their synchronized document metadata including LLM Vulnerabilities Analysis. Physical files in Google Drive are NOT deleted.
+            </p>
+          </div>
+          <button
+            onClick={() => {
+              setActionModal({
+                isOpen: true, variant: 'danger', confirmText: "Unlink Folders", title: "Unlink All Drive Folders",
+                message: "Are you sure you want to unlink all Google Drive folders and wipe the document cache? Links will have to be manually re-established for each test.",
+                onConfirm: async () => {
+                  try {
+                    await axios.delete('/api/danger/tests/wipe-google-drive-workspace');
+                    toast.success("Drive folders unlinked and documents wiped.");
+                  } catch (err) { toast.error("Failed to wipe drive folders."); }
+                }
+              });
+            }}
+            className="w-full mt-6 bg-red-500 hover:bg-red-600 text-white font-bold py-2.5 px-4 rounded-xl shadow-sm transition-colors text-sm"
+          >
+            Unlink Folders
           </button>
         </div>
 

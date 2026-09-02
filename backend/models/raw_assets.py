@@ -40,6 +40,7 @@ class RawAssets(Base):
     kiss24_asset_id = Column(String, nullable=True)
     is_kpi = Column(Boolean, default=False)
     is_critical = Column(Boolean, default=False)
+    snow_active = Column(Boolean, default=False)
 
     # relashionship
     asset_types = relationship("AssetTypes", back_populates="raw_assets")
@@ -62,3 +63,16 @@ class RawAssetsSnowMetadata(Base):
 
     # relashionship
     raw_asset = relationship("RawAssets", back_populates="snow_metadata")
+
+
+class AssetCriteria(Base):
+    __tablename__ = 'asset_criteria'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    year = Column(Integer, unique=True, nullable=False)
+    criticality_threshold = Column(Integer, nullable=False, default=8)
+
+    # Stores dynamic rules like: [{"field": "environment", "operator": "==", "value": "Production"}]
+    kpi_rules = Column(JSONB, nullable=False, server_default='[]')
+
+    updated_at = Column(DateTime(timezone=True), default=aware_utcnow, onupdate=aware_utcnow)

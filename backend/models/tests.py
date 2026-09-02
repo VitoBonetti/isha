@@ -42,7 +42,7 @@ class Tests(Base):
     test_history = relationship("TestHistory", back_populates="tests", cascade="all, delete-orphan")
     secret_notes = relationship("SecretNotes", back_populates="tests")
     documents = relationship("TestDocuments", back_populates="tests", cascade="all, delete-orphan")
-    document_chuncks = relationship("DocumentChunks", back_populates="tests")
+    document_chunks = relationship("DocumentChunk", back_populates="tests")
     rag_chat_logs = relationship("RagChatLogs", back_populates="tests")
 
 
@@ -62,7 +62,7 @@ class TestDocuments(Base):
 
     # relationships
     tests = relationship("Tests", back_populates="documents")
-    document_chuncks = relationship("DocumentChunks", back_populates="documents")
+    document_chunks = relationship("DocumentChunk", back_populates="documents")
 
 
 class DocumentChunk(Base):

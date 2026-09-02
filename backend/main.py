@@ -11,7 +11,7 @@ import json
 from jose import jwt, JWTError
 from routers import (
     auth, services, users, regions, countries, assets, tests, board, logs, locations, insights, contacts, luigi,
-    kiss24, danger, documents, rag
+    kiss24, danger, documents, rag, kpi_criteria
 )
 from routers.rag import start_nightly_rag_scheduler
 from routers.auth import require_admin, get_google_public_keys
@@ -104,6 +104,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 # Register the routes
 app.include_router(assets.router)
+app.include_router(kpi_criteria.router)
 app.include_router(auth.router)
 app.include_router(board.router)
 app.include_router(contacts.router)

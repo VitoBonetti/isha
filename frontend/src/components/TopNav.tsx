@@ -10,7 +10,7 @@ import E2EEKeyModal from './Modals/E2EEKeyModal';
 import {
   Sun, Moon, Laptop, LogOut, Bell,
   SprayCan, Snail, SunMoon, Fingerprint, Rabbit, Cat, Shell, Turtle, Radar, HandMetal, Drum, TentTree,
-  Wifi, WifiOff, Loader2, Key, LockOpen, Lock, Menu, X, Feather, PawPrint, Origami, KeySquare
+  Wifi, WifiOff, Loader2, Key, LockOpen, Lock, Menu, X, Feather, PawPrint, Origami, KeySquare, BellElectric, Siren
 } from 'lucide-react';
 
 export default function TopNav() {
@@ -35,7 +35,7 @@ export default function TopNav() {
   const [isMeetingModalOpen, setIsMeetingModalOpen] = useState(false);
 
   // Rotating Logo Icons Logic
-  const logoIcons = [SprayCan, Snail, SunMoon, Fingerprint, Rabbit, Cat, Shell, Turtle, Radar, HandMetal, Drum, TentTree, Wifi, WifiOff, LockOpen, Lock, Feather, PawPrint, Origami];
+  const logoIcons = [SprayCan, Snail, SunMoon, Fingerprint, Rabbit, Cat, Shell, Turtle, Radar, HandMetal, Drum, TentTree, Wifi, WifiOff, LockOpen, Lock, Feather, PawPrint, Origami, BellElectric, Siren];
   const ICON_ROTATION_TIME = 1000 * 60 * 5;
   const iconIndex = Math.floor(Date.now() / ICON_ROTATION_TIME) % logoIcons.length;
   const LogoIcon = logoIcons[iconIndex];
@@ -207,7 +207,7 @@ export default function TopNav() {
             onClick={() => setShowNotifications(!showNotifications)}
             className="text-slate-500 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-100 transition-colors relative flex items-center p-1"
           >
-            <Bell className="h-4 w-4" />
+            <BellElectric className="h-4 w-4" />
             {unreadCount > 0 && (
               <span className="absolute -top-1 -right-0.5 h-2.5 w-2.5 rounded-full bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.8)] border-2 border-white dark:border-zinc-950"></span>
             )}

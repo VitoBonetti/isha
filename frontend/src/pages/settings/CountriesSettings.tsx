@@ -16,7 +16,7 @@ const Toggle = ({ checked, onChange, label, disabled = false }: { checked: boole
   </label>
 );
 
-const defaultCountryForm = { code: '', name: '', region_id: '', is_active: true, kiss24_uuid: '' };
+const defaultCountryForm = { code: '', name: '', region_id: '', is_active: true, kiss24_uuid: '', is_team: false };
 
 export default function CountriesSettings() {
   const { countries, regions, handleSave, handleDelete, isLoading } = useSettings();
@@ -59,7 +59,8 @@ export default function CountriesSettings() {
       name: c.name,
       region_id: c.region_id || '',
       is_active: c.is_active,
-      kiss24_uuid: c.kiss24_uuid || ''
+      kiss24_uuid: c.kiss24_uuid || '',
+      is_team: c.is_team
     });
     setIsPanelOpen(true);
   };
@@ -287,6 +288,10 @@ export default function CountriesSettings() {
 
                 <div className="pt-4 border-t border-slate-100 dark:border-zinc-800">
                   <Toggle checked={countryForm.is_active} onChange={(c) => setCountryForm({ ...countryForm, is_active: c })} label="Country is Active" />
+                </div>
+
+                <div className="pt-4 border-t border-slate-100 dark:border-zinc-800">
+                  <Toggle checked={countryForm.is_team} onChange={(c) => setCountryForm({ ...countryForm, is_team: c })} label="Team Use Country" />
                 </div>
 
                 <div className="fixed bottom-0 right-0 w-full max-w-md p-6 bg-white dark:bg-zinc-900 border-t border-slate-100 dark:border-zinc-800 flex justify-end gap-3 z-10">

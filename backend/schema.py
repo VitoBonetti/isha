@@ -1,5 +1,5 @@
 from pydantic import BaseModel, EmailStr, UUID4, Field
-from typing import Optional, List
+from typing import Optional, List, Any
 from datetime import date, datetime
 from enum import Enum
 
@@ -34,6 +34,7 @@ class CountryBase(BaseModel):
     region_id: Optional[UUID4] = None
     is_active: bool = True
     kiss24_uuid: Optional[str] = None
+    is_team: bool = False
 
 class CountryResponse(CountryBase):
     id: UUID4
@@ -321,3 +322,20 @@ class RagChatBulkDeleteRequest(BaseModel):
 
 class FeedbackRequest(BaseModel):
     is_good: bool
+
+# KPI criterias
+class KPIRule(BaseModel):
+    field: str
+    operator: str # '==', '!=', 'in', '>', '<', 'contains', 'is_null', 'is_not_null'
+    value: Optional[Any] = None  # Allow null values for empty checks
+
+class AssetCriteriaBase(BaseModel):
+    year: int
+    criticality_threshold: int
+    kpi_rules: List[KPIRule]
+
+class AssetCriteriaResponse(AssetCriteriaBase):
+    id: UUID4
+
+class EvaluateCriteriaRequest(BaseModel):
+    raw_asset_ids: Optional[List[UUID4]] = None # If empty, evaluates all assets

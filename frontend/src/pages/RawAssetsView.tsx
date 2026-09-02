@@ -33,7 +33,8 @@ export default function RawAssetsView() {
   const [showFilters, setShowFilters] = useState(false);
   const [filters, setFilters] = useState({
     country: "", service: "", category: "", status: "",
-    asset_type: "", facing_internet: "", business_critical: ""
+    asset_type: "", facing_internet: "", business_critical: "",
+    is_kpi: "", is_critical: ""
   });
   const [totalPages, setTotalPages] = useState(1);
 
@@ -94,6 +95,8 @@ export default function RawAssetsView() {
       if (filters.asset_type) params.asset_type_id = filters.asset_type;
       if (filters.facing_internet !== "") params.facing_internet = filters.facing_internet;
       if (filters.business_critical) params.business_critical = filters.business_critical;
+      if (filters.is_kpi !== "") params.is_kpi = filters.is_kpi;
+      if (filters.is_critical !== "") params.is_critical = filters.is_critical;
 
       const res = await axios.get("/api/assets/raw", { params });
       setAssets(res.data.items);
@@ -223,15 +226,17 @@ export default function RawAssetsView() {
             <div className="space-y-4">
               <div><label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Service Lane</label><select className="w-full p-2.5 md:p-2 border border-slate-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-sm" value={filters.service} onChange={e => {setFilters({...filters, service: e.target.value, category: ""}); setPage(1);}}><option value="">All Services</option>{services.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
               <div><label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Category</label><select className="w-full p-2.5 md:p-2 border border-slate-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 disabled:opacity-50 text-sm" value={filters.category} onChange={e => {setFilters({...filters, category: e.target.value}); setPage(1);}} disabled={!filters.service}><option value="">All Categories</option>{filteredCategories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
+              <div><label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Is KPI</label><select className="w-full p-2.5 md:p-2 border border-slate-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-sm" value={filters.is_kpi} onChange={e => {setFilters({...filters, is_kpi: e.target.value}); setPage(1);}}><option value="">Any</option><option value="true">Yes</option><option value="false">No</option></select></div>
             </div>
 
             <div className="space-y-4">
               <div><label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Internet Facing</label><select className="w-full p-2.5 md:p-2 border border-slate-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-sm" value={filters.facing_internet} onChange={e => {setFilters({...filters, facing_internet: e.target.value}); setPage(1);}}><option value="">Any</option><option value="true">Yes</option><option value="false">No</option></select></div>
               <div><label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Min. Business Criticality (≥)</label><input type="number" min="0" max="9" placeholder="0-9" className="w-full p-2.5 md:p-2 border border-slate-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-sm" value={filters.business_critical} onChange={e => {setFilters({...filters, business_critical: e.target.value}); setPage(1);}} /></div>
+              <div><label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Is Critical</label><select className="w-full p-2.5 md:p-2 border border-slate-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-sm" value={filters.is_critical} onChange={e => {setFilters({...filters, is_critical: e.target.value}); setPage(1);}}><option value="">Any</option><option value="true">Yes</option><option value="false">No</option></select></div>
             </div>
 
             <div className="sm:col-span-3 flex justify-end mt-2 pt-4 border-t border-slate-100 dark:border-zinc-800">
-              <button onClick={() => {setFilters({country: "", service: "", category: "", status: "", asset_type: "", facing_internet: "", business_critical: ""}); setPage(1);}} className="text-sm text-blue-500 font-bold hover:text-blue-600 p-2">Clear All Filters</button>
+              <button onClick={() => {setFilters({country: "", service: "", category: "", status: "", asset_type: "", facing_internet: "", business_critical: "", is_kpi: "", is_critical: ""}); setPage(1);}} className="text-sm text-blue-500 font-bold hover:text-blue-600 p-2">Clear All Filters</button>
             </div>
           </div>
         )}

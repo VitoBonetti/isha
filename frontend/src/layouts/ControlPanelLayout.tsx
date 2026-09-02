@@ -3,8 +3,8 @@ import { Outlet, NavLink } from 'react-router-dom';
 import TopNav from '../components/TopNav';
 import {
   Users, MapPin, LayoutTemplate, Activity, Tags, Globe, Flag, KeySquare,
-  Server, BookUser, ShieldCheck, CloudSync, AlertTriangle, LayoutDashboard, GitMerge
-} from 'lucide-react';
+  Server, BookUser, ShieldCheck, CloudSync, AlertTriangle, LayoutDashboard, GitMerge, Filter
+} from 'lucide-react';;
 
 export default function ControlPanelLayout() {
   const navItems = [
@@ -12,6 +12,7 @@ export default function ControlPanelLayout() {
     { path: "/settings/users", label: "Users", icon: Users },
     { path: "/settings/locations", label: "Locations", icon: MapPin },
     { path: "/settings/asset-types", label: "Asset Types", icon: LayoutTemplate },
+    { path: "/settings/asset-criteria", label: "KPI Criteria", icon: Filter },
     { path: "/settings/services", label: "Services", icon: Activity },
     { path: "/settings/categories", label: "Categories", icon: Tags },
     { path: "/settings/regions", label: "Regions", icon: Globe },

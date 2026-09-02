@@ -228,6 +228,10 @@ def process_and_sync_snow_data(db: Session, snow_records: list, user_id: str, us
         facing_internet_str = item.pop("u_internet_facing", "")
         facing_internet = True if facing_internet_str and facing_internet_str.lower() == "yes" else False
 
+        # Extract and cast the 'active' field, removing it from the leftover JSON
+        active_str = item.pop("active", "")
+        snow_active = True if str(active_str).lower() == "true" else False
+
         # update_date (We leave the string intact or you can parse it to datetime if needed)
         update_date = item.pop("last_change_date", None)
 
@@ -244,7 +248,8 @@ def process_and_sync_snow_data(db: Session, snow_records: list, user_id: str, us
             availability_rating=availability_rating,
             facing_internet=facing_internet,
             country_id=country_id,
-            snow_number=snow_number
+            snow_number=snow_number,
+            snow_active=snow_active
         )
 
         # Define what happens if the ID already exists (Update the fields)
@@ -260,7 +265,8 @@ def process_and_sync_snow_data(db: Session, snow_records: list, user_id: str, us
                 'availability_rating': raw_asset_stmt.excluded.availability_rating,
                 'facing_internet': raw_asset_stmt.excluded.facing_internet,
                 'country_id': raw_asset_stmt.excluded.country_id,
-                'snow_number': raw_asset_stmt.excluded.snow_number
+                'snow_number': raw_asset_stmt.excluded.snow_number,
+                'snow_active': raw_asset_stmt.excluded.snow_active
             }
         )
         db.execute(raw_asset_stmt)

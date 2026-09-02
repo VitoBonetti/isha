@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Plus, ShieldAlert, Globe } from 'lucide-react';
+import { X, Plus, ShieldAlert, Globe, Activity, AlertTriangle } from 'lucide-react';
 import axios from 'axios';
 import toast from 'react-hot-toast';
 
@@ -20,6 +20,8 @@ export default function AddRawAssetModal({ isOpen, onClose, onSuccess, countries
     asset_type_id: "",
     facing_internet: false,
     duplicate_allowed: false,
+    is_kpi: false,
+    is_critical: false,
     country_id: "",
     service_forecast_id: "",
     category_id: "",
@@ -51,7 +53,7 @@ export default function AddRawAssetModal({ isOpen, onClose, onSuccess, countries
       await axios.post('/api/assets/raw', payload);
       toast.success("Asset added successfully!");
 
-      setNewAsset({ name: "", description: "", asset_type_id: "", facing_internet: false, duplicate_allowed: false, country_id: "", service_forecast_id: "", category_id: "", confidentiality_rating: 0, integrity_rating: 0, availability_rating: 0 });
+      setNewAsset({ name: "", description: "", asset_type_id: "", facing_internet: false, duplicate_allowed: false, is_kpi: false, is_critical: false, country_id: "", service_forecast_id: "", category_id: "", confidentiality_rating: 0, integrity_rating: 0, availability_rating: 0 });
       onSuccess();
       onClose();
     } catch (error) {
@@ -95,7 +97,7 @@ export default function AddRawAssetModal({ isOpen, onClose, onSuccess, countries
             <textarea className={`${inputClasses} resize-none h-20`} value={newAsset.description} onChange={e => setNewAsset({...newAsset, description: e.target.value})} placeholder="Brief overview of the asset..." />
           </div>
 
-          {/* Toggle Buttons Container */}
+          {/* Toggle Buttons Container - 4 Grid Layout */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
             <label className="flex items-center gap-3 p-3 bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-lg cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800/50 transition-colors">
               <input type="checkbox" className="h-4 w-4 rounded text-emerald-500 border-slate-300 flex-shrink-0" checked={newAsset.facing_internet} onChange={e => setNewAsset({...newAsset, facing_internet: e.target.checked})} />
@@ -109,6 +111,20 @@ export default function AddRawAssetModal({ isOpen, onClose, onSuccess, countries
               <div className="flex flex-col">
                 <span className="text-sm font-bold text-slate-700 dark:text-zinc-300 flex items-center gap-2">Allow Duplicates</span>
                 <span className="text-xs text-slate-500 leading-tight mt-0.5">Permit concurrent active tests.</span>
+              </div>
+            </label>
+            <label className="flex items-center gap-3 p-3 bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-lg cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800/50 transition-colors">
+              <input type="checkbox" className="h-4 w-4 rounded text-purple-500 border-slate-300 flex-shrink-0" checked={newAsset.is_kpi} onChange={e => setNewAsset({...newAsset, is_kpi: e.target.checked})} />
+              <div className="flex flex-col">
+                <span className="text-sm font-bold text-slate-700 dark:text-zinc-300 flex items-center gap-2"><Activity size={14}/> Is KPI</span>
+                <span className="text-xs text-slate-500 leading-tight mt-0.5">Manual override for KPI rules.</span>
+              </div>
+            </label>
+            <label className="flex items-center gap-3 p-3 bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-lg cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800/50 transition-colors">
+              <input type="checkbox" className="h-4 w-4 rounded text-red-500 border-slate-300 flex-shrink-0" checked={newAsset.is_critical} onChange={e => setNewAsset({...newAsset, is_critical: e.target.checked})} />
+              <div className="flex flex-col">
+                <span className="text-sm font-bold text-slate-700 dark:text-zinc-300 flex items-center gap-2"><AlertTriangle size={14}/> Is Critical</span>
+                <span className="text-xs text-slate-500 leading-tight mt-0.5">Flag as a business critical asset.</span>
               </div>
             </label>
           </div>
