@@ -174,7 +174,6 @@ def get_raw_assets(
     if business_critical is not None:
         where_clauses.append("r.business_critical >= %s")
         params.append(business_critical)
-
     if is_kpi is not None:
         where_clauses.append("r.is_kpi = %s")
         params.append(is_kpi)

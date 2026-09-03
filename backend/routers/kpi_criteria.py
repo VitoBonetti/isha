@@ -238,6 +238,19 @@ def evaluate_assets(year: int, req: EvaluateCriteriaRequest, current_user: dict 
 def dashboard_data(current_user: dict = Depends(require_admin),
                     cursor=Depends(get_db_cursor)):
     cursor.execute("""
+    SELECT COUNT(*) FROM tests t
+    LEFT JOIN services_lanes sl ON t.service_lane_id = sl.id
+    LEFT JOIN test_assets ta ON t.id = ta.test_id
+    LEFT JOIN assets a ON ta.asset_id = a.id
+    LEFT JOIN raw_assets ra ON a.raw_asset_id = ra.id
+    LEFT JOIN asset_types at ON ra.asset_type_id = at.id
+    LEFT JOIN countries c ON ra.country_id = c.id
+    WHERE (c.is_team = FALSE OR c.is_team IS NULL) AND sl.auto_provision_workspace = TRUE AND ra.is_kpi = TRUE 
+    AND t.stages != 'STOPPED'
+    """)
+    total_count = cursor.fetchone()[0]
+
+    cursor.execute("""
     SELECT t.name as Name, sl.name as Service, ra.id as Inventory_Id, ra.snow_number as ID, c.code, at.name as Type, 
     ra.snow_active as Status, ra.business_critical, ra.confidentiality_rating, ra.integrity_rating, 
     ra.availability_rating, ra.facing_internet, t.start_week, t.start_year, t.stages, ra.is_kpi, ra.is_critical 
@@ -252,4 +265,6 @@ def dashboard_data(current_user: dict = Depends(require_admin),
     AND t.stages != 'STOPPED'
     """)
     columns = [col[0] for col in cursor.description]
-    return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+    items = [dict(zip(columns, row)) for row in cursor.fetchall()]
+    return {"items": items, "total_count": total_count}

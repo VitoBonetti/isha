@@ -445,7 +445,7 @@ export default function PlannerView({
                                                         <FolderOpen size={14} />
                                                       </a>
                                                     ) : (
-                                                      currentUser?.role === 'admin' && service?.auto_provision_workspace && (
+                                                      !isReadOnly && service?.auto_provision_workspace && (
                                                         <button
                                                           title="Create Drive Workspace"
                                                           className="p-1.5 flex items-center justify-center rounded text-slate-400 hover:text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 transition-colors"

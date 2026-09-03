@@ -366,7 +366,7 @@ export default function TestDetailsView() {
                           <a href={test.drive_folder_url} target="_blank" rel="noopener noreferrer" className="px-3 py-1.5 text-blue-600 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 border border-blue-200 dark:border-blue-900/50 rounded-lg transition-colors flex items-center gap-2 text-xs font-bold" title="Open Workspace">
                             <FolderOpen size={14} /> <span className="hidden sm:inline">Workspace</span>
                           </a>
-                        ) : isAdmin && (
+                        ) : !isReadOnly && (
                           <button onClick={handleCreateWorkspace} className="px-3 py-1.5 text-slate-500 bg-slate-100 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors flex items-center gap-2 text-xs font-bold">
                             <FolderPlus size={14} /> <span className="hidden sm:inline">Create Workspace</span>
                           </button>

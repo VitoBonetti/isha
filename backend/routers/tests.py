@@ -864,9 +864,9 @@ def bulk_create_tests(req: BulkTestCreate, background_tasks: BackgroundTasks,
     return {"message": f"Generating {len(req.asset_ids)} tests from active pool."}
 
 
-@router.post("/{test_id}/workspace", summary="[Admin Only] Create workspace on Google for each test")
+@router.post("/{test_id}/workspace", summary="Create workspace on Google for each test")
 def provision_workspace_manually(test_id: str, background_tasks: BackgroundTasks,
-                                 current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+                                 current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
     """
     Admin Only Endpoint to create new workspace on Google for each test
     """
@@ -891,6 +891,15 @@ def provision_workspace_manually(test_id: str, background_tasks: BackgroundTasks
     # Run the provisioner in the background. It will automatically broadcast a REFRESH_BOARD event when done!
     background_tasks.add_task(background_provision_workspace, test_id, target_year, service_name, country_name,
                               test_name)
+
+    log_audit_event(
+        user_id=str(current_user["id"]),
+        role=current_user["role"],
+        action="PROVISIONING_GOOGLE_WORKSPACE_MANUALLY",
+        resource_type="TESTS",
+        resource_id=str(test_id),
+        details=f"Google Workspace for {test_name} ID: {test_id} was provisioned."
+    )
 
     return {"message": "Workspace provisioning started."}
 
