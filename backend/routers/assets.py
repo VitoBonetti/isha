@@ -140,7 +140,7 @@ def get_raw_assets(
         page: int = Query(1, ge=1), limit: int = Query(50, ge=1, le=500),
         search: Optional[str] = None, country_id: Optional[str] = None,
         service_id: Optional[str] = None, category_id: Optional[str] = None,
-        asset_type_id: Optional[str] = None, facing_internet: Optional[bool] = None,
+        asset_type_id: Optional[str] = None, facing_internet: Optional[str] = None,
         business_critical: Optional[int] = None, status: Optional[str] = None,
         is_kpi: Optional[bool] = None, is_critical: Optional[bool] = None,
         sort_by: Optional[str] = "name", sort_dir: Optional[str] = "asc",
@@ -168,9 +168,12 @@ def get_raw_assets(
     if asset_type_id:
         where_clauses.append("r.asset_type_id = %s")
         params.append(asset_type_id)
-    if facing_internet is not None:
-        where_clauses.append("r.facing_internet = %s")
-        params.append(facing_internet)
+    if facing_internet == 'true':
+        where_clauses.append("r.facing_internet = true")
+    elif facing_internet == 'false':
+        where_clauses.append("r.facing_internet = false")
+    elif facing_internet == 'null':
+        where_clauses.append("r.facing_internet IS NULL")
     if business_critical is not None:
         where_clauses.append("r.business_critical >= %s")
         params.append(business_critical)
@@ -714,7 +717,11 @@ def process_excel_import_sync(contents: bytes, filename: str, current_user: dict
 
                 raw_internet_val = str(row.get('Facing Internet', '')).strip().lower()
                 internet_val = sanitize_csv_injection(raw_internet_val)
-                facing_internet = internet_val in ['true', 'yes', '1', 'y']
+
+                if not internet_val:
+                    facing_internet = None
+                else:
+                    facing_internet = internet_val in ['true', 'yes', '1', 'y']
 
                 try:
                     c_val = int(row.get('Confidentiality', 0))

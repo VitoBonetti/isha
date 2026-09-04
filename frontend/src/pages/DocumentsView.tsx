@@ -15,6 +15,7 @@ export default function DocumentsView() {
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [filterService, setFilterService] = useState("");
   const [totalPages, setTotalPages] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
 
   // Sorting
   const [sortBy, setSortBy] = useState("synced_at");
@@ -43,6 +44,7 @@ export default function DocumentsView() {
       const res = await axios.get("/api/documents/", { params });
       setDocuments(res.data.items);
       setTotalPages(Math.ceil(res.data.total_count / 20) || 1);
+      setTotalCount(res.data.total_count);
     } catch (error) {
       toast.error("Failed to fetch documents");
     } finally {
@@ -69,10 +71,17 @@ export default function DocumentsView() {
     <div className="w-full animate-in fade-in zoom-in-95 duration-200">
       <Toaster position="bottom-right" />
 
-      <h1 className="text-2xl font-extrabold flex items-center gap-2">
-        <Files size={28} className="text-blue-500" />
-        Document Directory
-      </h1>
+      <div className="flex items-center gap-3">
+        <h1 className="text-2xl font-extrabold flex items-center gap-2">
+            <Files size={28} className="text-blue-500" />
+            Document Directory
+        </h1>
+        {!loading && (
+          <span className="bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400 text-xs font-bold px-2.5 py-1 rounded-full border border-slate-200 dark:border-zinc-700 shadow-sm mt-1">
+            {totalCount} Found
+          </span>
+        )}
+      </div>
       <p className="text-slate-500 dark:text-zinc-400 mb-6 md:mb-8 text-sm md:text-base">
         Global index of all synchronized Google Drive files across tests.
       </p>

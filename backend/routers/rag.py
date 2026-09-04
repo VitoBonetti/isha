@@ -167,6 +167,7 @@ def process_test_documents_background(test_id: str, user_id: str, user_role: str
                 details=f"RAG Sync failed for test {test_id}: {str(e)}"
             )
 
+
 @router.get("/", summary="[Admin] Testing endpoint for check the chunck")
 def check_chunks(current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     cursor.execute("""
@@ -259,8 +260,8 @@ async def start_nightly_rag_scheduler():
         sleep_seconds = (target - now).total_seconds()
         await asyncio.sleep(sleep_seconds)
 
-        # Execute the sync
-        sync_all_active_tests_background("SYSTEM", "SYSTEM")
+        # Execute the sync in a background thread to prevent freezing FastAPI
+        await asyncio.to_thread(sync_all_active_tests_background, "SYSTEM", "SYSTEM")
 
 
 # --- CHATS ---

@@ -37,6 +37,7 @@ export default function RawAssetsView() {
     is_kpi: "", is_critical: ""
   });
   const [totalPages, setTotalPages] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
 
   // Modal & Selection State
   const [showAddModal, setShowAddModal] = useState(false);
@@ -101,6 +102,7 @@ export default function RawAssetsView() {
       const res = await axios.get("/api/assets/raw", { params });
       setAssets(res.data.items);
       setTotalPages(Math.ceil(res.data.total_count / 20) || 1);
+      setTotalCount(res.data.total_count);
     } catch (error) {
       toast.error("Failed to fetch raw assets");
     } finally {
@@ -176,10 +178,17 @@ export default function RawAssetsView() {
         onCancel={() => setConfirmModal({ ...confirmModal, isOpen: false })}
       />
 
-      <h1 className="text-2xl font-extrabold flex items-center gap-2">
-        <Database size={28} className="text-slate-500" />
-        Raw Assets
-      </h1>
+      <div className="flex items-center gap-3">
+        <h1 className="text-2xl font-extrabold flex items-center gap-2">
+          <Database size={28} className="text-slate-500" />
+          Raw Assets
+        </h1>
+        {!loading && (
+          <span className="bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400 text-xs font-bold px-2.5 py-1 rounded-full border border-slate-200 dark:border-zinc-700 shadow-sm mt-1">
+            {totalCount} Found
+          </span>
+        )}
+      </div>
       <p className="text-slate-500 dark:text-zinc-400 mb-6 md:mb-8 text-sm md:text-base">Unprocessed assets ready for review and promotion.</p>
 
       {/* Toolbar - Fully Stackable */}
@@ -230,7 +239,19 @@ export default function RawAssetsView() {
             </div>
 
             <div className="space-y-4">
-              <div><label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Internet Facing</label><select className="w-full p-2.5 md:p-2 border border-slate-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-sm" value={filters.facing_internet} onChange={e => {setFilters({...filters, facing_internet: e.target.value}); setPage(1);}}><option value="">Any</option><option value="true">Yes</option><option value="false">No</option></select></div>
+              <div>
+                <label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Internet Facing</label>
+                <select
+                  className="w-full p-2.5 md:p-2 border border-slate-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-sm"
+                  value={filters.facing_internet}
+                  onChange={e => {setFilters({...filters, facing_internet: e.target.value}); setPage(1);}}
+                >
+                  <option value="">Any</option>
+                  <option value="true">Yes</option>
+                  <option value="false">No</option>
+                  <option value="null">Unknown</option>
+                </select>
+              </div>
               <div><label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Min. Business Criticality (≥)</label><input type="number" min="0" max="9" placeholder="0-9" className="w-full p-2.5 md:p-2 border border-slate-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-sm" value={filters.business_critical} onChange={e => {setFilters({...filters, business_critical: e.target.value}); setPage(1);}} /></div>
               <div><label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Is Critical</label><select className="w-full p-2.5 md:p-2 border border-slate-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-sm" value={filters.is_critical} onChange={e => {setFilters({...filters, is_critical: e.target.value}); setPage(1);}}><option value="">Any</option><option value="true">Yes</option><option value="false">No</option></select></div>
             </div>

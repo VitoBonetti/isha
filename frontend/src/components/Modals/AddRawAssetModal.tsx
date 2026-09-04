@@ -18,7 +18,7 @@ export default function AddRawAssetModal({ isOpen, onClose, onSuccess, countries
     name: "",
     description: "",
     asset_type_id: "",
-    facing_internet: false,
+    facing_internet: null as boolean | null,
     duplicate_allowed: false,
     is_kpi: false,
     is_critical: false,
@@ -99,13 +99,24 @@ export default function AddRawAssetModal({ isOpen, onClose, onSuccess, countries
 
           {/* Toggle Buttons Container - 4 Grid Layout */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-            <label className="flex items-center gap-3 p-3 bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-lg cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800/50 transition-colors">
-              <input type="checkbox" className="h-4 w-4 rounded text-emerald-500 border-slate-300 flex-shrink-0" checked={newAsset.facing_internet} onChange={e => setNewAsset({...newAsset, facing_internet: e.target.checked})} />
+            <div className="flex items-center justify-between p-3 bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-lg transition-colors">
               <div className="flex flex-col">
                 <span className="text-sm font-bold text-slate-700 dark:text-zinc-300 flex items-center gap-2"><Globe size={14}/> Facing Internet</span>
                 <span className="text-xs text-slate-500 leading-tight mt-0.5">Accessible externally without VPN.</span>
               </div>
-            </label>
+              <select
+                className="ml-2 p-1.5 border border-slate-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-900 text-xs font-bold text-slate-700 dark:text-zinc-300 outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer"
+                value={newAsset.facing_internet === null ? "" : String(newAsset.facing_internet)}
+                onChange={e => {
+                  const val = e.target.value;
+                  setNewAsset({...newAsset, facing_internet: val === "" ? null : val === "true"});
+                }}
+              >
+                <option value="">Unknown</option>
+                <option value="true">Yes</option>
+                <option value="false">No</option>
+              </select>
+            </div>
             <label className="flex items-center gap-3 p-3 bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-lg cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800/50 transition-colors">
               <input type="checkbox" className="h-4 w-4 rounded text-blue-500 border-slate-300 flex-shrink-0" checked={newAsset.duplicate_allowed} onChange={e => setNewAsset({...newAsset, duplicate_allowed: e.target.checked})} />
               <div className="flex flex-col">

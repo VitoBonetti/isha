@@ -372,6 +372,12 @@ export default function AssetCriteriaSettings() {
                                   <option value="true">True</option>
                                   <option value="false">False</option>
                                 </select>
+                              ) : rule.field === 'facing_internet' ? (
+                                <select value={String(rule.value || '')} onChange={(e) => handleRuleChange(idx, 'value', e.target.value)} className={inputClasses} required>
+                                  <option value="" disabled>Select Status...</option>
+                                  <option value="true">Yes</option>
+                                  <option value="false">No</option>
+                                </select>
                               ) : isRelation ? (
                                 isInOp ? (
                                   <CustomMultiSelect

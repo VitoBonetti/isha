@@ -28,7 +28,7 @@ class RawAssets(Base):
     confidentiality_rating = Column(Integer)
     integrity_rating = Column(Integer)
     availability_rating = Column(Integer)
-    facing_internet = Column(Boolean, default=False)
+    facing_internet = Column(Boolean, nullable=True)
     country_id = Column(UUID(as_uuid=True), ForeignKey('countries.id', ondelete='CASCADE'), nullable=False)
     service_forecast_id = Column(UUID(as_uuid=True), ForeignKey('services_lanes.id', ondelete='SET NULL'), nullable=True)
     category_id = Column(UUID(as_uuid=True), ForeignKey('service_categories.id', ondelete='SET NULL'), nullable=True)

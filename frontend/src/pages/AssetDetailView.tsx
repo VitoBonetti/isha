@@ -103,7 +103,7 @@ export default function AssetDetailView() {
     try {
       const payload = {
         ...asset,
-        facing_internet: !!asset.facing_internet,
+        facing_internet: asset.facing_internet === "" || asset.facing_internet === null ? null : asset.facing_internet === true || asset.facing_internet === "true",
         duplicate_allowed: !!asset.duplicate_allowed,
         is_kpi: !!asset.is_kpi,
         is_critical: !!asset.is_critical,
@@ -285,10 +285,30 @@ export default function AssetDetailView() {
               <div className="sm:col-span-2 grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
                 <div className="w-full">
                   <SyncLabel label="Facing Internet" />
-                  <label className={`flex items-center w-full gap-3 p-3 rounded-lg transition-colors ${isEditing ? 'bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800/50' : 'bg-transparent'}`}>
-                    <input type="checkbox" disabled={!isEditing} className="h-4 w-4 rounded text-emerald-500 border-slate-300 disabled:opacity-70" checked={asset.facing_internet} onChange={e => setAsset({...asset, facing_internet: e.target.checked})} />
-                    <span className="text-sm font-bold text-slate-700 dark:text-zinc-300 pr-2">Yes</span>
-                  </label>
+                  {isEditing ? (
+                    <select
+                      className={`${inputClasses} mt-0`}
+                      value={asset.facing_internet === null ? "" : String(asset.facing_internet)}
+                      onChange={e => {
+                        const val = e.target.value;
+                        setAsset({...asset, facing_internet: val === "" ? null : val === "true"});
+                      }}
+                    >
+                      <option value="">Unknown</option>
+                      <option value="true">Yes</option>
+                      <option value="false">No</option>
+                    </select>
+                  ) : (
+                    <div className="mt-1 p-2.5 bg-slate-50 dark:bg-zinc-950/50 border border-slate-200 dark:border-zinc-800 rounded-lg flex items-center h-[42px]">
+                      {asset.facing_internet === null ? (
+                        <span className="px-2.5 py-0.5 bg-slate-200 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400 text-xs font-bold rounded-md uppercase tracking-wider">Unknown</span>
+                      ) : asset.facing_internet ? (
+                        <span className="px-2.5 py-0.5 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 text-xs font-bold rounded-md uppercase tracking-wider">Yes</span>
+                      ) : (
+                        <span className="px-2.5 py-0.5 bg-slate-200 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400 text-xs font-bold rounded-md uppercase tracking-wider">No</span>
+                      )}
+                    </div>
+                  )}
                 </div>
                 <div className="w-full">
                   <label className="text-sm font-bold text-slate-700 dark:text-zinc-300 block mb-1">Allow Duplicates</label>

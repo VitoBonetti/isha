@@ -53,7 +53,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Isha Core API",
     description="Backend engine for pentest planning and asset management.",
-    version="1.3.1",
+    version="1.5.0",
     swagger_ui_parameters={"defaultModelsExpandDepth": -1},
     lifespan=lifespan,
     docs_url="/api/docs",

@@ -225,8 +225,14 @@ def process_and_sync_snow_data(db: Session, snow_records: list, user_id: str, us
         availability_rating = safe_int(item.pop("u_availability", None))
 
         # Boolean casting
-        facing_internet_str = item.pop("u_internet_facing", "")
-        facing_internet = True if facing_internet_str and facing_internet_str.lower() == "yes" else False
+        facing_internet_str = item.pop("u_internet_facing", None)
+
+        if facing_internet_str is None or str(facing_internet_str).strip() == "":
+            facing_internet = None  # Leave as Unknown
+        elif str(facing_internet_str).lower() == "yes":
+            facing_internet = True  # Explicitly Yes
+        else:
+            facing_internet = False
 
         # Extract and cast the 'active' field, removing it from the leftover JSON
         active_str = item.pop("active", "")

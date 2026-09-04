@@ -19,7 +19,7 @@ def get_valid_fields(current_user: dict = Depends(require_admin)):
         {"name": "confidentiality_rating", "label": "Confidentiality Rating", "type": "number"},
         {"name": "integrity_rating", "label": "Integrity Rating", "type": "number"},
         {"name": "availability_rating", "label": "Availability Rating", "type": "number"},
-        {"name": "facing_internet", "label": "Internet Facing (True/False)", "type": "boolean"},
+        {"name": "facing_internet", "label": "Internet Facing (Yes/No/Unknown)", "type": "string"},
         {"name": "snow:application_type", "label": "Application Type (ServiceNow)", "type": "string"},
         {"name": "asset_type_id", "label": "Asset Type", "type": "relation", "endpoint": "/api/assets/types"},
         {"name": "country_id", "label": "Country", "type": "relation", "endpoint": "/api/countries/"},
@@ -34,6 +34,10 @@ def evaluate_kpi_rule(asset_value, operator: str, rule_value):
     # Force ServiceNow empty strings to behave exactly like database NULLs
     if asset_value == "":
         asset_value = None
+
+    # Cast boolean asset values to lowercase strings so "true" / "false" string rules work
+    if isinstance(asset_value, bool):
+        asset_value = str(asset_value).lower()
 
     if operator == 'is_null': return asset_value is None
     if operator == 'is_not_null': return asset_value is not None

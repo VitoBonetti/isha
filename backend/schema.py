@@ -117,7 +117,7 @@ class RawAssetCreate(AssetBase):
     confidentiality_rating: Optional[int] = None
     integrity_rating: Optional[int] = None
     availability_rating: Optional[int] = None
-    facing_internet: bool = False
+    facing_internet: Optional[bool] = None
     duplicate_allowed: bool = False
     snow_number: Optional[str] = None
     team_note: Optional[str] = None
