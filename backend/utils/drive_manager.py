@@ -70,7 +70,7 @@ class DriveManager:
             return []
 
     def sync_global_knowledge_base(self):
-        """Indexes files from the global knowledge base folder."""
+        """Indexes files from the global knowledge base folder and removes deleted orphans."""
         kb_folder_id = os.getenv('KNOWLEDGE_BASE_FOLDER_ID')
 
         if not kb_folder_id:
@@ -83,6 +83,7 @@ class DriveManager:
                 f"Drive scanner found 0 files in folder {kb_folder_id}. Check permissions or folder contents.")
 
         with db_cursor_context() as cursor:
+            # 1. Upsert files that currently exist in Drive
             for f in files:
                 mod_time = datetime.strptime(f['modifiedTime'],
                                              "%Y-%m-%dT%H:%M:%S.%fZ") if 'modifiedTime' in f else datetime.now()
@@ -94,6 +95,31 @@ class DriveManager:
                         file_name = EXCLUDED.file_name, file_url = EXCLUDED.file_url, last_modified = EXCLUDED.last_modified, synced_at = CURRENT_TIMESTAMP
                 ''', (str(uuid.uuid4()), f['id'], f['name'], f.get('mimeType', 'unknown'), f.get('webViewLink', ''),
                       mod_time))
+
+            # 2. Cleanup Step: Delete documents (and their AI chunks) that are no longer in Drive
+            current_drive_ids = [f['id'] for f in files]
+            if current_drive_ids:
+                format_strings = ','.join(['%s'] * len(current_drive_ids))
+
+                # First, safely delete the AI chunks for any orphaned documents
+                cursor.execute(f"""
+                    DELETE FROM document_chunks 
+                    WHERE document_id IN (
+                        SELECT id FROM test_documents 
+                        WHERE test_id IS NULL 
+                          AND doc_type = 'KNOWLEDGE_BASE' 
+                          AND drive_file_id NOT IN ({format_strings})
+                    )
+                """, tuple(current_drive_ids))
+
+                # Second, delete the orphaned documents themselves
+                cursor.execute(f"""
+                    DELETE FROM test_documents 
+                    WHERE test_id IS NULL 
+                      AND doc_type = 'KNOWLEDGE_BASE' 
+                      AND drive_file_id NOT IN ({format_strings})
+                """, tuple(current_drive_ids))
+
             cursor.connection.commit()
 
     def provision_test_workspace(self, test_id: str, year: int, service_name: str, market: str, test_name: str):

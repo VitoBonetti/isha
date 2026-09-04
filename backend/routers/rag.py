@@ -3,6 +3,7 @@ import json
 import asyncio
 import re
 import uuid
+import time
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse
@@ -14,6 +15,7 @@ from routers.auth import require_admin
 from utils.document_parser import extract_text_from_drive_file
 from utils.secret_manager import get_secret
 from utils.drive_manager import DriveManager
+from utils.kiss24_service import get_test_vulns_info
 from audit_logger import log_audit_event
 from schema import RagChatRequest, RagAIResponse, RagChatBulkDeleteRequest, FeedbackRequest
 
@@ -64,50 +66,62 @@ def process_test_documents_background(test_id: str, user_id: str, user_role: str
     """Background task to extract, embed, and store document chunks using structural splitting."""
     with db_cursor_context() as cursor:
         try:
-            if test_id:
-                # Fetch the is_virtual flag directly from the database schema
+            # 1. Fetch documents EXACTLY how you originally had it to guarantee it works
+            # (Added a safeguard just in case test_id is passed as the string "None")
+            if test_id and test_id != "None":
                 cursor.execute("""
-                    SELECT id, drive_file_id, mime_type, file_name, doc_type, is_virtual 
+                    SELECT id, drive_file_id, mime_type, file_name, doc_type, is_virtual, last_modified 
                     FROM test_documents 
                     WHERE test_id = %s
                 """, (test_id,))
-                documents = cursor.fetchall()
-
-                if not documents:
-                    log_audit_event(
-                        user_id=str(user_id), role=str(user_role), action="RAG_NO_DOC_FOUND",
-                        resource_type="RAG", resource_id=str(test_id),
-                        details="No documents found in the database for this test to index."
-                    )
-                    return
-
-                cursor.execute("DELETE FROM document_chunks WHERE test_id = %s", (test_id,))
             else:
                 cursor.execute("""
-                    SELECT id, drive_file_id, mime_type, file_name, doc_type, is_virtual 
+                    SELECT id, drive_file_id, mime_type, file_name, doc_type, is_virtual, last_modified 
                     FROM test_documents 
                     WHERE test_id IS NULL AND doc_type = 'KNOWLEDGE_BASE'
                 """)
-                documents = cursor.fetchall()
 
-                if not documents:
-                    log_audit_event(
-                        user_id=str(user_id), role=str(user_role), action="RAG_NO_DOC_FOUND",
-                        resource_type="RAG", resource_id="KNOWLEDGE_BASE",
-                        details="No documents found in the database for this test to index."
-                    )
-                    return
+            all_documents = cursor.fetchall()
 
-                cursor.execute("""
-                    DELETE FROM document_chunks 
-                    WHERE document_id IN (
-                        SELECT id FROM test_documents 
-                        WHERE test_id IS NULL AND doc_type = 'KNOWLEDGE_BASE'
-                    )
-                """)
+            if not all_documents:
+                log_audit_event(
+                    user_id=str(user_id), role=str(user_role), action="RAG_NO_DOC_FOUND",
+                    resource_type="RAG", resource_id=str(test_id) if test_id else "KNOWLEDGE_BASE",
+                    details="No documents found in the database for this test to index."
+                )
+                return
 
-            for doc in documents:
-                doc_id, drive_file_id, mime_type, file_name, doc_type, is_virtual = doc
+            # 2. Incremental Sync Check (Done safely one-by-one so SQL doesn't drop rows)
+            docs_to_process = []
+            for doc in all_documents:
+                doc_id, drive_file_id, mime_type, file_name, doc_type, is_virtual, last_modified = doc
+
+                # Check when this specific document was last embedded
+                cursor.execute("SELECT MAX(created_at) FROM document_chunks WHERE document_id = %s", (doc_id,))
+                chunk_row = cursor.fetchone()
+                last_chunked = chunk_row[0] if chunk_row else None
+
+                # If chunks exist and the document hasn't been modified in Drive since, skip it!
+                if last_chunked and last_modified and last_modified <= last_chunked:
+                    continue
+
+                docs_to_process.append(doc)
+
+            if not docs_to_process:
+                log_audit_event(
+                    user_id=str(user_id), role=str(user_role), action="RAG_NO_UPDATE",
+                    resource_type="RAG", resource_id="Documents",
+                    details=f"[{datetime.now(timezone.utc)}] Skipping RAG sync: All documents are already up to date."
+                )
+                return
+
+            # 3. Delete chunks ONLY for the documents we are actively updating
+            for doc in docs_to_process:
+                cursor.execute("DELETE FROM document_chunks WHERE document_id = %s", (doc[0],))
+
+            # 4. Extract and Embed
+            for doc in docs_to_process:
+                doc_id, drive_file_id, mime_type, file_name, doc_type, is_virtual, last_modified = doc
                 chunks = []
 
                 # Safely route virtual docs without faking Google Drive IDs
@@ -119,7 +133,6 @@ def process_test_documents_background(test_id: str, user_id: str, user_role: str
                     if not raw_text.strip():
                         continue
 
-                    # Prepend an explicit identifier so the structural chunker grabs it
                     raw_text = f"# [LLM QUALITY ANALYSIS]\n{raw_text}"
                     chunks = structure_aware_chunking(raw_text)
 
@@ -127,11 +140,6 @@ def process_test_documents_background(test_id: str, user_id: str, user_role: str
                     # External Google Drive file
                     try:
                         raw_text = extract_text_from_drive_file(drive_file_id, mime_type)
-                        log_audit_event(
-                            user_id=str(user_id), role=str(user_role), action="EXTRACT_TEXT_FROM_DOCUMENT",
-                            resource_type="RAG", resource_id=str(doc_id),
-                            details=f"Extract text from Google Drive Document: {file_name}"
-                        )
                     except Exception as e:
                         log_audit_event(
                             user_id=str(user_id), role=str(user_role), action="EXTRACT_TEXT_FROM_DOCUMENT_FAILED",
@@ -143,53 +151,71 @@ def process_test_documents_background(test_id: str, user_id: str, user_role: str
                     if not raw_text or not raw_text.strip():
                         continue
 
-                    # Use structure-aware chunking for all external documents
                     chunks = structure_aware_chunking(raw_text)
-                    log_audit_event(
-                        user_id=str(user_id), role=str(user_role), action="CHUNK_TEXT",
-                        resource_type="RAG", resource_id=str(doc_id),
-                        details=f"Split into {len(chunks)} structural chunks Document: {file_name}"
-                    )
 
                 if not chunks:
                     continue
 
+                # 5. Rate-Limited Embedding Loop
                 for index, chunk_text_content in enumerate(chunks):
-                    try:
-                        response = client.models.embed_content(
-                            model='gemini-embedding-2',
-                            contents=chunk_text_content,
-                            config=types.EmbedContentConfig(output_dimensionality=768)
-                        )
+                    max_retries = 3
+                    base_delay = 5  # Start with a 5-second wait if rate-limited
 
-                        embedding_obj = response.embeddings[0]
-                        vector_str = json.dumps(embedding_obj.values)
+                    for attempt in range(max_retries):
+                        try:
+                            response = client.models.embed_content(
+                                model='gemini-embedding-2',
+                                contents=chunk_text_content,
+                                config=types.EmbedContentConfig(output_dimensionality=768)
+                            )
 
-                        cursor.execute("""
-                            INSERT INTO document_chunks (id, document_id, test_id, chunk_index, text_content, embedding, created_at)
-                            VALUES (gen_random_uuid(), %s, %s, %s, %s, %s::vector, CURRENT_TIMESTAMP)
-                        """, (doc_id, test_id, index, chunk_text_content, vector_str))
+                            embedding_obj = response.embeddings[0]
+                            vector_str = json.dumps(embedding_obj.values)
 
-                    except Exception as e:
-                        log_audit_event(
-                            user_id=str(user_id), role=str(user_role), action="RAG_EMBEDDING_FAILED",
-                            resource_type="RAG", resource_id=str(doc_id),
-                            details=f"Generate embedding failed for chunk {index} of {doc_id}: {str(e)}"
-                        )
-                        continue
+                            cursor.execute("""
+                                INSERT INTO document_chunks (id, document_id, test_id, chunk_index, text_content, embedding, created_at)
+                                VALUES (gen_random_uuid(), %s, %s, %s, %s, %s::vector, CURRENT_TIMESTAMP)
+                            """, (doc_id, test_id, index, chunk_text_content, vector_str))
+
+                            break  # Success! Exit the retry loop.
+
+                        except Exception as e:
+                            error_str = str(e)
+                            if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
+                                if attempt < max_retries - 1:
+                                    sleep_time = base_delay * (2 ** attempt)
+                                    print(f"Rate limited by Google (429). Retrying chunk {index} in {sleep_time}s...")
+                                    time.sleep(sleep_time)
+                                    continue
+                                else:
+                                    log_audit_event(
+                                        user_id=str(user_id), role=str(user_role), action="RAG_EMBEDDING_FAILED_429",
+                                        resource_type="RAG", resource_id=str(doc_id),
+                                        details=f"Hit max retries for 429 Rate Limit on chunk {index}."
+                                    )
+                                    break
+                            else:
+                                log_audit_event(
+                                    user_id=str(user_id), role=str(user_role), action="RAG_EMBEDDING_FAILED",
+                                    resource_type="RAG", resource_id=str(doc_id),
+                                    details=f"Generate embedding failed for chunk {index}: {error_str}"
+                                )
+                                break
 
             cursor.connection.commit()
+
+            # Only log success if we actually processed something
             log_audit_event(
                 user_id=str(user_id), role=str(user_role), action="CHUNK_TEXT_EMBEDDED",
-                resource_type="RAG", resource_id=str(test_id),
-                details=f"Generate embeddings using Gemini API Successful for test {test_id}"
+                resource_type="RAG", resource_id=str(test_id) if test_id else "KNOWLEDGE_BASE",
+                details=f"Generate embeddings using Gemini API Successful."
             )
         except Exception as e:
             cursor.connection.rollback()
             log_audit_event(
                 user_id=str(user_id), role=str(user_role), action="RAG_SYNC_FAILED",
-                resource_type="RAG", resource_id=str(test_id),
-                details=f"RAG Sync failed for test {test_id}: {str(e)}"
+                resource_type="RAG", resource_id=str(test_id) if test_id else "KNOWLEDGE_BASE",
+                details=f"RAG Sync failed: {str(e)}"
             )
 
 
@@ -492,8 +518,56 @@ def chat_with_documents(
             "url": file_url
         }
 
-    if not context_text:
-        context_text = "No relevant context documents were found in the database for this specific query."
+    # --- START KEEP SECURE 24 LIVE INJECTION ---
+    live_ks24_context = ""
+    if req.test_id:
+        # Look up the KS24 UUID directly using the existing test_id
+        with db_cursor_context() as ks_cursor:
+            ks_cursor.execute("SELECT kiss24 FROM tests WHERE id = %s", (str(req.test_id),))
+            row = ks_cursor.fetchone()
+            kiss24_uuid = str(row[0]) if row and row[0] else None
+
+        if kiss24_uuid:
+            try:
+                # Reuse the existing utility function from kiss24.py
+                raw_data = get_test_vulns_info(kiss24_uuid)
+
+                if raw_data and raw_data.get("items"):
+                    summary = []
+                    for item in raw_data["items"]:
+                        title = item.get("description", "Unknown")
+                        severity = item.get("severity", "Unrated")
+                        state = item.get("state", "Open")
+                        vid = item.get("id", "N/A")
+
+                        summary.append(f"- [{severity}] {title} (ID: {vid}, Current State: {state})")
+
+                    live_ks24_context = "\n\n--- LIVE KEEP SECURE 24 STATUS ---\n" + "\n".join(summary) + "\n"
+
+                    log_audit_event(
+                        user_id=str(current_user["id"]),
+                        role=str(current_user["role"]),
+                        action="CHAT_VULN_LIVE_FETCH_INFO",
+                        resource_type="RAG",
+                        resource_id=f"{kiss24_uuid}",
+                        details=f"LIVE KEEP SECURE 24 STATUS SUCCESS"
+                    )
+            except Exception as e:
+                log_audit_event(
+                    user_id=str(current_user["id"]),
+                    role=str(current_user["role"]),
+                    action="CHAT_VULN_LIVE_FETCH_INFO",
+                    resource_type="RAG",
+                    resource_id=f"{kiss24_uuid}",
+                    details=f"Failed to fetch live KS24 data for RAG: {e}"
+                )
+
+    # Assemble final context
+    if not context_text and not live_ks24_context:
+        context_text = "No relevant context documents or live status were found for this query."
+    else:
+        context_text += live_ks24_context
+    # --- END KEEP SECURE 24 LIVE INJECTION ---
 
     gemini_history = []
     for past_q, past_a in history_rows:
@@ -509,6 +583,7 @@ def chat_with_documents(
     DOCUMENT TAXONOMY & ROUTING RULES:
     1. Documents tagged [FULL_TEST_REPORT] are the canonical source for overall pentest scope, vulnerability summaries, and official findings.
     2. Documents tagged [LLM_ANALYSIS] represent deep quality checks. ALWAYS prioritize [LLM_ANALYSIS] when answering questions about vulnerability quality, false positive status, or grades.
+    3. If [LIVE KEEP SECURE 24 STATUS] is provided in the context, it represents the absolute latest real-time state of the test. ALWAYS prioritize this live data over static PDF reports regarding current state, remediation, or open/closed status.
 
     CITATION INSTRUCTIONS:
     When using information from the context, you MUST append an inline citation directly after the relevant sentence. 
@@ -671,3 +746,39 @@ def bulk_delete_chat_sessions(request: RagChatBulkDeleteRequest, current_user: d
 
     cursor.connection.commit()
     return {"status": "success"}
+
+
+@router.get("/sessions/shared/{session_id}", summary="Get messages for a shared session (Read-Only)")
+def get_shared_session_messages(session_id: str, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    """
+    Allows any authenticated team member with the unique session URL
+    to view a shared chat transcript in read-only mode.
+    """
+    cursor.execute("""
+        SELECT id, question, answer, timestamp, user_feedback, citations 
+        FROM rag_chat_logs 
+        WHERE session_id = %s AND is_session_active = TRUE
+        ORDER BY timestamp ASC
+    """, (session_id,))
+
+    rows = cursor.fetchall()
+    if not rows:
+        raise HTTPException(status_code=404, detail="Shared session not found or has been deactivated.")
+
+    messages = []
+    for log_id, q, a, t, feedback, citations in rows:
+        time_str = t.strftime("%I:%M %p") if t else ""
+        messages.append({
+            "role": "user",
+            "content": q,
+            "timestamp": time_str
+        })
+        messages.append({
+            "role": "assistant",
+            "content": a,
+            "citations": citations if citations else [],
+            "timestamp": time_str,
+            "log_id": str(log_id),
+            "feedback": feedback
+        })
+    return messages

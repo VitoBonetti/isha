@@ -3,10 +3,11 @@ import { twMerge } from 'tailwind-merge';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { v4 as uuidv4 } from 'uuid';
+import { useParams, useNavigate } from 'react-router-dom';
 import {
   Send, Trash2, Bot, User, Link as LinkIcon, FileText, Database,
   Box, Square, Copy, Check, MessageSquare, RefreshCw, Pencil, X, PanelLeft, Plus, CheckSquare, ListChecks,
-  ThumbsUp, ThumbsDown
+  ThumbsUp, ThumbsDown, Share2
 } from 'lucide-react';
 import toast, { Toaster } from "react-hot-toast";
 import { useAppContext } from "../context/AppContext";
@@ -25,9 +26,45 @@ const ICEBREAKERS = [
 
 export default function RagChatPage() {
   const { currentUser } = useAppContext();
+  const { sharedSessionId } = useParams();
+  const navigate = useNavigate();
   const [sessionId, setSessionId] = useState<string>(uuidv4());
+  const [isReadOnly, setIsReadOnly] = useState<boolean>(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Load shared session on mount if URL contains the param
+  useEffect(() => {
+    if (sharedSessionId) {
+      loadSharedSessionHistory(sharedSessionId);
+    }
+  }, [sharedSessionId]);
+
+  const loadSharedSessionHistory = async (targetSessionId: string) => {
+    try {
+      setIsLoading(true);
+      const res = await fetch(`/api/rag/sessions/shared/${targetSessionId}`);
+      if (!res.ok) throw new Error("Shared session not found");
+      const history = await res.json();
+
+      setSessionId(targetSessionId);
+      setIsReadOnly(true);
+      if (history.length > 0) {
+        setMessages([initialWelcomeMessage, ...history]);
+      }
+    } catch (error) {
+      toast.error("Failed to load shared chat history");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleShareChat = () => {
+    // Generate the share link using the current window origin
+    const shareUrl = `${window.location.origin}/assets/rag/share/${sessionId}`;
+    navigator.clipboard.writeText(shareUrl);
+    toast.success("Share link copied to clipboard!");
+  };
 
   // --- Sidebar & Sessions State ---
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -282,6 +319,10 @@ export default function RagChatPage() {
     setSelectedAssetId(null);
     setSelectedTestId(null);
     setEditingIndex(null);
+    setIsReadOnly(false);
+    if (sharedSessionId) {
+      navigate('/assets/rag');
+    }
     if (window.innerWidth < 768) setIsSidebarOpen(false);
   };
 
@@ -635,6 +676,24 @@ export default function RagChatPage() {
                 </span>
               </div>
             </div>
+          </div>
+          {/* ADD THIS NEW BLOCK: Share & Read-Only Badges */}
+          <div className="flex items-center gap-2">
+            {messages.length > 1 && !isReadOnly && (
+              <button
+                onClick={handleShareChat}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-800 rounded-lg hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition-colors shadow-sm"
+                title="Copy shareable chat link"
+              >
+                <Share2 size={14} />
+                <span className="hidden sm:inline">Share</span>
+              </button>
+            )}
+            {isReadOnly && (
+              <span className="px-2.5 py-1.5 text-[10px] sm:text-xs font-bold text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 rounded-lg shadow-sm">
+                Read-Only View
+              </span>
+            )}
           </div>
         </div>
 
@@ -999,66 +1058,79 @@ export default function RagChatPage() {
         </div>
 
         {/* INPUT FORM WITH AUTOCOMPLETE */}
-        <form onSubmit={handleSend} className="p-4 bg-slate-50 dark:bg-zinc-900/50 border-t border-slate-200 dark:border-zinc-800 relative z-20">
-
-          {/* THE COMMAND MENU POPUP */}
-          {activeTrigger && filteredMenuOptions.length > 0 && (
-            <div className="absolute bottom-full mb-2 left-4 w-72 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 shadow-xl rounded-xl overflow-hidden animate-in fade-in slide-in-from-bottom-2">
-              <div className="px-3 py-2 bg-slate-50 dark:bg-zinc-900/50 border-b border-slate-200 dark:border-zinc-800 text-xs font-semibold text-slate-500 dark:text-zinc-400 uppercase tracking-wider">
-                {activeTrigger === '/' ? 'Filter by Document Type' : activeTrigger === '@' ? 'Filter by Asset' : 'Filter by Test'}
-              </div>
-              <ul className="max-h-48 overflow-y-auto">
-                {filteredMenuOptions.map((item, idx) => (
-                  <li
-                    key={item.id}
-                    className={twMerge(
-                      "px-4 py-2.5 flex items-center gap-3 cursor-pointer transition-colors text-sm",
-                      idx === selectedIndex
-                        ? "bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
-                        : "text-slate-700 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-800"
-                    )}
-                    onClick={() => applyFilterSelection(item)}
-                  >
-                    {item.type === 'doc_type' ? <FileText size={16} className="text-emerald-500" /> : item.type === 'asset' ? <Database size={16} className="text-blue-500" /> : <Box size={16} className="text-amber-500" />}
-                    <span className="truncate">{item.name}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          <div className="relative flex items-end">
-            <textarea
-              ref={textareaRef}
-              value={input}
-              onChange={handleInputChange}
-              onKeyDown={handleKeyDown}
-              placeholder="Ask a question... Use / for documents, @ for assets, $ for tests"
-              className="w-full bg-white dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 placeholder-slate-400 dark:placeholder-zinc-600 text-sm rounded-3xl pl-6 pr-14 py-4 border border-slate-300 dark:border-zinc-700 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 resize-none overflow-y-auto [&::-webkit-scrollbar]:hidden"
-              rows={1}
-              style={{ minHeight: '54px', maxHeight: '200px' }}
-            />
-            {/* TOGGLE BUTTON: STOP vs SEND */}
-            {isLoading && abortControllerRef.current ? (
+        {isReadOnly ? (
+          <div className="p-4 bg-slate-100 dark:bg-zinc-900 border-t border-slate-200 dark:border-zinc-800 text-center relative z-20">
+            <p className="text-sm text-slate-500 dark:text-zinc-400 py-3">
+              You are viewing a shared read-only session transcript.{" "}
               <button
-                type="button"
-                onClick={handleStop}
-                className="absolute right-2 bottom-2 p-2 text-slate-400 bg-white dark:bg-zinc-950 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 border border-slate-200 dark:border-zinc-700 rounded-full transition-all mb-[5px] shadow-sm"
-                title="Stop Generating"
+                onClick={handleClearChat}
+                className="text-emerald-600 dark:text-emerald-400 font-bold hover:underline ml-1"
               >
-                <Square size={16} fill="currentColor" />
+                Start a new chat
               </button>
-            ) : (
-              <button
-                type="submit"
-                disabled={!input.trim() || isLoading}
-                className="absolute right-2 bottom-2 p-2 text-white bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:hover:bg-emerald-600 rounded-full transition-all mb-[5px]"
-              >
-                <Send size={18} />
-              </button>
-            )}
+            </p>
           </div>
-        </form>
+        ) : (
+          <form onSubmit={handleSend} className="p-4 bg-slate-50 dark:bg-zinc-900/50 border-t border-slate-200 dark:border-zinc-800 relative z-20">
+            {/* THE COMMAND MENU POPUP */}
+            {activeTrigger && filteredMenuOptions.length > 0 && (
+              <div className="absolute bottom-full mb-2 left-4 w-72 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 shadow-xl rounded-xl overflow-hidden animate-in fade-in slide-in-from-bottom-2">
+                <div className="px-3 py-2 bg-slate-50 dark:bg-zinc-900/50 border-b border-slate-200 dark:border-zinc-800 text-xs font-semibold text-slate-500 dark:text-zinc-400 uppercase tracking-wider">
+                  {activeTrigger === '/' ? 'Filter by Document Type' : activeTrigger === '@' ? 'Filter by Asset' : 'Filter by Test'}
+                </div>
+                <ul className="max-h-48 overflow-y-auto">
+                  {filteredMenuOptions.map((item, idx) => (
+                    <li
+                      key={item.id}
+                      className={twMerge(
+                        "px-4 py-2.5 flex items-center gap-3 cursor-pointer transition-colors text-sm",
+                        idx === selectedIndex
+                          ? "bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                          : "text-slate-700 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-800"
+                      )}
+                      onClick={() => applyFilterSelection(item)}
+                    >
+                      {item.type === 'doc_type' ? <FileText size={16} className="text-emerald-500" /> : item.type === 'asset' ? <Database size={16} className="text-blue-500" /> : <Box size={16} className="text-amber-500" />}
+                      <span className="truncate">{item.name}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            <div className="relative flex items-end">
+              <textarea
+                ref={textareaRef}
+                value={input}
+                onChange={handleInputChange}
+                onKeyDown={handleKeyDown}
+                placeholder="Ask a question... Use / for documents, @ for assets, $ for tests"
+                className="w-full bg-white dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 placeholder-slate-400 dark:placeholder-zinc-600 text-sm rounded-3xl pl-6 pr-14 py-4 border border-slate-300 dark:border-zinc-700 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 resize-none overflow-y-auto [&::-webkit-scrollbar]:hidden"
+                rows={1}
+                style={{ minHeight: '54px', maxHeight: '200px' }}
+              />
+              {/* TOGGLE BUTTON: STOP vs SEND */}
+              {isLoading && abortControllerRef.current ? (
+                <button
+                  type="button"
+                  onClick={handleStop}
+                  className="absolute right-2 bottom-2 p-2 text-slate-400 bg-white dark:bg-zinc-950 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 border border-slate-200 dark:border-zinc-700 rounded-full transition-all mb-[5px] shadow-sm"
+                  title="Stop Generating"
+                >
+                  <Square size={16} fill="currentColor" />
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  disabled={!input.trim() || isLoading}
+                  className="absolute right-2 bottom-2 p-2 text-white bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:hover:bg-emerald-600 rounded-full transition-all mb-[5px]"
+                >
+                  <Send size={18} />
+                </button>
+              )}
+            </div>
+          </form>
+        )}
       </div>
     </div>
   );

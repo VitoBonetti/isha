@@ -60,6 +60,7 @@ function AppContent() {
           <Route path="insights" element={<InsightsView />} />
           <Route path="documents" element={<DocumentsView />} />
           <Route path="rag" element={<RagChatPage />} />
+          <Route path="rag/share/:sharedSessionId" element={<RagChatPage />} />
         </Route>
 
         {/* Modular Control Panel */}
