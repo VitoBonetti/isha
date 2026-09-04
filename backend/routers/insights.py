@@ -59,10 +59,13 @@ def get_yearly_insights(year: Optional[int] = None, current_user: dict = Depends
     wasted_breakdown = {}
     total_wasted = 0.0
 
+    # Dynamically calculate total ISO weeks in the target year (52 or 53)
+    total_weeks_in_year = datetime(year, 12, 28).isocalendar()[1]
+
     for u_id, u_name, base_cap, s_year, s_week, e_year, e_week, loc_id in users:
         base = float(base_cap or 0.0)
         start = s_week if s_year == year else 1
-        end = e_week if e_year == year else 52
+        end = e_week if e_year == year else total_weeks_in_year
         if (s_year and year < s_year) or (e_year and year > e_year): continue
 
         active_weeks = max(0, end - start + 1)
@@ -173,7 +176,7 @@ def get_yearly_insights(year: Optional[int] = None, current_user: dict = Depends
         # This adds the line item to the UI card
         unassigned_sched_breakdown["Placeholders (All Lanes)"] = total_placeholders
         # This deducts it from your net capacity and bench math
-        total_unassigned_sched += total_placeholders
+        # total_unassigned_sched += total_placeholders
 
     # Backlog
     cursor.execute("""
@@ -188,11 +191,11 @@ def get_yearly_insights(year: Optional[int] = None, current_user: dict = Depends
 
     # ---  TARGET VS ACTUAL (ALL SERVICES & CATEGORIES) ---
     cursor.execute("""
-            SELECT sl.id, sl.name, COALESCE(slg.target_goal, 0) as target_goal, sl.theme_color, sl.is_active
-            FROM services_lanes sl
-            LEFT JOIN service_lane_goals slg ON sl.id = slg.service_lane_id AND slg.year = %s
-            ORDER BY sl.display_order ASC, sl.name ASC
-        """, (year,))
+        SELECT sl.id, sl.name, COALESCE(slg.target_goal, 0) as target_goal, sl.theme_color, sl.is_active
+        FROM services_lanes sl
+        LEFT JOIN service_lane_goals slg ON sl.id = slg.service_lane_id AND slg.year = %s
+        ORDER BY sl.display_order ASC, sl.name ASC
+    """, (year,))
     services_data = []
 
     for s_id, s_name, s_goal, s_color, s_active in cursor.fetchall():
@@ -201,65 +204,140 @@ def get_yearly_insights(year: Optional[int] = None, current_user: dict = Depends
             "theme_color": s_color, "is_active": s_active, "categories": []
         }
 
-        # Overall Service Counts
+        # Overall Service Counts & Theoretical Credits
         cursor.execute("""
-                SELECT 
-                    COUNT(DISTINCT CASE WHEN stages::text = 'NOT_PLANNED' THEN id END),
-                    COUNT(DISTINCT CASE WHEN stages::text IN ('SCHEDULED', 'IN_PROGRESS') AND start_year = %s THEN id END),
-                    COUNT(DISTINCT CASE WHEN stages::text = 'COMPLETED' AND start_year = %s THEN id END)
-                FROM tests WHERE service_lane_id = %s
-            """, (year, year, str(s_id)))
+            SELECT 
+                COUNT(DISTINCT CASE WHEN stages::text = 'NOT_PLANNED' THEN id END),
+                COUNT(DISTINCT CASE WHEN stages::text IN ('SCHEDULED', 'IN_PROGRESS') AND start_year = %s THEN id END),
+                COUNT(DISTINCT CASE WHEN stages::text = 'COMPLETED' AND start_year = %s THEN id END),
+                COALESCE(SUM(CASE 
+                    WHEN stages::text = 'NOT_PLANNED' THEN (credits_per_week * duration_weeks)
+                    WHEN stages::text IN ('SCHEDULED', 'IN_PROGRESS', 'COMPLETED') AND start_year = %s THEN (credits_per_week * duration_weeks)
+                    ELSE 0 
+                END), 0)
+            FROM tests WHERE service_lane_id = %s
+        """, (year, year, year, str(s_id)))
         counts = cursor.fetchone()
-        s_dict.update({"unplanned": counts[0], "planned": counts[1], "completed": counts[2]})
 
-        # Categories
+        # Assigned Credits
         cursor.execute("""
-                    SELECT c.id, c.name, COALESCE(cg.target_goal, 0) as target_goal 
-                    FROM service_categories c
-                    LEFT JOIN service_category_goals cg ON c.id = cg.category_id AND cg.year = %s
-                    WHERE c.service_lane_id = %s
-                """, (year, str(s_id)))
+            SELECT COALESCE(SUM(a.allocated_credits), 0)
+            FROM assignments a
+            JOIN tests t ON a.test_id = t.id
+            WHERE t.service_lane_id = %s AND a.year = %s AND t.stages::text != 'STOPPED'
+        """, (str(s_id), year))
+        assigned_credits = cursor.fetchone()[0]
+
+        s_dict.update({
+            "unplanned": counts[0],
+            "planned": counts[1],
+            "completed": counts[2],
+            "theoretical_credits": float(counts[3]),
+            "assigned_credits": float(assigned_credits)
+        })
+
+        # Categories - Using CTEs to prevent JOIN duplication inflation
+        cursor.execute("""
+            SELECT c.id, c.name, COALESCE(cg.target_goal, 0) as target_goal 
+            FROM service_categories c
+            LEFT JOIN service_category_goals cg ON c.id = cg.category_id AND cg.year = %s
+            WHERE c.service_lane_id = %s
+        """, (year, str(s_id)))
         cats = cursor.fetchall()
         cat_sum_goals = 0
 
         if cats:
             for c_id, c_name, c_goal in cats:
                 cat_sum_goals += (c_goal or 0)
-                # Correctly join through assets to find the test's category
+
                 cursor.execute("""
-                        SELECT 
-                            COUNT(DISTINCT CASE WHEN t.stages::text = 'NOT_PLANNED' THEN t.id END),
-                            COUNT(DISTINCT CASE WHEN t.stages::text IN ('SCHEDULED', 'IN_PROGRESS') AND t.start_year = %s THEN t.id END),
-                            COUNT(DISTINCT CASE WHEN t.stages::text = 'COMPLETED' AND t.start_year = %s THEN t.id END)
+                    WITH CategoryTests AS (
+                        SELECT DISTINCT t.id, t.stages, t.start_year, t.credits_per_week, t.duration_weeks
                         FROM tests t
                         LEFT JOIN test_assets ta ON t.id = ta.test_id
                         LEFT JOIN assets a ON ta.asset_id = a.id
                         LEFT JOIN raw_assets ra ON a.raw_asset_id = ra.id
                         WHERE t.service_lane_id = %s AND ra.category_id = %s
-                    """, (year, year, str(s_id), str(c_id)))
+                    )
+                    SELECT 
+                        COUNT(CASE WHEN stages::text = 'NOT_PLANNED' THEN id END),
+                        COUNT(CASE WHEN stages::text IN ('SCHEDULED', 'IN_PROGRESS') AND start_year = %s THEN id END),
+                        COUNT(CASE WHEN stages::text = 'COMPLETED' AND start_year = %s THEN id END),
+                        COALESCE(SUM(CASE 
+                            WHEN stages::text = 'NOT_PLANNED' THEN (credits_per_week * duration_weeks)
+                            WHEN stages::text IN ('SCHEDULED', 'IN_PROGRESS', 'COMPLETED') AND start_year = %s THEN (credits_per_week * duration_weeks)
+                            ELSE 0 
+                        END), 0)
+                    FROM CategoryTests
+                """, (str(s_id), str(c_id), year, year, year))
                 c_counts = cursor.fetchone()
+
+                cursor.execute("""
+                    WITH CategoryTests AS (
+                        SELECT DISTINCT t.id
+                        FROM tests t
+                        LEFT JOIN test_assets ta ON t.id = ta.test_id
+                        LEFT JOIN assets a ON ta.asset_id = a.id
+                        LEFT JOIN raw_assets ra ON a.raw_asset_id = ra.id
+                        WHERE t.service_lane_id = %s AND ra.category_id = %s AND t.stages::text != 'STOPPED'
+                    )
+                    SELECT COALESCE(SUM(a.allocated_credits), 0)
+                    FROM assignments a
+                    JOIN CategoryTests ct ON a.test_id = ct.id
+                    WHERE a.year = %s
+                """, (str(s_id), str(c_id), year))
+                c_assigned = cursor.fetchone()[0]
+
                 s_dict["categories"].append({
                     "id": str(c_id), "name": c_name, "target_goal": c_goal or 0,
-                    "unplanned": c_counts[0] or 0, "planned": c_counts[1] or 0, "completed": c_counts[2] or 0
+                    "unplanned": c_counts[0] or 0, "planned": c_counts[1] or 0, "completed": c_counts[2] or 0,
+                    "theoretical_credits": float(c_counts[3]), "assigned_credits": float(c_assigned)
                 })
 
-            # Ghost Category (Uncategorized) - ONLY show if there are other real categories
+            # Ghost Category (Uncategorized)
             cursor.execute("""
-                    SELECT 
-                        COUNT(DISTINCT CASE WHEN t.stages::text = 'NOT_PLANNED' THEN t.id END),
-                        COUNT(DISTINCT CASE WHEN t.stages::text IN ('SCHEDULED', 'IN_PROGRESS') AND t.start_year = %s THEN t.id END),
-                        COUNT(DISTINCT CASE WHEN t.stages::text = 'COMPLETED' AND t.start_year = %s THEN t.id END)
+                WITH CategoryTests AS (
+                    SELECT DISTINCT t.id, t.stages, t.start_year, t.credits_per_week, t.duration_weeks
                     FROM tests t
                     LEFT JOIN test_assets ta ON t.id = ta.test_id
                     LEFT JOIN assets a ON ta.asset_id = a.id
                     LEFT JOIN raw_assets ra ON a.raw_asset_id = ra.id
                     WHERE t.service_lane_id = %s AND ra.category_id IS NULL
-                """, (year, year, str(s_id)))
+                )
+                SELECT 
+                    COUNT(CASE WHEN stages::text = 'NOT_PLANNED' THEN id END),
+                    COUNT(CASE WHEN stages::text IN ('SCHEDULED', 'IN_PROGRESS') AND start_year = %s THEN id END),
+                    COUNT(CASE WHEN stages::text = 'COMPLETED' AND start_year = %s THEN id END),
+                    COALESCE(SUM(CASE 
+                        WHEN stages::text = 'NOT_PLANNED' THEN (credits_per_week * duration_weeks)
+                        WHEN stages::text IN ('SCHEDULED', 'IN_PROGRESS', 'COMPLETED') AND start_year = %s THEN (credits_per_week * duration_weeks)
+                        ELSE 0 
+                    END), 0)
+                FROM CategoryTests
+            """, (str(s_id), year, year, year))
             u_counts = cursor.fetchone()
-            if sum(u_counts) > 0:
+
+            if sum(u_counts[:3]) > 0:
+                cursor.execute("""
+                    WITH CategoryTests AS (
+                        SELECT DISTINCT t.id
+                        FROM tests t
+                        LEFT JOIN test_assets ta ON t.id = ta.test_id
+                        LEFT JOIN assets a ON ta.asset_id = a.id
+                        LEFT JOIN raw_assets ra ON a.raw_asset_id = ra.id
+                        WHERE t.service_lane_id = %s AND ra.category_id IS NULL AND t.stages::text != 'STOPPED'
+                    )
+                    SELECT COALESCE(SUM(a.allocated_credits), 0)
+                    FROM assignments a
+                    JOIN CategoryTests ct ON a.test_id = ct.id
+                    WHERE a.year = %s
+                """, (str(s_id), year))
+                u_assigned = cursor.fetchone()[0]
+
                 s_dict["categories"].append({
                     "id": "uncategorized", "name": "Uncategorized", "target_goal": 0,
-                    "unplanned": u_counts[0] or 0, "planned": u_counts[1] or 0, "completed": u_counts[2] or 0
+                    "unplanned": u_counts[0] or 0, "planned": u_counts[1] or 0, "completed": u_counts[2] or 0,
+                    "theoretical_credits": float(u_counts[3]), "assigned_credits": float(u_assigned)
                 })
 
         s_dict["goal_warning"] = (s_goal or 0) < cat_sum_goals
@@ -271,7 +349,7 @@ def get_yearly_insights(year: Optional[int] = None, current_user: dict = Depends
             "gross_capacity": total_gross_credits,
             "total_time_off": total_time_off,
             "assigned_resources": total_scheduled,
-            "unassigned_bench": max(0.0, total_gross_credits - total_time_off - total_scheduled)
+            "unassigned_bench": max(0.0, total_gross_credits - total_time_off - total_scheduled - total_wasted)
         },
         "forecast": {
             "scheduled": {"total": total_scheduled, "breakdown": scheduled_breakdown},

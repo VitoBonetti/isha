@@ -22,14 +22,18 @@ def api_key():
     return str(get_secret(KISS_24_API_KEY_NAME))
 
 
-def post(endpoint, body=None, page=None):
+def post(endpoint, body=None, page=None, user_api_key: str = None):
     url = f"{KISS_24_ENDPOINT}{endpoint}"
     if page:
         url += f"?page={page}"
     data = json.dumps(body or {}).encode("utf-8")
     if page is None and body is None:
         data = b""
-    req = urllib.request.Request(url, data=data, headers={"x-api-key": api_key(), "Content-Type": "application/json"})
+
+    # Use personal key if passed, fallback to system key
+    key = user_api_key if user_api_key else api_key()
+
+    req = urllib.request.Request(url, data=data, headers={"x-api-key": key, "Content-Type": "application/json"})
     with urllib.request.urlopen(req) as res:
         return json.loads(res.read())
 
@@ -456,10 +460,12 @@ def upload_vulnerability_attachment(vuln_uuid: str, base64_data: str, filename: 
 # ---  4. VALIDATIONS                    ---
 # ==========================================
 # fetchs validating vulns
-def fetch_validating_vulnerabilities():
-    """Fetches all vulns in 'Validating' state using the system API key with explicit timeouts."""
+def fetch_validating_vulnerabilities(user_api_key: str = None):
+    """Fetches all vulns in 'Validating' state using the provided API key with explicit timeouts."""
     all_items = []
     page = 1
+    key = user_api_key if user_api_key else api_key()
+
     while True:
         payload = {"states": ["Validating"]}
         url = f"{KISS_24_ENDPOINT}vulnerabilities?page={page}"
@@ -468,7 +474,7 @@ def fetch_validating_vulnerabilities():
         req = urllib.request.Request(
             url,
             data=data,
-            headers={"x-api-key": api_key(), "Content-Type": "application/json"}
+            headers={"x-api-key": key, "Content-Type": "application/json"}
         )
 
         try:
@@ -497,7 +503,7 @@ def fetch_validating_vulnerabilities():
 
 
 # Complete info and low vulnerabilities workflow
-def fetch_validation_info(uuid: str):
+def fetch_validation_info(uuid: str, user_api_key: str = None):
     """
     Fetches a single vulnerability, strips out useless metadata to save AI tokens,
     filters for actual developer comments, and structures all attachments perfectly.
@@ -521,7 +527,7 @@ def fetch_validation_info(uuid: str):
 
     try:
         # 1. Fetch Vulnerability (API expects a list of UUIDs)
-        resp = post("vulnerabilities", {"uuid": [uuid]})
+        resp = post("vulnerabilities", {"uuid": [uuid]}, user_api_key=user_api_key)
         items = resp.get("items", [])
         if not items:
             log_audit_event(
@@ -553,7 +559,7 @@ def fetch_validation_info(uuid: str):
         )
 
         # 3. Fetch Direct Vulnerability Attachments
-        att_resp = post("attachments", {"vulnerabilities": [vuln_uuid]})
+        att_resp = post("attachments", {"vulnerabilities": [vuln_uuid]}, user_api_key=user_api_key)
         for att in att_resp.get("items", []):
             item["downloaded_attachments"].append({
                 "uuid": att.get("uuid"),
@@ -570,7 +576,7 @@ def fetch_validation_info(uuid: str):
         )
 
         # 4. Fetch Comments
-        comm_resp = post("comments", {"vulnerabilities": [vuln_uuid]})
+        comm_resp = post("comments", {"vulnerabilities": [vuln_uuid]}, user_api_key=user_api_key)
         for comm in comm_resp.get("items", []):
 
             # FILTER: We only care about human comments, not system state changes!
@@ -587,7 +593,7 @@ def fetch_validation_info(uuid: str):
 
                 # 5. Fetch Comment Attachments (Only if total > 0)
                 if int(comm.get("attachments", {}).get("total", 0)) > 0:
-                    c_att_resp = post("attachments", {"comments": [comm.get("uuid")]})
+                    c_att_resp = post("attachments", {"comments": [comm.get("uuid")]}, user_api_key=user_api_key)
                     for c_att in c_att_resp.get("items", []):
                         clean_comm["downloaded_attachments"].append({
                             "uuid": c_att.get("uuid"),

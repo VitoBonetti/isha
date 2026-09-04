@@ -3,7 +3,7 @@ import axios from "axios";
 import { Target, ChevronDown, ChevronRight, AlertTriangle, LineChart, Info, Zap  } from "lucide-react";
 
 // --- CUSTOM OVERFLOW-AWARE TARGET BAR ---
-const TargetBar = ({ label, completed, planned, unplanned, goal, isHero }: any) => {
+const TargetBar = ({ label, completed, planned, unplanned, goal, isHero, theoretical, assigned, isActive = true }: any) => {
   const actual = completed + planned + unplanned;
   const maxVal = Math.max(actual, goal, 1);
   const pctCompleted = (completed / maxVal) * 100;
@@ -13,13 +13,20 @@ const TargetBar = ({ label, completed, planned, unplanned, goal, isHero }: any) 
 
   return (
     <div className={`mb-5 ${isHero ? 'bg-slate-50 dark:bg-zinc-950/50 p-4 sm:p-5 rounded-2xl border border-slate-100 dark:border-zinc-800/80 shadow-sm' : ''}`}>
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-1 sm:gap-0 mb-2.5">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-2 sm:gap-0 mb-2.5">
         <span className={`font-bold text-slate-700 dark:text-zinc-300 flex items-center gap-2 ${isHero ? 'text-base sm:text-lg' : 'text-xs sm:text-sm'}`}>
           {isHero && <Zap size={18} className="text-blue-500 flex-shrink-0" />} {label}
         </span>
-        <span className="text-slate-500 font-medium text-[11px] sm:text-xs">
-          Actual: <strong className={`text-slate-700 dark:text-zinc-300 ${isHero ? 'text-xs sm:text-sm' : ''}`}>{actual}</strong> / Target: {goal || 'None'}
-        </span>
+        <div className="flex flex-col items-start sm:items-end gap-1.5 w-full sm:w-auto">
+          <span className="text-slate-500 font-medium text-[11px] sm:text-xs">
+            Actual: <strong className={`text-slate-700 dark:text-zinc-300 ${isHero ? 'text-xs sm:text-sm' : ''}`}>{actual}</strong> / Target: {goal || 'None'}
+          </span>
+          {isActive && theoretical !== undefined && assigned !== undefined && (
+            <span className="text-slate-500 font-medium text-[10px] sm:text-[11px] bg-slate-100 dark:bg-zinc-800/50 px-2 py-1 rounded-md border border-slate-200 dark:border-zinc-700 flex items-center gap-1.5">
+              Required: <strong className="text-indigo-600 dark:text-indigo-400">{theoretical.toFixed(1)} cr</strong> | Assigned: <strong className="text-emerald-600 dark:text-emerald-400">{assigned.toFixed(1)} cr</strong>
+            </span>
+          )}
+        </div>
       </div>
       <div className={`relative bg-slate-100 dark:bg-zinc-800 overflow-hidden flex shadow-inner ${isHero ? 'h-7 sm:h-8 rounded-xl' : 'h-4 sm:h-5 rounded-md opacity-90'}`}>
         <div className="bg-emerald-500 h-full border-r border-white/20" style={{ width: `${pctCompleted}%` }} title={`Completed: ${completed}`} />
@@ -50,12 +57,15 @@ const ForecastCard = ({ title, total, breakdown, isOpen, toggleOpen }: any) => (
     </button>
     {isOpen && (
       <div className="mt-2 space-y-2 border-t border-slate-100 dark:border-zinc-800 pt-3">
-        {Object.entries(breakdown).filter(([_, val]) => (val as number) > 0).map(([key, val]) => (
-          <div key={key} className="flex justify-between text-xs sm:text-sm">
-            <span className="text-slate-500 dark:text-zinc-400 font-medium truncate pr-2">{key}:</span>
-            <span className="font-bold text-slate-700 dark:text-zinc-300 shrink-0">{(val as number).toFixed(1)}</span>
-          </div>
-        ))}
+        {Object.entries(breakdown).filter(([_, val]) => (val as number) > 0).map(([key, val]) => {
+          const isPlaceholder = key === 'Placeholders (All Lanes)';
+          return (
+            <div key={key} className={`flex justify-between items-center text-xs sm:text-sm ${isPlaceholder ? 'text-amber-600 dark:text-amber-500 bg-amber-50 dark:bg-amber-500/10 px-2 py-1.5 rounded-md -mx-2' : ''}`}>
+              <span className={`${isPlaceholder ? 'font-bold' : 'text-slate-500 dark:text-zinc-400 font-medium'} truncate pr-2`}>{key}:</span>
+              <span className={`font-bold shrink-0 ${isPlaceholder ? '' : 'text-slate-700 dark:text-zinc-300'}`}>{(val as number).toFixed(1)}</span>
+            </div>
+          );
+        })}
       </div>
     )}
   </div>
@@ -184,7 +194,7 @@ export default function InsightsView() {
 
             {openServices[s.id] && (
               <div className="px-4 sm:px-6 pb-4 sm:pb-6 pt-2 border-t border-slate-100 dark:border-zinc-800 animate-in fade-in slide-in-from-top-2 w-full">
-                <TargetBar label="Overall Service Total" completed={s.completed} planned={s.planned} unplanned={s.unplanned} goal={s.target_goal} isHero={true} />
+                <TargetBar label="Overall Service Total" completed={s.completed} planned={s.planned} unplanned={s.unplanned} goal={s.target_goal} isHero={true} theoretical={s.theoretical_credits} assigned={s.assigned_credits} isActive={s.is_active} />
 
                 {s.categories && s.categories.length > 0 && (
                   <div className="mt-6 sm:mt-8 w-full">
@@ -198,7 +208,7 @@ export default function InsightsView() {
                     </div>
                     <div className="space-y-4 sm:space-y-6 w-full">
                       {s.categories.map((c: any) => (
-                        <TargetBar key={c.id} label={c.name} completed={c.completed} planned={c.planned} unplanned={c.unplanned} goal={c.target_goal} isHero={false} />
+                        <TargetBar key={c.id} label={c.name} completed={c.completed} planned={c.planned} unplanned={c.unplanned} goal={c.target_goal} isHero={false} theoretical={c.theoretical_credits} assigned={c.assigned_credits} isActive={s.is_active} />
                       ))}
                     </div>
                   </div>

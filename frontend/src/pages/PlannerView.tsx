@@ -350,7 +350,13 @@ export default function PlannerView({
                                   const uiPercentage = Math.min(100, percentage);
                                   const progressColor = percentage >= 100 ? 'bg-emerald-500' : percentage > 70 ? 'bg-blue-500' : 'bg-orange-500';
 
-                                  const renderQualityAndTeam = () => (
+                                  const renderQualityAndTeam = () => {
+                                    // 1. Determine Operational Leader for this entire test
+                                    // By looking at ALL assignments for the test, the leader is consistent across multi-week tests
+                                    const testAllAssignments = boardData.assignments.filter(a => a.test_id === test.id);
+                                    const operationalLeaderId = testAllAssignments.length > 0 ? testAllAssignments[0].user_id : null;
+
+                                    return (
                                     <div className="mt-2.5 flex flex-col gap-2">
                                       <div className="w-full bg-slate-100 dark:bg-zinc-800 rounded-full h-1.5 flex overflow-hidden">
                                         <div className={`h-full ${progressColor} transition-all duration-300`} style={{ width: `${uiPercentage}%` }} />
@@ -362,18 +368,40 @@ export default function PlannerView({
 
                                       {weekAssignments.length > 0 && (
                                         <div className="flex flex-wrap gap-1 mt-1">
-                                          {weekAssignments.map(a => (
-                                            <span key={a.user_id} className={`text-[10px] flex items-center gap-1 px-1.5 py-0.5 rounded-md border ${String(a.user_id) === String(currentUser?.id) ? 'bg-blue-50 border-blue-200 text-blue-700 font-bold dark:bg-blue-900/20 dark:border-blue-800/50' : 'bg-slate-50 border-slate-200 text-slate-600 dark:bg-zinc-800/50 dark:border-zinc-700'}`}>
-                                              {(a.user_name || 'Unknown').split(' ')[0]}
-                                              {currentUser?.role === 'admin' && test.status !== 'Completed' && test.status !== 'Stopped' && (
-                                                <X size={10} className="cursor-pointer text-slate-400 hover:text-red-500 transition-colors ml-0.5" onClick={() => handleUnassignPentester(test.id, a.user_id)} />
-                                              )}
-                                            </span>
-                                          ))}
+                                          {weekAssignments.map(a => {
+                                            const isMe = String(a.user_id) === String(currentUser?.id);
+                                            const isLeader = String(a.user_id) === String(operationalLeaderId);
+
+                                            // 2. Dynamic styling for the Operational Leader
+                                            let badgeClasses = "text-[10px] flex items-center gap-1 px-1.5 py-0.5 rounded-md transition-all ";
+
+                                            if (isMe) {
+                                              badgeClasses += isLeader
+                                                ? "bg-blue-50 border-2 border-blue-500 text-blue-800 font-extrabold dark:bg-blue-900/40 dark:border-blue-400 dark:text-blue-300"
+                                                : "bg-blue-50 border border-blue-200 text-blue-700 font-bold dark:bg-blue-900/20 dark:border-blue-800/50";
+                                            } else {
+                                              badgeClasses += isLeader
+                                                ? "bg-slate-100 border-2 border-slate-400 text-slate-800 font-extrabold dark:bg-zinc-700 dark:border-zinc-400 dark:text-zinc-100"
+                                                : "bg-slate-50 border border-slate-200 text-slate-600 dark:bg-zinc-800/50 dark:border-zinc-700";
+                                            }
+
+                                            return (
+                                              <span
+                                                key={a.user_id}
+                                                className={badgeClasses}
+                                                title={isLeader ? "Operational Leader" : ""}
+                                              >
+                                                {(a.user_name || 'Unknown').split(' ')[0]}
+                                                {currentUser?.role === 'admin' && test.status !== 'Completed' && test.status !== 'Stopped' && (
+                                                  <X size={10} className="cursor-pointer text-slate-400 hover:text-red-500 transition-colors ml-0.5" onClick={() => handleUnassignPentester(test.id, a.user_id)} />
+                                                )}
+                                              </span>
+                                            );
+                                          })}
                                         </div>
                                       )}
                                     </div>
-                                  );
+                                  )};
 
                                   if (test.startYear === targetYear && test.startWeek === week) {
                                     return (
@@ -445,7 +473,7 @@ export default function PlannerView({
                                                         <FolderOpen size={14} />
                                                       </a>
                                                     ) : (
-                                                      !isReadOnly && service?.auto_provision_workspace && (
+                                                      currentUser?.role !== 'read_only' && service?.auto_provision_workspace && (
                                                         <button
                                                           title="Create Drive Workspace"
                                                           className="p-1.5 flex items-center justify-center rounded text-slate-400 hover:text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 transition-colors"

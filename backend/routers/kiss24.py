@@ -40,6 +40,19 @@ PUBSUB_TOPIC_PATH = os.environ.get("PUBSUB_TOPIC_PATH")
 KISS_24_ENDPOINT = os.environ.get("KISS_24_ENDPOINT")
 KISS_24_API_KEY_NAME = os.environ.get("KISS_24_API_KEY_NAME")
 
+
+def get_user_kiss24_key(cursor, user_id: str) -> str:
+    cursor.execute("SELECT kiss24_api_key FROM users WHERE id = %s", (user_id,))
+    key_row = cursor.fetchone()
+    if not key_row or not key_row[0]:
+        raise HTTPException(status_code=400, detail="Configure your personal Keep Secure 24 API key first.")
+    cipher = get_cipher()
+    try:
+        return cipher.decrypt(key_row[0].encode('utf-8')).decode('utf-8')
+    except Exception:
+        raise HTTPException(status_code=400, detail="Failed to decrypt your personal API key. Please reset it in your profile.")
+
+
 @router.post("/sync-org-ids", status_code=status.HTTP_200_OK, summary="[Admin Only]")
 def sync_kiss24_org_ids(
         current_user: dict = Depends(require_admin),
@@ -786,8 +799,10 @@ def get_validating_vulns(current_user: dict = Depends(get_current_user), cursor=
 @router.post("/validating-vulns/sync", summary="Reconcile & Sync with KISS24")
 def sync_validating_vulns(current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
     """Fetches live KISS24 data and reconciles with local PostgreSQL."""
+    user_api_key = get_user_kiss24_key(cursor, str(current_user["id"]))
     try:
-        live_vulns = fetch_validating_vulnerabilities()
+        # 2. Pass personal key to KISS24
+        live_vulns = fetch_validating_vulnerabilities(user_api_key)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -871,10 +886,11 @@ def update_validating_vuln(uuid: str, payload: dict, current_user: dict = Depend
 
 
 # Validate fix with Luigi
-def upload_attachment_to_gcs(att_uuid: str, file_name: str, vuln_uuid: str, bucket) -> str | None:
+def upload_attachment_to_gcs(att_uuid: str, file_name: str, vuln_uuid: str, bucket,
+                                 user_api_key: str) -> str | None:
     """Helper to stream a file from KISS24 straight to GCS and return the URI."""
     try:
-        headers = {"x-api-key": get_secret(KISS_24_API_KEY_NAME), "Content-Type": "application/json"}
+        headers = {"x-api-key": user_api_key, "Content-Type": "application/json"}
         resp = requests.get(f"{KISS_24_ENDPOINT}attachments/{att_uuid}", headers=headers)
 
         if resp.status_code == 200:
@@ -892,11 +908,11 @@ def upload_attachment_to_gcs(att_uuid: str, file_name: str, vuln_uuid: str, buck
     return None
 
 
-def trigger_luigi_verification_pipeline(vuln_uuid: str):
+def trigger_luigi_verification_pipeline(vuln_uuid: str, user_api_key: str):
     """Background task to prep the JSON payload and alert Luigi."""
     try:
         # 1. Get the cleaned JSON payload
-        vuln_data = fetch_validation_info(vuln_uuid)
+        vuln_data = fetch_validation_info(vuln_uuid, user_api_key)
         if not vuln_data:
             log_audit_event("SYSTEM", "SYSTEM", "LUIGI_PIPELINE_ABORT", "PIPELINE", "N/A",
                             f"fetch_validation_info returned empty for {vuln_uuid}.")
@@ -911,14 +927,14 @@ def trigger_luigi_verification_pipeline(vuln_uuid: str):
 
         # 2. Process root vulnerability attachments
         for att in vuln_data.get("downloaded_attachments", []):
-            gcs_uri = upload_attachment_to_gcs(att["uuid"], att["name"], vuln_uuid, bucket)
+            gcs_uri = upload_attachment_to_gcs(att["uuid"], att["name"], vuln_uuid, bucket, user_api_key)
             att["gcs_uri"] = gcs_uri
             if gcs_uri: gcs_uris_to_cleanup.append(gcs_uri)
 
         # 3. Process comment attachments
         for comment in vuln_data.get("fetched_comments", []):
             for c_att in comment.get("downloaded_attachments", []):
-                gcs_uri = upload_attachment_to_gcs(c_att["uuid"], c_att["name"], vuln_uuid, bucket)
+                gcs_uri = upload_attachment_to_gcs(c_att["uuid"], c_att["name"], vuln_uuid, bucket, user_api_key)
                 c_att["gcs_uri"] = gcs_uri
                 if gcs_uri: gcs_uris_to_cleanup.append(gcs_uri)
 
@@ -948,16 +964,18 @@ def trigger_luigi_verification_pipeline(vuln_uuid: str):
 
 
 @router.post("/validating-vulns/{uuid}/analyze")
-def start_ai_analysis(uuid: str, background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user)):
+def start_ai_analysis(uuid: str, background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
     """
     Trigs trigger_luigi_verification_pipeline: Background task to prep the JSON payload and alert Luigi.
+    0. Fetch personal key before triggering the background pipeline and Pass it into the background task
     1. Get the cleaned JSON payload
     2. Process root vulnerability attachments
     3. Process comment attachments
     4. Ship to Pub/Sub
     5. future.result() forces the background task to wait for Google to confirm the message
     """
-    background_tasks.add_task(trigger_luigi_verification_pipeline, uuid)
+    user_api_key = get_user_kiss24_key(cursor, str(current_user["id"]))
+    background_tasks.add_task(trigger_luigi_verification_pipeline, uuid, user_api_key)
     return {"message": "Luigi pipeline started"}
 
 

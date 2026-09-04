@@ -93,14 +93,6 @@ export default function Kiss24SyncSettings() {
         </div>
       </div>
 
-      <div className="bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-900/30 p-4 rounded-xl flex items-center gap-3 text-amber-800 dark:text-amber-300 mb-8 shadow-sm">
-        <AlertCircle className="shrink-0" size={24} />
-        <div className="text-sm">
-          <strong className="block mb-0.5">System Prerequisites</strong>
-          You must configure your Keep Secure 24 Personal API key in your profile before running these global synchronization tasks.
-        </div>
-      </div>
-
       <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
 
         {/* SYNC ORGS */}

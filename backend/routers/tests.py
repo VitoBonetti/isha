@@ -522,35 +522,38 @@ def process_bulk_tests_background(asset_ids: List[UUID4], user_id: str, role: st
 
     with db_cursor_context() as cursor:
         if not cursor: return
+
         for asset_id in asset_ids:
-            cursor.execute('''
+            cursor.execute("""
                 SELECT r.name, r.service_forecast_id, s.default_credits, s.default_duration_weeks,
-                       s.name as service_name, c.name as country_name, s.auto_provision_workspace
+                       s.name as service_name, c.name as country_name, s.auto_provision_workspace, r.category_id
                 FROM assets a
                 JOIN raw_assets r ON a.raw_asset_id = r.id
                 LEFT JOIN services_lanes s ON r.service_forecast_id = s.id
                 LEFT JOIN countries c ON r.country_id = c.id
-                WHERE a.id = %s 
-                 AND (r.duplicate_allowed = TRUE OR NOT EXISTS (
-                    SELECT 1 FROM test_assets ta 
-                     JOIN tests t ON ta.test_id = t.id 
-                     WHERE ta.asset_id = a.id 
-                         AND t.stages::text IN ('NOT_PLANNED', 'SCHEDULED', 'IN_PROGRESS')
-                ))
-            ''', (str(asset_id),))
+                WHERE a.id = %s
+                    AND (r.duplicate_allowed = TRUE OR NOT EXISTS (
+                        SELECT 1 FROM test_assets ta 
+                        JOIN tests t ON ta.test_id = t.id 
+                        WHERE ta.asset_id = a.id 
+                        AND t.stages::text IN ('NOT_PLANNED', 'SCHEDULED', 'IN_PROGRESS')
+                    ))
+            """, (str(asset_id),))
             asset_data = cursor.fetchone()
             if not asset_data or not asset_data[1]: continue
 
-            asset_name, service_lane_id, default_credits, default_duration_weeks, service_name, country_name, auto_provision = asset_data
+            asset_name, service_lane_id, default_credits, default_duration_weeks, service_name, country_name, auto_provision, cat_id = asset_data
 
             new_test_id = str(uuid.uuid4())
             credits = float(default_credits) if default_credits is not None else 2.0
             duration = int(default_duration_weeks) if default_duration_weeks is not None else 1
 
-            cursor.execute('''
-                INSERT INTO tests (id, name, service_lane_id, credits_per_week, duration_weeks, stages) 
-                 VALUES (%s, %s, %s, %s, %s, 'NOT_PLANNED') RETURNING id
-            ''', (new_test_id, asset_name, str(service_lane_id), credits, duration))
+            # Insert with category_id
+            cursor.execute("""
+                INSERT INTO tests (id, name, service_lane_id, category_id, credits_per_week, duration_weeks, stages)
+                  VALUES (%s, %s, %s, %s, %s, %s, 'NOT_PLANNED') RETURNING id
+            """, (new_test_id, asset_name, str(service_lane_id), str(cat_id) if cat_id else None, credits,
+                  duration))
 
             log_audit_event(
                 user_id=str(user_id),
@@ -586,11 +589,13 @@ def create_test(t: TestCreate, background_tasks: BackgroundTasks,
     Admin Only Endpoint to create a new Test
     """
     new_test_id = str(uuid.uuid4())
+    cat_id = str(t.category_id) if hasattr(t, 'category_id') and t.category_id else None
 
     cursor.execute('''
-        INSERT INTO tests (id, name, service_lane_id, credits_per_week, duration_weeks, stages) 
-        VALUES (%s, %s, %s, %s, %s, 'NOT_PLANNED') RETURNING id
-    ''', (new_test_id, t.name, str(t.service_lane_id), t.credits_per_week, t.duration_weeks))
+            INSERT INTO tests (id, name, service_lane_id, category_id, credits_per_week, duration_weeks, stages) 
+             VALUES (%s, %s, %s, %s, %s, %s, 'NOT_PLANNED') RETURNING id
+        ''', (new_test_id, t.name, str(t.service_lane_id), cat_id, t.credits_per_week, t.duration_weeks))
+
     new_id = cursor.fetchone()[0]
 
     if t.asset_ids:
@@ -624,12 +629,15 @@ def get_all_tests(current_user: dict = Depends(get_current_user), cursor=Depends
         SELECT t.id, t.name, t.start_week, t.start_year, t.duration_weeks, t.stages::text as status,
             s.name as service_lane_name, s.is_active as is_service_active,
             s.auto_provision_workspace,
+            sc.name as category_name, 
             COALESCE((SELECT string_agg(DISTINCT u.name, ', ') FROM assignments a JOIN users u ON a.user_id = u.id WHERE a.test_id = t.id), 'Unassigned') as assigned_pentesters,
             EXISTS(SELECT 1 FROM secret_notes WHERE test_id = t.id) as has_secret,
             t.drive_folder_url,
             t.kiss24,
             (SELECT a.raw_asset_id FROM test_assets ta JOIN assets a ON ta.asset_id = a.id WHERE ta.test_id = t.id LIMIT 1) as raw_asset_id
-        FROM tests t LEFT JOIN services_lanes s ON t.service_lane_id = s.id
+        FROM tests t 
+        LEFT JOIN services_lanes s ON t.service_lane_id = s.id
+        LEFT JOIN service_categories sc ON t.category_id = sc.id
         ORDER BY t.start_year DESC NULLS LAST, t.start_week DESC NULLS LAST, t.name ASC
     ''')
     columns = [col[0] for col in cursor.description]

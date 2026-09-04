@@ -247,7 +247,16 @@ export default function TestsView() {
                         </Link>
                       </td>
                       <td className="p-4">
-                        <span className="font-medium text-slate-700 dark:text-zinc-300 whitespace-nowrap">{test.service_lane_name || 'N/A'}</span>
+                        <div className="flex flex-col gap-1 items-start">
+                          <span className="font-medium text-slate-700 dark:text-zinc-300 whitespace-nowrap">
+                            {test.service_lane_name || 'N/A'}
+                          </span>
+                          {test.category_name && (
+                            <span className="text-[10px] font-bold bg-slate-100 text-slate-600 dark:bg-zinc-800 dark:text-zinc-400 px-1.5 py-0.5 rounded uppercase tracking-wider">
+                              {test.category_name}
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="p-4">
                         {test.start_week ? (
@@ -372,9 +381,14 @@ export default function TestsView() {
                   </div>
 
                   <div className="grid grid-cols-2 gap-2 mt-1">
-                    <div className="flex flex-col gap-0.5">
+                    <div className="flex flex-col gap-0.5 items-start">
                       <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Service Lane</span>
                       <span className="text-xs font-medium text-slate-700 dark:text-zinc-300 truncate">{test.service_lane_name || 'N/A'}</span>
+                      {test.category_name && (
+                        <span className="mt-0.5 text-[9px] font-bold bg-slate-100 text-slate-600 dark:bg-zinc-800 dark:text-zinc-400 px-1.5 py-0.5 rounded uppercase tracking-wider truncate max-w-full">
+                          {test.category_name}
+                        </span>
+                      )}
                     </div>
                     <div className="flex flex-col gap-0.5 items-end">
                       <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Status</span>

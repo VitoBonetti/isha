@@ -6,9 +6,11 @@ import {
   RefreshCw, ExternalLink, ShieldAlert, Wand2, ArrowUpDown, ArrowUp, ArrowDown,
   Filter, ChevronLeft, ChevronRight, MessageSquareText, CheckCircle2, AlertCircle
 } from 'lucide-react';
+import { useAppContext } from '../context/AppContext';
+import Kiss24KeyModal from '../components/Modals/Kiss24KeyModal';
 
 // --- SUB-COMPONENT: Expandable Row ---
-const VulnRow = ({ v, onUpdateField }: { v: any, onUpdateField: (uuid: string, field: string, value: any) => void }) => {
+const VulnRow = ({ v, onUpdateField, isKeyReady }: { v: any, onUpdateField: (uuid: string, field: string, value: any) => void, isKeyReady: boolean }) => {
   const [issues, setIssues] = useState(v.other_issue || "");
   const [notes, setNotes] = useState(v.note || "");
   const [action, setAction] = useState(v.action_taken || "");
@@ -95,17 +97,19 @@ const VulnRow = ({ v, onUpdateField }: { v: any, onUpdateField: (uuid: string, f
         <td className="p-4 text-center" onClick={e => e.stopPropagation()}>
           <button
             onClick={(e) => triggerAiAnalysis(e, v.uuid)}
-            disabled={isAnalyzing || !['Low', 'Info'].includes(v.severity)}
+            disabled={!isKeyReady || isAnalyzing || !['Low', 'Info'].includes(v.severity)}
             className={`p-1.5 rounded-lg shrink-0 transition-all ${
-              isAnalyzing
-                ? 'bg-indigo-100 text-indigo-500 cursor-wait'
-                : v.ai_suggestion
-                  ? 'bg-emerald-100 text-emerald-600 hover:bg-emerald-200 cursor-pointer shadow-sm'
-                  : ['Low', 'Info'].includes(v.severity)
-                    ? 'bg-indigo-50 hover:bg-indigo-100 text-indigo-600 cursor-pointer shadow-sm'
-                    : 'bg-slate-100 dark:bg-zinc-800 text-slate-400 dark:text-zinc-500 cursor-not-allowed opacity-70'
+              !isKeyReady
+                ? 'bg-slate-100 dark:bg-zinc-800 text-slate-400 dark:text-zinc-500 cursor-not-allowed opacity-70'
+                : isAnalyzing
+                  ? 'bg-indigo-100 text-indigo-500 cursor-wait'
+                  : v.ai_suggestion
+                    ? 'bg-emerald-100 text-emerald-600 hover:bg-emerald-200 cursor-pointer shadow-sm'
+                    : ['Low', 'Info'].includes(v.severity)
+                      ? 'bg-indigo-50 hover:bg-indigo-100 text-indigo-600 cursor-pointer shadow-sm'
+                      : 'bg-slate-100 dark:bg-zinc-800 text-slate-400 dark:text-zinc-500 cursor-not-allowed opacity-70'
             }`}
-            title={v.ai_suggestion ? "Luigi has analyzed this! Click to run again." : "Ask Luigi to verify evidence"}
+            title={!isKeyReady ? "Valid API Key Required" : v.ai_suggestion ? "Luigi has analyzed this! Click to run again." : "Ask Luigi to verify evidence"}
           >
             <Wand2 size={16} className={isAnalyzing ? "animate-spin" : ""} />
           </button>
@@ -193,6 +197,13 @@ const VulnRow = ({ v, onUpdateField }: { v: any, onUpdateField: (uuid: string, f
 
 // --- MAIN PAGE VIEW ---
 export default function ValidatingVulnsView() {
+  const { currentUser } = useAppContext();
+
+  // Key Validation States
+  const [isKeyValid, setIsKeyValid] = useState<boolean | null>(null);
+  const [isValidatingKey, setIsValidatingKey] = useState(false);
+  const [isKeyModalOpen, setIsKeyModalOpen] = useState(false);
+
   const [vulns, setVulns] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
@@ -210,6 +221,21 @@ export default function ValidatingVulnsView() {
   // Pagination States
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [pageSize, setPageSize] = useState<number>(10);
+
+  useEffect(() => {
+    if (currentUser?.has_kiss24_key) {
+      setIsValidatingKey(true);
+      axios.get('/api/users/me/kiss24-key/validate')
+        .then(res => setIsKeyValid(res.data.is_valid))
+        .catch(() => setIsKeyValid(false))
+        .finally(() => setIsValidatingKey(false));
+    } else if (!currentUser?.has_kiss24_key) {
+      setIsKeyValid(false);
+    }
+  }, [currentUser?.has_kiss24_key]);
+
+  // Derived Boolean
+  const isKeyReady = currentUser?.has_kiss24_key && isKeyValid !== false;
 
   const loadLocalData = async () => {
     try {
@@ -344,14 +370,43 @@ export default function ValidatingVulnsView() {
           </div>
           <button
             onClick={handleSync}
-            disabled={syncing}
-            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl transition-colors shadow-sm disabled:opacity-70 cursor-pointer text-sm"
+            disabled={!isKeyReady || syncing}
+            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl transition-colors shadow-sm disabled:opacity-70 disabled:cursor-not-allowed cursor-pointer text-sm"
           >
             <RefreshCw size={16} className={syncing ? "animate-spin" : ""} />
             {syncing ? "Syncing API..." : "Sync Keep Secure 24"}
           </button>
         </div>
+        {/* --- BANNER SECTION --- */}
+        {!currentUser?.has_kiss24_key && (
+          <div className="bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-900/30 p-4 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-4 mb-6 shadow-sm">
+            <div className="flex items-center gap-3 text-red-800 dark:text-red-300">
+              <AlertCircle className="shrink-0" size={24} />
+              <div className="text-sm">
+                <strong className="block mb-0.5">Missing Personal API Key</strong>
+                You must configure your Keep Secure 24 API key before you can interact with the external platform.
+              </div>
+            </div>
+            <button onClick={() => setIsKeyModalOpen(true)} className="w-full sm:w-auto shrink-0 px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-lg transition-colors shadow-md">
+              Configure Key
+            </button>
+          </div>
+        )}
 
+        {currentUser?.has_kiss24_key && isKeyValid === false && !isValidatingKey && (
+          <div className="bg-orange-50 dark:bg-orange-900/10 border border-orange-200 dark:border-orange-900/30 p-4 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-4 mb-6 shadow-sm">
+            <div className="flex items-center gap-3 text-orange-800 dark:text-orange-300">
+              <AlertCircle className="shrink-0" size={24} />
+              <div className="text-sm">
+                <strong className="block mb-0.5">Invalid or Expired API Key</strong>
+                Your Keep Secure 24 API key was rejected by the server. It may have expired or been revoked.
+              </div>
+            </div>
+            <button onClick={() => setIsKeyModalOpen(true)} className="w-full sm:w-auto shrink-0 px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold rounded-lg transition-colors shadow-md">
+              Reset Key
+            </button>
+          </div>
+        )}
         {/* FILTER BAR */}
         <div className="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-2xl p-4 mb-6 shadow-sm flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3 flex-wrap">
@@ -414,7 +469,7 @@ export default function ValidatingVulnsView() {
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-zinc-800">
                 {paginatedVulns.map(v => (
-                  <VulnRow key={v.uuid} v={v} onUpdateField={handleUpdateField} />
+                  <VulnRow key={v.uuid} v={v} onUpdateField={handleUpdateField} isKeyReady={isKeyReady} />
                 ))}
               </tbody>
             </table>
@@ -448,6 +503,7 @@ export default function ValidatingVulnsView() {
           </div>
         </div>
       </div>
+      <Kiss24KeyModal isOpen={isKeyModalOpen} onClose={() => setIsKeyModalOpen(false)} />
     </div>
   );
 }
