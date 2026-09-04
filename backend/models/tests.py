@@ -50,7 +50,7 @@ class TestDocuments(Base):
     __tablename__ = 'test_documents'
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    test_id = Column(UUID(as_uuid=True), ForeignKey('tests.id', ondelete='CASCADE'), nullable=False)
+    test_id = Column(UUID(as_uuid=True), ForeignKey('tests.id', ondelete='CASCADE'), nullable=True)
     drive_file_id = Column(String(255), unique=True, nullable=False)
     file_name = Column(String(500), nullable=False)
     mime_type = Column(String(255), nullable=True)
@@ -70,7 +70,7 @@ class DocumentChunk(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     document_id = Column(UUID(as_uuid=True), ForeignKey('test_documents.id', ondelete='CASCADE'), nullable=False)
-    test_id = Column(UUID(as_uuid=True), ForeignKey('tests.id', ondelete='CASCADE'), nullable=False)
+    test_id = Column(UUID(as_uuid=True), ForeignKey('tests.id', ondelete='CASCADE'), nullable=True)
     chunk_index = Column(Integer, nullable=False)
     text_content = Column(Text, nullable=False)
     embedding = Column(Vector(768), nullable=False)  # 768 is the standard dimension output for gemini-embedding-2

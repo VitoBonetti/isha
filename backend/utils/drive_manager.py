@@ -42,6 +42,60 @@ class DriveManager:
         folder = self.find_folder(name, parent_id)
         return folder if folder else self.create_folder(name, parent_id)
 
+    def scan_folder_recursive(self, folder_id: str) -> list:
+        """Recursively scans a folder and all subfolders, returning files only."""
+        found_files = []
+        try:
+            query = f"'{folder_id}' in parents and trashed=false"
+
+            # Added includeItemsFromAllDrives=True for Shared Drives
+            results = self.drive_service.files().list(
+                q=query,
+                fields="files(id, name, mimeType, webViewLink, modifiedTime)",
+                supportsAllDrives=True,
+                includeItemsFromAllDrives=True
+            ).execute()
+
+            for item in results.get('files', []):
+                if item['mimeType'] == 'application/vnd.google-apps.folder':
+                    # It found your subfolder! Dive into it:
+                    found_files.extend(self.scan_folder_recursive(item['id']))
+                else:
+                    # It found your file! Keep it:
+                    found_files.append(item)
+
+            return found_files
+        except Exception as e:
+            print(f"Error recursively scanning folder {folder_id}: {e}")
+            return []
+
+    def sync_global_knowledge_base(self):
+        """Indexes files from the global knowledge base folder."""
+        kb_folder_id = os.getenv('KNOWLEDGE_BASE_FOLDER_ID')
+
+        if not kb_folder_id:
+            raise ValueError("KNOWLEDGE_BASE_FOLDER_ID is not set in the environment variables.")
+
+        files = self.scan_folder_recursive(kb_folder_id)
+
+        if not files:
+            raise ValueError(
+                f"Drive scanner found 0 files in folder {kb_folder_id}. Check permissions or folder contents.")
+
+        with db_cursor_context() as cursor:
+            for f in files:
+                mod_time = datetime.strptime(f['modifiedTime'],
+                                             "%Y-%m-%dT%H:%M:%S.%fZ") if 'modifiedTime' in f else datetime.now()
+                # Upsert with test_id = NULL and doc_type = 'KNOWLEDGE_BASE'
+                cursor.execute('''
+                    INSERT INTO test_documents (id, test_id, drive_file_id, file_name, mime_type, file_url, doc_type, last_modified, synced_at)
+                    VALUES (%s, NULL, %s, %s, %s, %s, 'KNOWLEDGE_BASE', %s, CURRENT_TIMESTAMP)
+                    ON CONFLICT (drive_file_id) DO UPDATE SET 
+                        file_name = EXCLUDED.file_name, file_url = EXCLUDED.file_url, last_modified = EXCLUDED.last_modified, synced_at = CURRENT_TIMESTAMP
+                ''', (str(uuid.uuid4()), f['id'], f['name'], f.get('mimeType', 'unknown'), f.get('webViewLink', ''),
+                      mod_time))
+            cursor.connection.commit()
+
     def provision_test_workspace(self, test_id: str, year: int, service_name: str, market: str, test_name: str):
         try:
             # 1. Find "Reports" folder inside SOURCE_FOLDER_ID

@@ -13,6 +13,7 @@ from database import get_db_cursor, db_cursor_context
 from routers.auth import require_admin
 from utils.document_parser import extract_text_from_drive_file
 from utils.secret_manager import get_secret
+from utils.drive_manager import DriveManager
 from audit_logger import log_audit_event
 from schema import RagChatRequest, RagAIResponse, RagChatBulkDeleteRequest, FeedbackRequest
 
@@ -63,23 +64,47 @@ def process_test_documents_background(test_id: str, user_id: str, user_role: str
     """Background task to extract, embed, and store document chunks using structural splitting."""
     with db_cursor_context() as cursor:
         try:
-            # Fetch the is_virtual flag directly from the database schema
-            cursor.execute("""
-                SELECT id, drive_file_id, mime_type, file_name, doc_type, is_virtual 
-                FROM test_documents 
-                WHERE test_id = %s
-            """, (test_id,))
-            documents = cursor.fetchall()
+            if test_id:
+                # Fetch the is_virtual flag directly from the database schema
+                cursor.execute("""
+                    SELECT id, drive_file_id, mime_type, file_name, doc_type, is_virtual 
+                    FROM test_documents 
+                    WHERE test_id = %s
+                """, (test_id,))
+                documents = cursor.fetchall()
 
-            if not documents:
-                log_audit_event(
-                    user_id=str(user_id), role=str(user_role), action="RAG_NO_DOC_FOUND",
-                    resource_type="RAG", resource_id=str(test_id),
-                    details="No documents found in the database for this test to index."
-                )
-                return
+                if not documents:
+                    log_audit_event(
+                        user_id=str(user_id), role=str(user_role), action="RAG_NO_DOC_FOUND",
+                        resource_type="RAG", resource_id=str(test_id),
+                        details="No documents found in the database for this test to index."
+                    )
+                    return
 
-            cursor.execute("DELETE FROM document_chunks WHERE test_id = %s", (test_id,))
+                cursor.execute("DELETE FROM document_chunks WHERE test_id = %s", (test_id,))
+            else:
+                cursor.execute("""
+                    SELECT id, drive_file_id, mime_type, file_name, doc_type, is_virtual 
+                    FROM test_documents 
+                    WHERE test_id IS NULL AND doc_type = 'KNOWLEDGE_BASE'
+                """)
+                documents = cursor.fetchall()
+
+                if not documents:
+                    log_audit_event(
+                        user_id=str(user_id), role=str(user_role), action="RAG_NO_DOC_FOUND",
+                        resource_type="RAG", resource_id="KNOWLEDGE_BASE",
+                        details="No documents found in the database for this test to index."
+                    )
+                    return
+
+                cursor.execute("""
+                    DELETE FROM document_chunks 
+                    WHERE document_id IN (
+                        SELECT id FROM test_documents 
+                        WHERE test_id IS NULL AND doc_type = 'KNOWLEDGE_BASE'
+                    )
+                """)
 
             for doc in documents:
                 doc_id, drive_file_id, mime_type, file_name, doc_type, is_virtual = doc
@@ -168,6 +193,53 @@ def process_test_documents_background(test_id: str, user_id: str, user_role: str
             )
 
 
+def sync_knowledge_base_background(user_id: str, user_role: str):
+    """Background worker specifically for the Global Knowledge Base."""
+    print(f"[{datetime.now(timezone.utc)}] Starting Knowledge Base Drive & RAG sync...")
+
+    # 1. Fetch new files from Google Drive
+    try:
+        DriveManager().sync_global_knowledge_base()
+    except Exception as e:
+        log_audit_event(
+            user_id=user_id, role=user_role, action="SYNC_KB_DRIVE_FAILED",
+            resource_type="RAG", resource_id="KNOWLEDGE_BASE",
+            details=f"Failed to fetch new files from Google Drive: {e}"
+        )
+        return
+
+    # 2. Embed the files into the AI Vector DB (Passing None for test_id)
+    try:
+        process_test_documents_background(None, user_id, user_role)
+        log_audit_event(
+            user_id=user_id, role=user_role, action="SYNC_KB_RAG_COMPLETED",
+            resource_type="RAG", resource_id="KNOWLEDGE_BASE",
+            details="Knowledge Base successfully synced and embedded."
+        )
+    except Exception as e:
+        log_audit_event(
+            user_id=user_id, role=user_role, action="SYNC_KB_RAG_FAILED",
+            resource_type="RAG", resource_id="KNOWLEDGE_BASE",
+            details=f"Failed to embed Knowledge Base: {e}"
+        )
+
+
+@router.post("/knowledge-base/sync", summary="[Admin] Sync Global Knowledge Base")
+def trigger_knowledge_base_sync(
+        background_tasks: BackgroundTasks,
+        current_user: dict = Depends(require_admin)
+):
+    """Admin endpoint to instantly sync only the Global Knowledge Base."""
+    background_tasks.add_task(sync_knowledge_base_background, str(current_user["id"]), str(current_user["role"]))
+
+    log_audit_event(
+        user_id=str(current_user["id"]), role=current_user["role"],
+        action="SYNC_KB_RAG_STARTED", resource_type="RAG", resource_id="KNOWLEDGE_BASE",
+        details="Manual sync of Global Knowledge Base initiated."
+    )
+    return {"message": "Knowledge Base sync started in the background."}
+
+
 @router.get("/", summary="[Admin] Testing endpoint for check the chunck")
 def check_chunks(current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     cursor.execute("""
@@ -203,6 +275,9 @@ def sync_test_to_rag(
 
 # --- GLOBAL SYNC WORKER ---
 def sync_all_active_tests_background(user_id: str, user_role: str):
+
+    sync_knowledge_base_background(user_id, user_role)
+
     with db_cursor_context() as cursor:
         cursor.execute("SELECT id FROM tests WHERE drive_folder_id IS NOT NULL")
         test_rows = cursor.fetchall()
@@ -271,6 +346,7 @@ def get_rag_filters(current_user: dict = Depends(require_admin), cursor=Depends(
 
     # 1. Doc Types (Trigger: /)
     filters.extend([
+        {"type": "doc_type", "id": "KNOWLEDGE_BASE", "name": "Knowledge-Base", "trigger": "/"},
         {"type": "doc_type", "id": "FULL_TEST_REPORT", "name": "Full-Test-Report", "trigger": "/"},
         {"type": "doc_type", "id": "LLM_ANALYSIS", "name": "LLM-Quality-Analysis", "trigger": "/"},
         {"type": "doc_type", "id": "VULN_REPORT", "name": "Vulnerability-Report", "trigger": "/"},
@@ -335,25 +411,33 @@ def chat_with_documents(
         where_clauses = []
         params = [query_vector]
 
-        if req.asset_id:
-            query_sql = """
-                SELECT dc.id, dc.text_content, td.id, td.file_name, td.file_url, td.doc_type, 1 - (dc.embedding <=> %s::vector) as similarity, dc.test_id
-                FROM document_chunks dc
-                JOIN test_documents td ON dc.document_id = td.id
-                JOIN test_assets ta ON dc.test_id = ta.test_id
-            """
-            where_clauses.append("ta.asset_id = %s")
-            params.append(str(req.asset_id))
-        elif req.test_id:
-            where_clauses.append("dc.test_id = %s")
-            params.append(str(req.test_id))
+        if req.doc_type == 'KNOWLEDGE_BASE':
+            # ONLY search the global knowledge base
+            where_clauses.append("dc.test_id IS NULL")
+            where_clauses.append("td.doc_type = 'KNOWLEDGE_BASE'")
+        else:
+            # EXCLUDE the global knowledge base from normal test chats
+            where_clauses.append("dc.test_id IS NOT NULL")
 
-        if req.doc_type:
-            where_clauses.append("td.doc_type = %s")
-            params.append(req.doc_type)
+            if req.asset_id:
+                query_sql = """
+                    SELECT dc.id, dc.text_content, td.id, td.file_name, td.file_url, td.doc_type, 1 - (dc.embedding <=> %s::vector) as similarity, dc.test_id
+                    FROM document_chunks dc
+                    JOIN test_documents td ON dc.document_id = td.id
+                    JOIN test_assets ta ON dc.test_id = ta.test_id
+                """
+                where_clauses.append("ta.asset_id = %s")
+                params.append(str(req.asset_id))
+            elif req.test_id:
+                where_clauses.append("dc.test_id = %s")
+                params.append(str(req.test_id))
 
-        if where_clauses:
-            query_sql += " WHERE " + " AND ".join(where_clauses)
+            if req.doc_type:
+                where_clauses.append("td.doc_type = %s")
+                params.append(req.doc_type)
+
+            if where_clauses:
+                query_sql += " WHERE " + " AND ".join(where_clauses)
 
         query_sql += " ORDER BY dc.embedding <=> %s::vector LIMIT 30"
         params.append(query_vector)
