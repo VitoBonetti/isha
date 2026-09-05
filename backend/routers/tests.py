@@ -57,10 +57,11 @@ FRONTEND_TO_DB_STAGES = {
 KISS24_BASE_URL = str(os.environ.get("KISS_24_ENDPOINT"))
 BASE_URL = str(os.environ.get("FRONTEND_URL"))
 
+
 ####################################
 # ---        HELPERS          ---  #
 ####################################
-# TEST HISTORY LOGGER
+# history logger
 def log_test_history(cursor, test_id: str, user_id: str, action: str, details: str = None):
     """Logs an event to the test_history AND cascades it to the asset_history of all attached assets."""
 

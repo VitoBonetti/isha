@@ -6,7 +6,7 @@ import {
   Building2, ExternalLink, ChevronLeft,
   ChevronRight, ArrowUpDown, Layers, Database
 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom'; // Import Link
 
 interface Suggestion {
   kiss24_uuid: string;
@@ -345,8 +345,16 @@ export default function AssetReconciliationView() {
                             className="mt-1 shrink-0 w-4 h-4 rounded text-indigo-600 border-slate-300 focus:ring-indigo-500 cursor-pointer disabled:opacity-30"
                           />
                           <div>
-                            <div className="font-bold text-slate-900 dark:text-zinc-100">{candidate.mario_name}</div>
-                            <div className="font-mono text-xs text-indigo-600 dark:text-indigo-400 mt-0.5">
+                            <Link
+                              to={`/assets/raw/${candidate.mario_raw_asset_id}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="font-bold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1.5"
+                              title="Open Asset Details in new tab"
+                            >
+                              {candidate.mario_name} <ExternalLink size={12} className="opacity-70" />
+                            </Link>
+                            <div className="font-mono text-xs text-slate-500 dark:text-zinc-500 mt-0.5">
                               SNow ID: {candidate.snow_number}
                             </div>
                           </div>

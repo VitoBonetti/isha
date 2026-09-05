@@ -13,7 +13,6 @@ from routers.auth import get_current_user, require_admin, require_write_access
 from audit_logger import log_audit_event
 from websockets_manager import manager
 
-
 router = APIRouter(prefix="/api/luigi", tags=["Luigi"])
 
 WEB_APP_URL = os.environ.get("LUIGI_MIDDLEWARE_CONTACTS_URL")
@@ -71,7 +70,7 @@ def draft_intro_email(test_id: str, current_user: dict = Depends(require_admin),
     1. Fetch Test, Asset, Country, and Service data using the correct junction tables
     2. Fetch Pentesters using the correct Assignments table
     3. Calculate the start date (Monday of the given week/year)
-    4. Fetch the REAL Contacts! (Using the CountryContacts junction)
+    4. Fetch the REAL Contacts! (Using BOTH CountryContacts and RawAssetContacts)
     5. Populate Template
     """
     # 1. Fetch Test, Asset, Country, and Service data using the correct junction tables
@@ -110,10 +109,8 @@ def draft_intro_email(test_id: str, current_user: dict = Depends(require_admin),
         """, (test_id,))
     pentester_rows = cursor.fetchall()
 
-    # Extract names for the email body template
     pentesters = ", ".join([r[0] for r in pentester_rows if r[0]])
-    # Extract emails to add to the CC list
-    pentester_emails = [r[1] for r in pentester_rows if r[1]]
+    pentester_emails = set([r[1] for r in pentester_rows if r[1]])
 
     # 3. Calculate the start date (Monday of the given week/year)
     start_date_str = "TBD"
@@ -124,25 +121,52 @@ def draft_intro_email(test_id: str, current_user: dict = Depends(require_admin),
         except:
             pass
 
-    # 4. Fetch the REAL Contacts! (Using the CountryContacts junction)
+    # 4. Fetch the REAL Contacts! (Merging Country and Asset Level Contacts)
     cursor.execute("""
-        SELECT DISTINCT con.email
+        SELECT c.email, cc.is_developer, cc.is_stakeholder
         FROM test_assets ta
         JOIN assets a ON ta.asset_id = a.id
         JOIN country_contacts cc ON a.country_id = cc.country_id
-        JOIN contacts con ON cc.contact_id = con.id
+        JOIN contacts c ON cc.contact_id = c.id
         WHERE ta.test_id = %s
-    """, (test_id,))
-    contact_emails = [r[0] for r in cursor.fetchall() if r[0]]
 
-    # Leave blank for now to prevent crashes; admin will fill in UI
-    to_email = contact_emails[0] if len(contact_emails) > 0 else ""
-    cc_list = contact_emails[1:] if len(contact_emails) > 1 else []
-    cc_list.extend(pentester_emails)
-    cc_list = list(set([e for e in cc_list if e]))
+        UNION
+
+        SELECT c.email, rac.is_developer, rac.is_stakeholder
+        FROM test_assets ta
+        JOIN assets a ON ta.asset_id = a.id
+        JOIN raw_asset_contacts rac ON a.raw_asset_id = rac.raw_asset_id
+        JOIN contacts c ON rac.contact_id = c.id
+        WHERE ta.test_id = %s
+    """, (test_id, test_id))
+
+    dev_emails = set()
+    stakeholder_emails = set()
+
+    for email, is_dev, is_stake in cursor.fetchall():
+        if email:
+            if is_dev: dev_emails.add(email)
+            if is_stake: stakeholder_emails.add(email)
+
+    # Routing Logic for TO and CC
+    to_list = list(dev_emails)
+    cc_list = list(stakeholder_emails) + list(pentester_emails)
+
+    if not to_list:
+        to_list = list(stakeholder_emails)
+        cc_list = list(pentester_emails)
+
+    if not to_list:
+        to_list = list(pentester_emails)
+        cc_list = []
+
+    # Ensure no duplicates between To and CC
+    cc_list = list(set(cc_list) - set(to_list))
+
+    to_email = ", ".join(to_list)
     cc_emails = ", ".join(cc_list)
 
-    # 4. Populate Template
+    # 5. Populate Template
     body = db_template.replace("{{service_lane}}", service_name or "Service")
     body = body.replace("{{country_code}}", country_code or "Country")
     body = body.replace("{{asset_name}}", asset_name or "Asset")
@@ -220,8 +244,8 @@ def draft_final_email(test_id: str, current_user: dict = Depends(get_current_use
     Endpoint to Draft Final Email
     1. Fetch Test, Asset, Country, Service data, AND kiss24
     2. Fetch Pentesters (Names AND Emails)
-    3. Fetch the REAL Contacts
-    4. Populate Template (You can add more specific final email placeholders later!)
+    3. Fetch the REAL Contacts (Using BOTH CountryContacts and RawAssetContacts)
+    4. Populate Template
     """
     # 1. Fetch Test, Asset, Country, Service data, AND kiss24
     cursor.execute("""
@@ -259,26 +283,54 @@ def draft_final_email(test_id: str, current_user: dict = Depends(get_current_use
     """, (test_id,))
     pentester_rows = cursor.fetchall()
     pentesters = ", ".join([r[0] for r in pentester_rows if r[0]])
-    pentester_emails = [r[1] for r in pentester_rows if r[1]]
+    pentester_emails = set([r[1] for r in pentester_rows if r[1]])
 
-    # 3. Fetch the REAL Contacts
+    # 3. Fetch the REAL Contacts (Merging Country and Asset Level Contacts)
     cursor.execute("""
-        SELECT DISTINCT con.email
+        SELECT c.email, cc.is_developer, cc.is_stakeholder
         FROM test_assets ta
         JOIN assets a ON ta.asset_id = a.id
         JOIN country_contacts cc ON a.country_id = cc.country_id
-        JOIN contacts con ON cc.contact_id = con.id
+        JOIN contacts c ON cc.contact_id = c.id
         WHERE ta.test_id = %s
-    """, (test_id,))
-    contact_emails = [r[0] for r in cursor.fetchall() if r[0]]
 
-    to_email = contact_emails[0] if len(contact_emails) > 0 else ""
-    cc_list = contact_emails[1:] if len(contact_emails) > 1 else []
-    cc_list.extend(pentester_emails)
-    cc_list = list(set([e for e in cc_list if e]))
+        UNION
+
+        SELECT c.email, rac.is_developer, rac.is_stakeholder
+        FROM test_assets ta
+        JOIN assets a ON ta.asset_id = a.id
+        JOIN raw_asset_contacts rac ON a.raw_asset_id = rac.raw_asset_id
+        JOIN contacts c ON rac.contact_id = c.id
+        WHERE ta.test_id = %s
+    """, (test_id, test_id))
+
+    dev_emails = set()
+    stakeholder_emails = set()
+
+    for email, is_dev, is_stake in cursor.fetchall():
+        if email:
+            if is_dev: dev_emails.add(email)
+            if is_stake: stakeholder_emails.add(email)
+
+    # Routing Logic for TO and CC
+    to_list = list(dev_emails)
+    cc_list = list(stakeholder_emails) + list(pentester_emails)
+
+    if not to_list:
+        to_list = list(stakeholder_emails)
+        cc_list = list(pentester_emails)
+
+    if not to_list:
+        to_list = list(pentester_emails)
+        cc_list = []
+
+    # Ensure no duplicates between To and CC
+    cc_list = list(set(cc_list) - set(to_list))
+
+    to_email = ", ".join(to_list)
     cc_emails = ", ".join(cc_list)
 
-    # 4. Populate Template (You can add more specific final email placeholders later!)
+    # 4. Populate Template
     body = db_template.replace("{{service_lane}}", service_name or "Service")
     body = body.replace("{{country_code}}", country_code or "Country")
     body = body.replace("{{asset_name}}", asset_name or "Asset")
@@ -287,7 +339,6 @@ def draft_final_email(test_id: str, current_user: dict = Depends(get_current_use
     body = body.replace("{{pentesters}}", pentesters or "TBD")
     body = body.replace("{{kiss24}}", str(kiss24) if kiss24 else "MISSING_KISS24_ID")
 
-    # We can change the subject line dynamically here for the final email
     subject = f"Pentest Completed: {country_code or ''} - {asset_name or ''} ({service_name or ''})"
 
     return {
@@ -350,7 +401,6 @@ def send_final_email(test_id: str, payload: SendEmailPayload, current_user: dict
             detail=f"Missing files in Workspace: Could not find the latest {' and '.join(missing)}."
         )
 
-
     luigi_payload = {
         "secret_key": LUIGI_MIDDLEWARE_KEY_NAME,
         "action": "SEND_EMAIL",
@@ -380,6 +430,7 @@ def send_final_email(test_id: str, payload: SendEmailPayload, current_user: dict
     cursor.connection.commit()
 
     return {"status": "Success"}
+
 
 # request meeting
 @router.get("/{test_id}/meeting-participants")

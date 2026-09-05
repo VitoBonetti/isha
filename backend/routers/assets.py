@@ -25,7 +25,9 @@ ALLOWED_MIME_TYPES = {
 }
 
 
-#--- VALIDATIONS HELPERS ---
+###################################
+# ---  VALIDATIONS HELPERS    --- #
+###################################
 def is_valid_file_signature(contents: bytes, filename: str) -> bool:
     """Validates file contents against expected magic numbers."""
     if not contents:
@@ -55,7 +57,9 @@ def sanitize_csv_injection(text: str) -> str:
     return text
 
 
-# --- ASSET TYPES DICTIONARY ---
+###################################
+# --- ASSET TYPES DICTIONARY  --- #
+###################################
 @router.get("/types")
 def get_asset_types(current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
     """
@@ -134,7 +138,9 @@ def delete_asset_type(type_id: str, current_user: dict = Depends(require_admin),
     return {"message": "Asset Type deleted."}
 
 
-# --- RAW ASSETS ---
+###################################
+# ---      RAW ASSETS         --- #
+###################################
 @router.get("/raw")
 def get_raw_assets(
         page: int = Query(1, ge=1), limit: int = Query(50, ge=1, le=500),
@@ -228,7 +234,9 @@ def get_raw_assets(
     return {"items": items, "total_count": total_count}
 
 
-# --- STANDARDIZED ASSET HISTORY LOGGING ---
+##################################################
+# ---  STANDARDIZED ASSET HISTORY LOGGING    --- #
+##################################################
 def insert_asset_history(cursor, raw_asset_id: str, user_id: str, action: str, details: str):
     """Guarantees a standardized action format and a strict, non-null Database Timestamp."""
     cursor.execute("""
@@ -642,7 +650,9 @@ def bulk_delete_raw_assets(
     return {"message": f"Processed successfully: {deleted_count} deleted, {archived_count} archived."}
 
 
-# --- LEGACY SYNCHRONOUS IMPORT IN BACKGROUND THREAD ---
+##############################################################
+# ---  LEGACY SYNCHRONOUS IMPORT IN BACKGROUND THREAD    --- #
+##############################################################
 def is_valid_uuid(val: str):
     """Helper to ensure provided CSV IDs are valid UUIDs to prevent DB crashes."""
     try:
@@ -828,10 +838,14 @@ async def import_assets(file: UploadFile = File(...), background_tasks: Backgrou
         "success": success_count,
         "failed": failed_items
     }
-# --- END LEGACY ---
+###################################
+# ---      END LEGACY         --- #
+###################################
 
 
-# --- THE PROMOTION ENGINE ---
+###################################
+# ---  THE PROMOTION ENGINE   --- #
+###################################
 @router.post("/promote", summary="[Admin Only]")
 def promote_raw_assets_to_pool(req: BulkAssetRequest, background_tasks: BackgroundTasks,
                                current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
@@ -925,7 +939,9 @@ def bulk_update_service_lane(req: BulkServiceUpdateRequest, background_tasks: Ba
     return {"message": f"Successfully updated service lane for {len(req.asset_ids)} assets."}
 
 
-# --- ACTIVE ASSET POOL ---
+###################################
+# ---    ACTIVE ASSET POOL    --- #
+###################################
 @router.get("/")
 def get_active_asset_pool(year: Optional[int] = None, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
     """
@@ -1055,7 +1071,9 @@ def remove_from_active_pool(asset_id: str, year: int, background_tasks: Backgrou
     return {"message": action_msg}
 
 
-# Service Now integrations
+###################################
+# --- ServiceNow integrations --- #
+###################################
 def full_background_sync_wrapper(user_id: str, user_role: str):
     """Wrapper to run the ENTIRE fetch and sync process in the background."""
 
@@ -1127,3 +1145,15 @@ def trigger_snow_sync(
     )
 
     return {"message": "ServiceNow sync started in the background. This may take a few minutes."}
+
+
+@router.get("/servicenow/last-sync", summary="[Admin Only]")
+def get_last_snow_sync(current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+    """
+    Returns the most recent sync timestamp from the ServiceNow metadata table.
+    """
+    cursor.execute("SELECT MAX(last_snow_sync) FROM raw_assets_snow_metadata")
+    row = cursor.fetchone()
+    if row and row[0]:
+        return {"last_sync": row[0]}
+    return {"last_sync": None}
