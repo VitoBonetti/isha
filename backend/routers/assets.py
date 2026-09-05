@@ -948,6 +948,8 @@ def get_active_asset_pool(year: Optional[int] = None, current_user: dict = Depen
             at.name as asset_type_name, 
             r.duplicate_allowed,
             r.kiss24_asset_id,
+            r.is_kpi,
+            r.is_critical,
             (
                 SELECT COUNT(*) > 0 
                 FROM test_assets ta 

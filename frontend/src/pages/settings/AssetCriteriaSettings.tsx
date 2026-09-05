@@ -3,7 +3,7 @@ import axios from 'axios';
 import toast, { Toaster } from 'react-hot-toast';
 import ConfirmModal from '../../components/Modals/ConfirmModal';
 import {
-  Settings2, Plus, Edit2, Trash2, X, Play, ListFilter, ChevronDown, ChevronRight
+  Settings2, Plus, Edit2, Trash2, X, Play, ListFilter, ChevronDown, ChevronRight, CheckCircle2, Filter
 } from 'lucide-react';
 
 // --- Custom Multi-Select Component ---
@@ -98,6 +98,13 @@ export default function AssetCriteriaSettings() {
       ]);
       setCriteria(critRes.data);
       setSchemaFields(fieldsRes.data);
+
+      // Auto-fetch relation data so names resolve immediately in the expanded table
+      fieldsRes.data.forEach((field: any) => {
+        if (field.type === 'relation') {
+          fetchRelationData(field.endpoint);
+        }
+      });
     } catch (error) {
       toast.error('Failed to load criteria engine data.');
     } finally {
@@ -113,7 +120,7 @@ export default function AssetCriteriaSettings() {
       const res = await axios.get(endpoint);
       setRelationCache(prev => ({ ...prev, [endpoint]: res.data }));
     } catch (error) {
-      toast.error('Failed to load dynamic field options.');
+      console.error('Failed to load dynamic field options for', endpoint);
     }
   };
 
@@ -204,6 +211,7 @@ export default function AssetCriteriaSettings() {
         const toastId = toast.loading(`Evaluating assets for ${year}...`);
         const res = await axios.post(`/api/asset-criteria/evaluate/${year}`, {});
         toast.success(`Evaluated ${res.data.assets_evaluated} assets. Updated ${res.data.assets_updated} records.`, { id: toastId });
+        fetchInitialData(); // Refresh the table to get the new is_evaluated boolean and updated_at timestamp
       }
     } catch (error) {
       toast.error(`${type === 'delete' ? 'Deletion' : 'Evaluation'} failed.`);
@@ -230,7 +238,7 @@ export default function AssetCriteriaSettings() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
         <div>
           <h1 className="text-xl font-bold text-slate-900 dark:text-zinc-100 flex items-center gap-2">
-            <Settings2 size={22} className="text-blue-500" /> Asset Criteria
+            <Filter size={22} className="text-blue-500" /> KPI Criteria
           </h1>
           <p className="text-sm text-slate-500 dark:text-zinc-400 mt-0.5">Manage rules for KPI and Criticality flags.</p>
         </div>
@@ -247,58 +255,92 @@ export default function AssetCriteriaSettings() {
               <th className="p-4 font-bold text-slate-600 dark:text-zinc-400">Year</th>
               <th className="p-4 font-bold text-slate-600 dark:text-zinc-400">Criticality Threshold</th>
               <th className="p-4 font-bold text-slate-600 dark:text-zinc-400">KPI Rules</th>
+              <th className="p-4 font-bold text-slate-600 dark:text-zinc-400">Last Updated</th>
               <th className="p-4 font-bold text-slate-600 dark:text-zinc-400 text-right">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 dark:divide-zinc-800">
-            {criteria.map(c => (
-              <React.Fragment key={c.id}>
-                <tr className="hover:bg-slate-50/50 dark:hover:bg-zinc-800/30 transition-colors">
-                  <td className="p-4 cursor-pointer" onClick={() => toggleRowExpansion(c.year)}>
-                    <ChevronRight size={16} className={`text-slate-400 transition-transform ${expandedYears.has(c.year) ? 'rotate-90 text-blue-500' : ''}`} />
-                  </td>
-                  <td className="p-4 font-bold text-slate-900 dark:text-zinc-100 text-base">{c.year}</td>
-                  <td className="p-4"><span className="font-mono bg-slate-100 dark:bg-zinc-800 px-2 py-1 rounded border border-slate-200 dark:border-zinc-700 text-slate-700 dark:text-zinc-300">≥ {c.criticality_threshold}</span></td>
-                  <td className="p-4 text-slate-500 dark:text-zinc-400"><div className="flex items-center gap-1.5"><ListFilter size={14} /> {c.kpi_rules.length}</div></td>
-                  <td className="p-4 text-right">
-                    <div className="flex justify-end gap-2">
-                      <button onClick={(e) => { e.stopPropagation(); setActionModal({ isOpen: true, year: c.year, type: 'evaluate' }) }} className="text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 p-2 rounded-xl transition-colors cursor-pointer" title="Evaluate Assets"><Play size={16} className="fill-current" /></button>
-                      <button onClick={(e) => { e.stopPropagation(); openPanel(c) }} className="text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 p-2 rounded-xl transition-colors cursor-pointer"><Edit2 size={16} /></button>
-                      <button onClick={(e) => { e.stopPropagation(); setActionModal({ isOpen: true, year: c.year, type: 'delete' }) }} className="text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 p-2 rounded-xl transition-colors cursor-pointer"><Trash2 size={16} /></button>
-                    </div>
-                  </td>
-                </tr>
-                {expandedYears.has(c.year) && (
-                  <tr className="bg-slate-50/50 dark:bg-zinc-950/30 border-t-0">
-                    <td colSpan={5} className="p-6 pt-2">
-                      <div className="ml-10 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-xl p-4 shadow-sm">
-                        <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Active KPI Conditions</h4>
-                        {c.kpi_rules.length === 0 ? (
-                          <span className="text-sm text-slate-400 italic">No rules defined.</span>
-                        ) : (
-                          <div className="flex flex-wrap gap-2">
-                            {c.kpi_rules.map((r: any, i: number) => {
-                              const fieldDef = schemaFields.find(f => f.name === r.field);
-                              return (
-                                <div key={i} className="flex items-center gap-2 text-xs bg-slate-50 dark:bg-zinc-950 border border-slate-100 dark:border-zinc-800 px-3 py-1.5 rounded-lg shadow-sm">
-                                  <span className="font-bold text-blue-600 dark:text-blue-400">{fieldDef?.label || r.field}</span>
-                                  <span className="font-mono text-slate-400 px-1">{r.operator}</span>
-                                  {r.value !== null && (
-                                    <span className="font-semibold text-slate-700 dark:text-zinc-300">
-                                      {Array.isArray(r.value) ? `[${r.value.length} selected]` : String(r.value)}
-                                    </span>
-                                  )}
-                                </div>
-                              )
-                            })}
-                          </div>
-                        )}
+            {criteria.map(c => {
+              const isEvaluated = Boolean(c.is_evaluated);
+              return (
+                <React.Fragment key={c.id}>
+                  <tr className="hover:bg-slate-50/50 dark:hover:bg-zinc-800/30 transition-colors">
+                    <td className="p-4 cursor-pointer" onClick={() => toggleRowExpansion(c.year)}>
+                      <ChevronRight size={16} className={`text-slate-400 transition-transform ${expandedYears.has(c.year) ? 'rotate-90 text-blue-500' : ''}`} />
+                    </td>
+                    <td className="p-4 font-bold text-slate-900 dark:text-zinc-100 text-base">{c.year}</td>
+                    <td className="p-4"><span className="font-mono bg-slate-100 dark:bg-zinc-800 px-2 py-1 rounded border border-slate-200 dark:border-zinc-700 text-slate-700 dark:text-zinc-300">≥ {c.criticality_threshold}</span></td>
+                    <td className="p-4 text-slate-500 dark:text-zinc-400"><div className="flex items-center gap-1.5"><ListFilter size={14} /> {c.kpi_rules.length}</div></td>
+                    <td className="p-4 text-slate-500 dark:text-zinc-400">
+                      {c.updated_at ? (
+                        <div className="flex items-center gap-1.5 text-slate-600 dark:text-slate-400 font-medium">
+                          {isEvaluated && <CheckCircle2 size={14} className="text-emerald-500" />}
+                          {new Date(c.updated_at).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}
+                        </div>
+                      ) : (
+                        <span className="italic text-slate-400">Never</span>
+                      )}
+                    </td>
+                    <td className="p-4 text-right">
+                      <div className="flex justify-end gap-2">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setActionModal({ isOpen: true, year: c.year, type: 'evaluate' }) }}
+                          className={`p-2 rounded-xl transition-colors cursor-pointer ${isEvaluated ? 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100 dark:bg-emerald-900/20 dark:hover:bg-emerald-900/40' : 'text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30'}`}
+                          title="Evaluate Assets"
+                        >
+                          <Play size={16} className={isEvaluated ? "fill-current" : ""} />
+                        </button>
+                        <button onClick={(e) => { e.stopPropagation(); openPanel(c) }} className="text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 p-2 rounded-xl transition-colors cursor-pointer" title="Edit Criteria"><Edit2 size={16} /></button>
+                        <button onClick={(e) => { e.stopPropagation(); setActionModal({ isOpen: true, year: c.year, type: 'delete' }) }} className="text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 p-2 rounded-xl transition-colors cursor-pointer" title="Delete Criteria"><Trash2 size={16} /></button>
                       </div>
                     </td>
                   </tr>
-                )}
-              </React.Fragment>
-            ))}
+
+                  {expandedYears.has(c.year) && (
+                    <tr className="bg-slate-50/50 dark:bg-zinc-950/30 border-t-0">
+                      <td colSpan={6} className="p-6 pt-2">
+                        <div className="ml-10 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-xl p-5 shadow-sm">
+                          <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4">Active KPI Conditions</h4>
+                          {c.kpi_rules.length === 0 ? (
+                            <span className="text-sm text-slate-400 italic">No rules defined.</span>
+                          ) : (
+                            <ul className="space-y-2">
+                              {c.kpi_rules.map((r: any, i: number) => {
+                                const fieldDef = schemaFields.find(f => f.name === r.field);
+                                const isRelation = fieldDef?.type === 'relation';
+                                const options = isRelation ? relationCache[fieldDef.endpoint] || [] : [];
+
+                                // Resolve readable names for IDs
+                                let displayValue = String(r.value);
+                                if (isRelation && Array.isArray(r.value)) {
+                                  displayValue = r.value.map(id => options.find((o: any) => o.id === id)?.name || id).join(', ');
+                                } else if (isRelation) {
+                                  displayValue = options.find((o: any) => o.id === r.value)?.name || r.value;
+                                }
+
+                                return (
+                                  <li key={i} className="flex items-center gap-3 text-sm bg-slate-50 dark:bg-zinc-950 border border-slate-100 dark:border-zinc-800 px-4 py-2.5 rounded-lg shadow-sm">
+                                    <span className="font-bold text-blue-600 dark:text-blue-400 min-w-[150px]">{fieldDef?.label || r.field}</span>
+                                    <span className="font-mono text-slate-500 dark:text-zinc-500 bg-slate-100 dark:bg-zinc-900 px-2 py-0.5 rounded text-xs shrink-0">
+                                      {r.operator}
+                                    </span>
+                                    {r.value !== null && r.operator !== 'is_null' && r.operator !== 'is_not_null' && (
+                                      <span className="font-semibold text-slate-700 dark:text-zinc-300 ml-2 whitespace-normal leading-tight">
+                                        {displayValue}
+                                      </span>
+                                    )}
+                                  </li>
+                                )
+                              })}
+                            </ul>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
+              );
+            })}
           </tbody>
         </table>
         {criteria.length === 0 && <div className="p-12 text-center text-sm text-slate-500">No criteria configured.</div>}
@@ -333,7 +375,11 @@ export default function AssetCriteriaSettings() {
                 <div>
                   <div className="flex items-center justify-between mb-4 border-b border-slate-200 dark:border-zinc-800 pb-2">
                     <h4 className="text-sm font-bold text-slate-900 dark:text-zinc-100">2. KPI Conditions (AND across fields, OR within same field)</h4>
-                    <button type="button" onClick={() => setFormData((p: any) => ({ ...p, kpi_rules: [...p.kpi_rules, { field: '', operator: '==', value: '' }] }))} className="text-xs font-bold text-blue-600 hover:text-blue-700 flex items-center gap-1 transition-colors">
+                    <button
+                      type="button"
+                      onClick={() => setFormData((p: any) => ({ ...p, kpi_rules: [{ field: '', operator: '==', value: '' }, ...p.kpi_rules] }))}
+                      className="text-xs font-bold text-blue-600 hover:text-blue-700 flex items-center gap-1 transition-colors"
+                    >
                       <Plus size={14} /> Add Rule
                     </button>
                   </div>

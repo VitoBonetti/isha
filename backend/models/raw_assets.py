@@ -71,8 +71,6 @@ class AssetCriteria(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     year = Column(Integer, unique=True, nullable=False)
     criticality_threshold = Column(Integer, nullable=False, default=8)
-
-    # Stores dynamic rules like: [{"field": "environment", "operator": "==", "value": "Production"}]
-    kpi_rules = Column(JSONB, nullable=False, server_default='[]')
-
+    kpi_rules = Column(JSONB, nullable=False, server_default='[]')  # Stores dynamic rules like: [{"field": "environment", "operator": "==", "value": "Production"}]
     updated_at = Column(DateTime(timezone=True), default=aware_utcnow, onupdate=aware_utcnow)
+    is_evaluated = Column(Boolean, default=False)

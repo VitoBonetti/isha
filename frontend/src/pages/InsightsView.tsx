@@ -2,6 +2,17 @@ import { useState, useEffect } from "react";
 import axios from "axios";
 import { Target, ChevronDown, ChevronRight, AlertTriangle, LineChart, Info, Zap  } from "lucide-react";
 
+// --- HEX TO RGBA HELPER FOR DYNAMIC TINTING ---
+const hexToRgba = (hex: string, alpha: number) => {
+  if (!hex) return `rgba(128, 128, 128, ${alpha})`;
+  const cleanHex = hex.replace('#', '');
+  if (cleanHex.length !== 3 && cleanHex.length !== 6) return `rgba(128, 128, 128, ${alpha})`;
+  const r = parseInt(cleanHex.length === 3 ? cleanHex[0]+cleanHex[0] : cleanHex.substring(0,2), 16);
+  const g = parseInt(cleanHex.length === 3 ? cleanHex[1]+cleanHex[1] : cleanHex.substring(2,4), 16);
+  const b = parseInt(cleanHex.length === 3 ? cleanHex[2]+cleanHex[2] : cleanHex.substring(4,6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+};
+
 // --- CUSTOM OVERFLOW-AWARE TARGET BAR ---
 const TargetBar = ({ label, completed, planned, unplanned, goal, isHero, theoretical, assigned, isActive = true }: any) => {
   const actual = completed + planned + unplanned;
@@ -12,26 +23,26 @@ const TargetBar = ({ label, completed, planned, unplanned, goal, isHero, theoret
   const pctGoal = (goal / maxVal) * 100;
 
   return (
-    <div className={`mb-5 ${isHero ? 'bg-slate-50 dark:bg-zinc-950/50 p-4 sm:p-5 rounded-2xl border border-slate-100 dark:border-zinc-800/80 shadow-sm' : ''}`}>
+    <div className={`mb-5 ${isHero ? 'bg-black/5 dark:bg-white/5 p-4 sm:p-5 rounded-2xl border border-black/5 dark:border-white/5 shadow-sm' : ''}`}>
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-2 sm:gap-0 mb-2.5">
-        <span className={`font-bold text-slate-700 dark:text-zinc-300 flex items-center gap-2 ${isHero ? 'text-base sm:text-lg' : 'text-xs sm:text-sm'}`}>
+        <span className={`font-bold text-slate-700 dark:text-zinc-200 flex items-center gap-2 ${isHero ? 'text-base sm:text-lg' : 'text-xs sm:text-sm'}`}>
           {isHero && <Zap size={18} className="text-blue-500 flex-shrink-0" />} {label}
         </span>
         <div className="flex flex-col items-start sm:items-end gap-1.5 w-full sm:w-auto">
-          <span className="text-slate-500 font-medium text-[11px] sm:text-xs">
-            Actual: <strong className={`text-slate-700 dark:text-zinc-300 ${isHero ? 'text-xs sm:text-sm' : ''}`}>{actual}</strong> / Target: {goal || 'None'}
+          <span className="text-slate-500 dark:text-slate-400 font-medium text-[11px] sm:text-xs">
+            Actual: <strong className={`text-slate-700 dark:text-zinc-200 ${isHero ? 'text-xs sm:text-sm' : ''}`}>{actual}</strong> / Target: {goal || 'None'}
           </span>
           {isActive && theoretical !== undefined && assigned !== undefined && (
-            <span className="text-slate-500 font-medium text-[10px] sm:text-[11px] bg-slate-100 dark:bg-zinc-800/50 px-2 py-1 rounded-md border border-slate-200 dark:border-zinc-700 flex items-center gap-1.5">
+            <span className="text-slate-500 dark:text-zinc-400 font-medium text-[10px] sm:text-[11px] bg-black/5 dark:bg-white/5 px-2 py-1 rounded-md border border-black/5 dark:border-white/10 flex items-center gap-1.5">
               Required: <strong className="text-indigo-600 dark:text-indigo-400">{theoretical.toFixed(1)} cr</strong> | Assigned: <strong className="text-emerald-600 dark:text-emerald-400">{assigned.toFixed(1)} cr</strong>
             </span>
           )}
         </div>
       </div>
-      <div className={`relative bg-slate-100 dark:bg-zinc-800 overflow-hidden flex shadow-inner ${isHero ? 'h-7 sm:h-8 rounded-xl' : 'h-4 sm:h-5 rounded-md opacity-90'}`}>
+      <div className={`relative bg-black/10 dark:bg-white/10 overflow-hidden flex shadow-inner ${isHero ? 'h-7 sm:h-8 rounded-xl' : 'h-4 sm:h-5 rounded-md opacity-90'}`}>
         <div className="bg-emerald-500 h-full border-r border-white/20" style={{ width: `${pctCompleted}%` }} title={`Completed: ${completed}`} />
         <div className="bg-blue-500 h-full border-r border-white/20" style={{ width: `${pctPlanned}%` }} title={`Scheduled: ${planned}`} />
-        <div className="bg-slate-300 dark:bg-zinc-600 h-full" style={{ width: `${pctUnplanned}%` }} title={`Backlog: ${unplanned}`} />
+        <div className="bg-slate-300 dark:bg-zinc-500 h-full" style={{ width: `${pctUnplanned}%` }} title={`Backlog: ${unplanned}`} />
 
         {goal > 0 && (
           <div
@@ -52,7 +63,7 @@ const ForecastCard = ({ title, total, breakdown, isOpen, toggleOpen }: any) => (
       <span className="font-bold text-xs sm:text-sm text-slate-700 dark:text-zinc-300 truncate pr-2">{title}</span>
       <span className="font-black text-sm sm:text-base text-slate-900 dark:text-zinc-100 shrink-0">{total.toFixed(1)} cr</span>
     </div>
-    <button onClick={toggleOpen} className="flex items-center gap-1 text-xs font-bold text-slate-400 hover:text-slate-600 dark:hover:text-zinc-300 transition-colors mb-1 py-1 text-left">
+    <button onClick={toggleOpen} className="flex items-center gap-1 text-xs font-bold text-slate-400 hover:text-slate-600 dark:hover:text-zinc-300 transition-colors mb-1 py-1 text-left outline-none">
       {isOpen ? <ChevronDown size={14}/> : <ChevronRight size={14}/>} View Breakdown
     </button>
     {isOpen && (
@@ -181,43 +192,55 @@ export default function InsightsView() {
       </div>
 
       <div className="space-y-3 sm:space-y-4 w-full">
-        {data.services.map((s: any) => (
-          <div key={s.id} className="bg-white dark:bg-zinc-900 rounded-2xl border border-slate-200 dark:border-zinc-800 shadow-sm overflow-hidden transition-colors w-full">
-            <button onClick={() => toggleService(s.id)} className="w-full p-4 sm:p-6 flex justify-between items-center hover:bg-slate-50 dark:hover:bg-zinc-800/50 outline-none text-left gap-2">
-              <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
-                {openServices[s.id] ? <ChevronDown size={20} className="text-slate-400 shrink-0" /> : <ChevronRight size={20} className="text-slate-400 shrink-0" />}
-                <div className="w-2.5 h-2.5 rounded-full shadow-sm shrink-0" style={{backgroundColor: s.theme_color}}/>
-                <h3 className="font-bold text-sm sm:text-lg text-slate-900 dark:text-zinc-100 truncate flex-1">{s.name}</h3>
-                {!s.is_active && <span className="px-2 py-0.5 rounded text-[9px] font-extrabold uppercase tracking-wider bg-slate-100 dark:bg-zinc-800 text-slate-500 shrink-0">Inactive</span>}
-              </div>
-            </button>
+        {data.services.map((s: any) => {
+          const isOpen = openServices[s.id];
+          return (
+            <div
+              key={s.id}
+              className={`bg-white dark:bg-zinc-900 rounded-2xl border shadow-sm overflow-hidden transition-all duration-300 w-full ${isOpen ? '' : 'border-slate-200 dark:border-zinc-800'}`}
+              style={isOpen ? {
+                backgroundImage: `linear-gradient(${hexToRgba(s.theme_color, 0.08)}, ${hexToRgba(s.theme_color, 0.08)})`,
+                borderColor: hexToRgba(s.theme_color, 0.4)
+              } : undefined}
+            >
+              <button
+                onClick={() => toggleService(s.id)}
+                className="w-full p-4 sm:p-6 flex justify-between items-center hover:bg-slate-900/5 dark:hover:bg-white/5 outline-none text-left gap-2 transition-colors"
+              >
+                <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
+                  {isOpen ? <ChevronDown size={20} className="text-slate-400 shrink-0" /> : <ChevronRight size={20} className="text-slate-400 shrink-0" />}
+                  <div className="w-2.5 h-2.5 rounded-full shadow-sm shrink-0" style={{backgroundColor: s.theme_color}}/>
+                  <h3 className="font-bold text-sm sm:text-lg text-slate-900 dark:text-zinc-100 truncate flex-1">{s.name}</h3>
+                  {!s.is_active && <span className="px-2 py-0.5 rounded text-[9px] font-extrabold uppercase tracking-wider bg-slate-100 dark:bg-zinc-800 text-slate-500 shrink-0">Inactive</span>}
+                </div>
+              </button>
 
-            {openServices[s.id] && (
-              <div className="px-4 sm:px-6 pb-4 sm:pb-6 pt-2 border-t border-slate-100 dark:border-zinc-800 animate-in fade-in slide-in-from-top-2 w-full">
-                <TargetBar label="Overall Service Total" completed={s.completed} planned={s.planned} unplanned={s.unplanned} goal={s.target_goal} isHero={true} theoretical={s.theoretical_credits} assigned={s.assigned_credits} isActive={s.is_active} />
+              {isOpen && (
+                <div className="px-4 sm:px-6 pb-4 sm:pb-6 pt-2 border-t animate-in fade-in slide-in-from-top-2 w-full" style={{ borderColor: hexToRgba(s.theme_color, 0.15) }}>
+                  <TargetBar label="Overall Service Total" completed={s.completed} planned={s.planned} unplanned={s.unplanned} goal={s.target_goal} isHero={true} theoretical={s.theoretical_credits} assigned={s.assigned_credits} isActive={s.is_active} />
 
-                {s.categories && s.categories.length > 0 && (
-                  <div className="mt-6 sm:mt-8 w-full">
-                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-2 sm:gap-0">
-                      <h4 className="text-[10px] md:text-xs font-bold uppercase tracking-wider text-slate-500">Category Breakdowns</h4>
-                      {s.goal_warning && (
-                        <span className="text-[10px] sm:text-[11px] font-bold text-amber-600 bg-amber-50 dark:bg-amber-500/10 px-2 py-1 rounded-md border border-amber-200 dark:border-amber-500/20 leading-tight">
-                          Warning: Overall target is less than sum of category targets.
-                        </span>
-                      )}
+                  {s.categories && s.categories.length > 0 && (
+                    <div className="mt-6 sm:mt-8 w-full">
+                      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-2 sm:gap-0">
+                        <h4 className="text-[10px] md:text-xs font-bold uppercase tracking-wider text-slate-500">Category Breakdowns</h4>
+                        {s.goal_warning && (
+                          <span className="text-[10px] sm:text-[11px] font-bold text-amber-600 bg-amber-50/50 dark:bg-amber-500/10 px-2 py-1 rounded-md border border-amber-200/50 dark:border-amber-500/20 leading-tight">
+                            Warning: Overall target is less than sum of category targets.
+                          </span>
+                        )}
+                      </div>
+                      <div className="space-y-4 sm:space-y-6 w-full">
+                        {s.categories.map((c: any) => (
+                          <TargetBar key={c.id} label={c.name} completed={c.completed} planned={c.planned} unplanned={c.unplanned} goal={c.target_goal} isHero={false} theoretical={c.theoretical_credits} assigned={c.assigned_credits} isActive={s.is_active} />
+                        ))}
+                      </div>
                     </div>
-                    <div className="space-y-4 sm:space-y-6 w-full">
-                      {s.categories.map((c: any) => (
-                        <TargetBar key={c.id} label={c.name} completed={c.completed} planned={c.planned} unplanned={c.unplanned} goal={c.target_goal} isHero={false} theoretical={c.theoretical_credits} assigned={c.assigned_credits} isActive={s.is_active} />
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-          </div>
-        ))}
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

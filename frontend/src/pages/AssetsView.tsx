@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import axios from "axios";
 import ConfirmModal from "../components/Modals/ConfirmModal";
 import toast, { Toaster } from "react-hot-toast";
-import { Search, ArrowBigRightDash, Server, ChevronDown, Activity, Layers, ChevronsUpDown, ChevronUp, RefreshCw, Link2 } from "lucide-react";
+import { Search, ArrowBigRightDash, Server, ChevronDown, Activity, Layers, ChevronsUpDown, ChevronUp, RefreshCw, Link2, Filter } from "lucide-react";
 
 interface PoolAsset {
   id: string;
@@ -12,6 +12,9 @@ interface PoolAsset {
   asset_type_name?: string;
   country?: string;
   service_name?: string;
+  category_name?: string;
+  is_kpi?: boolean;
+  is_critical?: boolean;
   is_assigned: boolean;
   in_backlog: boolean;
   duplicate_allowed: boolean;
@@ -23,15 +26,25 @@ interface PoolAsset {
 export default function AssetsView() {
   const [assets, setAssets] = useState<PoolAsset[]>([]);
   const [services, setServices] = useState<any[]>([]);
+  const [categories, setCategories] = useState<any[]>([]);
+  const [assetTypes, setAssetTypes] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Filtering States
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState<"all" | "assigned" | "ready_untested" | "ready_tested" | "archived">("all");
   const [filterService, setFilterService] = useState<string>("all");
+  const [filterCategory, setFilterCategory] = useState<string>("all");
+  const [filterAssetType, setFilterAssetType] = useState<string>("all");
   const [filterCountry, setFilterCountry] = useState<string>("all");
   const [filterKiss24, setFilterKiss24] = useState<"all" | "synced" | "unsynced">("all");
+  const [filterIsKpi, setFilterIsKpi] = useState<"all" | "true" | "false">("all");
+  const [filterIsCritical, setFilterIsCritical] = useState<"all" | "true" | "false">("all");
+
   const [targetYear, setTargetYear] = useState(new Date().getFullYear());
+  const [showFilters, setShowFilters] = useState(false);
+  const filterRef = useRef<HTMLDivElement>(null);
+  const filterBtnRef = useRef<HTMLButtonElement>(null);
 
   const availableYears = Array.from(
     { length: 7 },
@@ -47,7 +60,7 @@ export default function AssetsView() {
   // Reset pagination when any filter changes
   useEffect(() => {
     setPage(1);
-  }, [searchTerm, filterStatus, filterService, filterCountry, filterKiss24, sortBy, sortDir]);
+  }, [searchTerm, filterStatus, filterService, filterCategory, filterAssetType, filterCountry, filterKiss24, filterIsKpi, filterIsCritical, sortBy, sortDir]);
 
   const handleSort = (column: string) => {
     if (sortBy === column) setSortDir(sortDir === "asc" ? "desc" : "asc");
@@ -81,10 +94,15 @@ export default function AssetsView() {
   useEffect(() => {
     fetchPoolAssets();
     axios.get('/api/services/').then(res => setServices(res.data)).catch(console.error);
+    axios.get('/api/board/categories/').then(res => setCategories(res.data)).catch(console.error);
+    axios.get('/api/assets/types').then(res => setAssetTypes(res.data)).catch(console.error);
 
     const handleClickOutside = (e: MouseEvent) => {
       if (bulkActionsRef.current && !bulkActionsRef.current.contains(e.target as Node)) {
         setShowBulkActions(false);
+      }
+      if (filterRef.current && !filterRef.current.contains(e.target as Node) && filterBtnRef.current && !filterBtnRef.current.contains(e.target as Node)) {
+        setShowFilters(false);
       }
     };
     document.addEventListener("mousedown", handleClickOutside);
@@ -149,17 +167,11 @@ export default function AssetsView() {
     } else if (confirmModal.action === 'combine') {
       if (selectedAssets.length === 0) return;
 
-      // 1. Get all selected asset objects
       const selectedAssetObjects = assets.filter(a => selectedAssets.includes(a.id));
-
-      // 2. Extract Service Lane info (Validation guarantees they are all the same)
       const serviceName = selectedAssetObjects[0].service_name;
       const serviceObj = services.find(s => s.name === serviceName);
-
-      // 3. Construct the merged Test Name
       const testName = selectedAssetObjects.map(a => a.name).join(" & ");
 
-      // 4. Build the payload for the existing single-test endpoint
       const payload = {
         name: testName,
         service_lane_id: serviceObj.id,
@@ -231,35 +243,35 @@ export default function AssetsView() {
     setSelectedAssets(prev => prev.includes(assetId) ? prev.filter(id => id !== assetId) : [...prev, assetId]);
   };
 
-  // Extract unique countries dynamically from the assets data
   const uniqueCountries = Array.from(new Set(assets.map(a => a.country).filter(Boolean))).sort();
 
   // Advanced Filtering Logic
   const filteredAssets = assets.filter(asset => {
-    // 1. Search Term
     const matchesSearch = !searchTerm ||
       asset.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (asset.country && asset.country.toLowerCase().includes(searchTerm.toLowerCase()));
 
-    // 2. Service Lane & Country
     const matchesService = filterService === "all" ||
       (filterService === "none" ? !asset.service_name : asset.service_name === filterService);
+
+    const matchesCategory = filterCategory === "all" || asset.category_name === filterCategory;
+    const matchesAssetType = filterAssetType === "all" || asset.asset_type_name === filterAssetType;
     const matchesCountry = filterCountry === "all" || asset.country === filterCountry;
 
-    // 3. KISS24 Sync Status ---
     const hasKiss24 = Boolean(asset.kiss24_asset_id && asset.kiss24_asset_id.trim() !== "");
     const matchesKiss24 =
       filterKiss24 === "all" ||
       (filterKiss24 === "synced" && hasKiss24) ||
       (filterKiss24 === "unsynced" && !hasKiss24);
 
-    // 4. Status Check
-    const isAvailableForTest = !asset.is_assigned || asset.duplicate_allowed;
+    const matchesIsKpi = filterIsKpi === "all" || (filterIsKpi === "true" ? asset.is_kpi : !asset.is_kpi);
+    const matchesIsCritical = filterIsCritical === "all" || (filterIsCritical === "true" ? asset.is_critical : !asset.is_critical);
+
     let matchesStatus = true;
     if (filterStatus === "archived") {
       matchesStatus = asset.is_archived_this_year;
     } else {
-      if (asset.is_archived_this_year) return false; // HIDE archived assets from other views
+      if (asset.is_archived_this_year) return false;
 
       const isAvailableForTest = !asset.is_assigned || asset.duplicate_allowed;
       if (filterStatus === "assigned") {
@@ -270,7 +282,7 @@ export default function AssetsView() {
         matchesStatus = isAvailableForTest && asset.completed_count > 0;
       }
     }
-    return matchesSearch && matchesService && matchesCountry && matchesKiss24 && matchesStatus;
+    return matchesSearch && matchesService && matchesCategory && matchesAssetType && matchesCountry && matchesKiss24 && matchesIsKpi && matchesIsCritical && matchesStatus;
   });
 
   const sortedAssets = [...filteredAssets].sort((a, b) => {
@@ -297,16 +309,20 @@ export default function AssetsView() {
   const totalPages = Math.ceil(sortedAssets.length / ITEMS_PER_PAGE);
   const paginatedAssets = sortedAssets.slice((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE);
 
+  // Stats dynamically update based on current filters
   const stats = {
-    total: assets.length,
-    assigned: assets.filter(a => a.is_assigned && !a.in_backlog).length,
-    unassigned: assets.filter(a => !a.is_assigned || a.in_backlog || a.duplicate_allowed).length,
-    completed: assets.filter(a => a.completed_count > 0).length
+    total: filteredAssets.length,
+    assigned: filteredAssets.filter(a => a.is_assigned && !a.in_backlog).length,
+    unassigned: filteredAssets.filter(a => !a.is_assigned || a.in_backlog || a.duplicate_allowed).length,
+    completed: filteredAssets.filter(a => a.completed_count > 0).length
   };
 
   const validForSelection = filteredAssets.filter(a => !a.is_assigned || a.duplicate_allowed);
-
   const selectStyles = "px-3 py-2 w-full sm:w-auto rounded-lg border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-sm text-slate-700 dark:text-zinc-300 focus:ring-2 focus:ring-emerald-500 focus:border-transparent outline-none cursor-pointer";
+
+  // Helper to get Category mapping for filters
+  const selectedServiceObj = services.find(s => s.name === filterService);
+  const filteredCategories = categories.filter(c => filterService === "all" || filterService === "none" || c.service_lane_id === selectedServiceObj?.id);
 
   return (
     <div className="w-full animate-in fade-in zoom-in-95 duration-200">
@@ -352,18 +368,20 @@ export default function AssetsView() {
       )}
 
       {/* Header */}
-      <h1 className="text-2xl font-extrabold flex items-center gap-2">
-        <Server size={28} className="text-emerald-500" />
-        Active Asset Pool
-      </h1>
+      <div className="flex items-center gap-3">
+        <h1 className="text-2xl font-extrabold flex items-center gap-2">
+          <Server size={28} className="text-emerald-500" />
+          Active Asset Pool
+        </h1>
+      </div>
       <p className="text-slate-500 dark:text-zinc-400 mb-6 md:mb-8 text-sm md:text-base">
         Select unassigned (or multi-test) assets to generate tests for the Planner Backlog.
       </p>
 
-      {/* Stats Cards - Responsive Grid */}
+      {/* Dynamic Stats Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 mb-6 md:mb-8">
         <div className="bg-white dark:bg-zinc-900 p-4 md:p-6 rounded-xl border border-slate-200 dark:border-zinc-800 shadow-sm flex flex-col justify-between">
-          <p className="text-xs md:text-sm text-slate-500 dark:text-zinc-400 mb-1">Total Assets</p>
+          <p className="text-xs md:text-sm text-slate-500 dark:text-zinc-400 mb-1">Total Filtered</p>
           <p className="text-2xl md:text-3xl font-bold text-emerald-600">{stats.total}</p>
         </div>
         <div className="bg-white dark:bg-zinc-900 p-4 md:p-6 rounded-xl border border-slate-200 dark:border-zinc-800 shadow-sm flex flex-col justify-between">
@@ -380,160 +398,201 @@ export default function AssetsView() {
         </div>
       </div>
 
-      {/* Actions Bar with Dropdown Filters - Fully Stackable */}
-      <div className="flex flex-col xl:flex-row gap-4 xl:items-center justify-between bg-white dark:bg-zinc-900 p-4 rounded-xl border border-slate-200 dark:border-zinc-800 shadow-sm">
+      {/* Actions Bar with Advanced Dropdown Filters */}
+      <div className="flex flex-col gap-4 bg-white dark:bg-zinc-900 p-4 rounded-xl border border-slate-200 dark:border-zinc-800 shadow-sm relative z-10">
 
-        <div className="flex flex-col md:flex-row flex-wrap items-stretch md:items-center gap-3 flex-1 w-full xl:w-auto">
-          {/* Search Input */}
-          <div className="relative w-full md:max-w-xs md:min-w-[200px]">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-            <input
-              type="text"
-              placeholder="Search assets..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 md:py-2 rounded-lg border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 focus:ring-2 focus:ring-emerald-500 focus:border-transparent outline-none text-sm"
-            />
-          </div>
-
-          {/* Filter Dropdowns Grid on Mobile */}
-          <div className="grid grid-cols-1 sm:grid-cols-5 gap-3 w-full md:w-auto items-center">
-            <select
-              value={targetYear}
-              onChange={(e) => setTargetYear(parseInt(e.target.value))}
-              className={selectStyles}
-            >
-              {availableYears.map(y => (
-                <option key={y} value={y}>{y}</option>
-              ))}
-            </select>
-            <select
-              value={filterStatus}
-              onChange={(e) => setFilterStatus(e.target.value as any)}
-              className={selectStyles}
-            >
-              <option value="all">All Statuses</option>
-              <option value="assigned">Active Tests Only</option>
-              <option value="ready_untested">Ready (Never Tested)</option>
-              <option value="ready_tested">Ready (Previously Tested)</option>
-              <option value="archived">Archived</option>
-            </select>
-
-            <select
-              value={filterService}
-              onChange={(e) => setFilterService(e.target.value)}
-              className={selectStyles}
-            >
-              <option value="all">All Service Lanes</option>
-              <option value="none">No Service Lane</option>
-              {services.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
-            </select>
-
-            <select
-              value={filterCountry}
-              onChange={(e) => setFilterCountry(e.target.value)}
-              className={selectStyles}
-            >
-              <option value="all">All Countries</option>
-              {uniqueCountries.map(c => <option key={c as string} value={c as string}>{c as string}</option>)}
-            </select>
-
-            <select
-              value={filterKiss24}
-              onChange={(e) => setFilterKiss24(e.target.value as "all" | "synced" | "unsynced")}
-              className={selectStyles}
-            >
-              <option value="all">KISS24: All</option>
-              <option value="synced">KISS24: Synced</option>
-              <option value="unsynced">KISS24: Unsynced</option>
-            </select>
-
-          </div>
-        </div>
-
-        <div className="flex flex-row-reverse md:flex-row items-center justify-between md:justify-end gap-3 w-full xl:w-auto border-t border-slate-100 dark:border-zinc-800 pt-3 xl:border-0 xl:pt-0">
-           <span className="text-sm font-medium text-slate-500 dark:text-zinc-400 order-1 md:order-2">
-            {filteredAssets.length} results
-          </span>
-          {selectedAssets.length > 0 && (
-            <div className="relative w-full md:w-auto order-2 md:order-1" ref={bulkActionsRef}>
-              <button onClick={() => setShowBulkActions(!showBulkActions)} className="w-full md:w-auto flex justify-center items-center gap-2 px-4 py-2.5 md:py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium">
-                Actions ({selectedAssets.length}) <ChevronDown size={16}/>
-              </button>
-              {showBulkActions && (
-                <div className="absolute top-full left-0 md:left-auto md:right-0 mt-2 w-full md:w-56 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-xl shadow-xl py-2 z-30 animate-in fade-in zoom-in-95 overflow-hidden">
-                  <button
-                    onClick={() => {
-                      setShowBulkActions(false);
-                      const missingLanes = selectedAssets.filter(id => !assets.find(a => a.id === id)?.service_name);
-                      if (missingLanes.length > 0) {
-                        toast.error(`${missingLanes.length} selected assets are missing a Service Lane! Please assign one first.`);
-                        return;
-                      }
-                      setConfirmModal({
-                        isOpen: true,
-                        action: 'generate',
-                        title: "Generate Tests",
-                        message: `Are you sure you want to generate Planner Tests for these ${selectedAssets.length} assets? This will move them to the Planner Backlog.`,
-                        confirmText: "Generate",
-                        variant: "info"
-                      });
-                    }}
-                    className="w-full flex items-center gap-2 px-4 py-2.5 text-sm font-bold hover:bg-slate-50 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 transition-colors"
-                  >
-                    <Activity size={16} className="text-blue-500" /> Generate Tests
-                  </button>
-                  <div className="h-px bg-slate-100 dark:bg-zinc-800 my-0.5"></div>
-                  <button
-                    onClick={() => {
-                      setShowBulkActions(false);
-                      setServiceModal({ isOpen: true, selectedServiceId: "" });
-                    }}
-                    className="w-full flex items-center gap-2 px-4 py-2.5 text-sm font-bold hover:bg-slate-50 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300 transition-colors"
-                  >
-                    <Layers size={16} className="text-purple-500" /> Set Service Lane
-                  </button>
-                  <div className="h-px bg-slate-100 dark:bg-zinc-800 my-0.5"></div>
-                  <button
-                    onClick={() => {
-                      setShowBulkActions(false);
-                      const selectedAssetObjects = assets.filter(a => selectedAssets.includes(a.id));
-
-                      // Check 1: Missing Service Lanes
-                      const missingLanes = selectedAssetObjects.filter(a => !a.service_name);
-                      if (missingLanes.length > 0) {
-                        toast.error(`${missingLanes.length} selected assets are missing a Service Lane!`);
-                        return;
-                      }
-
-                      // Check 2: Mixed Service Lanes
-                      const serviceNames = new Set(selectedAssetObjects.map(a => a.service_name));
-                      if (serviceNames.size > 1) {
-                        toast.error("All selected assets must belong to the SAME Service Lane to be combined.");
-                        return;
-                      }
-
-                      // Validation passed: calculate the merged name for the prompt
-                      const testName = selectedAssetObjects.map(a => a.name).join(" & ");
-
-                      setConfirmModal({
-                        isOpen: true,
-                        action: 'combine',
-                        title: "Combine into Single Test",
-                        message: `Are you sure you want to combine these ${selectedAssets.length} assets into a single test named "${testName}"?`,
-                        confirmText: "Combine Assets",
-                        variant: "info"
-                      });
-                    }}
-                    className="w-full flex items-center gap-2 px-4 py-2.5 text-sm font-bold hover:bg-slate-50 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300 transition-colors"
-                  >
-                    <Link2 size={16} className="text-emerald-500" /> Combine into Single Test
-                  </button>
-                </div>
-              )}
+        <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 w-full">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 flex-1">
+            <div className="relative w-full md:max-w-md">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+              <input
+                type="text"
+                placeholder="Search assets..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-10 pr-4 py-2.5 md:py-2 rounded-lg border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 focus:ring-2 focus:ring-emerald-500 outline-none text-sm"
+              />
             </div>
-          )}
+
+            <button
+              ref={filterBtnRef}
+              onClick={() => setShowFilters(!showFilters)}
+              className={`w-full sm:w-auto flex justify-center items-center gap-2 px-4 py-2.5 md:py-2 rounded-lg border transition-colors text-sm ${showFilters ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 font-bold' : 'border-slate-300 dark:border-zinc-700 hover:bg-slate-100 dark:hover:bg-zinc-800'}`}
+            >
+              <Filter className="h-4 w-4" /> Advanced Filters
+            </button>
+
+            {/* Quick Filter: Year */}
+            <select value={targetYear} onChange={(e) => setTargetYear(parseInt(e.target.value))} className={`${selectStyles} max-w-[120px]`}>
+              {availableYears.map(y => <option key={y} value={y}>{y}</option>)}
+            </select>
+          </div>
+
+          <div className="flex flex-row-reverse md:flex-row items-center justify-between md:justify-end gap-3 w-full md:w-auto">
+            {selectedAssets.length > 0 && (
+              <div className="relative w-full sm:w-auto" ref={bulkActionsRef}>
+                <button onClick={() => setShowBulkActions(!showBulkActions)} className="w-full sm:w-auto flex justify-center items-center gap-2 px-4 py-2.5 md:py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium text-sm">
+                  Actions ({selectedAssets.length}) <ChevronDown size={16}/>
+                </button>
+                {showBulkActions && (
+                  <div className="absolute top-full left-0 sm:left-auto sm:right-0 mt-2 w-full sm:w-56 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-xl shadow-xl py-2 z-30 animate-in fade-in zoom-in-95 overflow-hidden">
+                    <button
+                      onClick={() => {
+                        setShowBulkActions(false);
+                        const missingLanes = selectedAssets.filter(id => !assets.find(a => a.id === id)?.service_name);
+                        if (missingLanes.length > 0) {
+                          toast.error(`${missingLanes.length} selected assets are missing a Service Lane! Please assign one first.`);
+                          return;
+                        }
+                        setConfirmModal({
+                          isOpen: true,
+                          action: 'generate',
+                          title: "Generate Tests",
+                          message: `Are you sure you want to generate Planner Tests for these ${selectedAssets.length} assets? This will move them to the Planner Backlog.`,
+                          confirmText: "Generate",
+                          variant: "info"
+                        });
+                      }}
+                      className="w-full flex items-center gap-2 px-4 py-2.5 text-sm font-bold hover:bg-slate-50 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 transition-colors"
+                    >
+                      <Activity size={16} className="text-blue-500" /> Generate Tests
+                    </button>
+                    <div className="h-px bg-slate-100 dark:bg-zinc-800 my-0.5"></div>
+                    <button
+                      onClick={() => {
+                        setShowBulkActions(false);
+                        setServiceModal({ isOpen: true, selectedServiceId: "" });
+                      }}
+                      className="w-full flex items-center gap-2 px-4 py-2.5 text-sm font-bold hover:bg-slate-50 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300 transition-colors"
+                    >
+                      <Layers size={16} className="text-purple-500" /> Set Service Lane
+                    </button>
+                    <div className="h-px bg-slate-100 dark:bg-zinc-800 my-0.5"></div>
+                    <button
+                      onClick={() => {
+                        setShowBulkActions(false);
+                        const selectedAssetObjects = assets.filter(a => selectedAssets.includes(a.id));
+                        const missingLanes = selectedAssetObjects.filter(a => !a.service_name);
+                        if (missingLanes.length > 0) {
+                          toast.error(`${missingLanes.length} selected assets are missing a Service Lane!`);
+                          return;
+                        }
+                        const serviceNames = new Set(selectedAssetObjects.map(a => a.service_name));
+                        if (serviceNames.size > 1) {
+                          toast.error("All selected assets must belong to the SAME Service Lane to be combined.");
+                          return;
+                        }
+                        const testName = selectedAssetObjects.map(a => a.name).join(" & ");
+                        setConfirmModal({
+                          isOpen: true,
+                          action: 'combine',
+                          title: "Combine into Single Test",
+                          message: `Are you sure you want to combine these ${selectedAssets.length} assets into a single test named "${testName}"?`,
+                          confirmText: "Combine Assets",
+                          variant: "info"
+                        });
+                      }}
+                      className="w-full flex items-center gap-2 px-4 py-2.5 text-sm font-bold hover:bg-slate-50 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300 transition-colors"
+                    >
+                      <Link2 size={16} className="text-emerald-500" /> Combine into Single Test
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
+
+        {/* Advanced Filters Popover */}
+        {showFilters && (
+          <div ref={filterRef} className="absolute top-full left-0 right-0 mt-2 w-full bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-xl shadow-xl p-4 md:p-6 z-20 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 animate-in fade-in slide-in-from-top-2">
+
+            <div className="space-y-4">
+              <div>
+                <label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Status</label>
+                <select className="w-full p-2 border border-slate-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-sm" value={filterStatus} onChange={e => setFilterStatus(e.target.value as any)}>
+                  <option value="all">All Statuses</option>
+                  <option value="assigned">Active Tests Only</option>
+                  <option value="ready_untested">Ready (Never Tested)</option>
+                  <option value="ready_tested">Ready (Previously Tested)</option>
+                  <option value="archived">Archived</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-500 uppercase mb-1 block">KISS24 Sync</label>
+                <select className="w-full p-2 border border-slate-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-sm" value={filterKiss24} onChange={e => setFilterKiss24(e.target.value as any)}>
+                  <option value="all">All</option>
+                  <option value="synced">Synced</option>
+                  <option value="unsynced">Unsynced</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Country</label>
+                <select className="w-full p-2 border border-slate-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-sm" value={filterCountry} onChange={e => setFilterCountry(e.target.value)}>
+                  <option value="all">All Countries</option>
+                  {uniqueCountries.map(c => <option key={c as string} value={c as string}>{c as string}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Asset Type</label>
+                <select className="w-full p-2 border border-slate-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-sm" value={filterAssetType} onChange={e => setFilterAssetType(e.target.value)}>
+                  <option value="all">All Types</option>
+                  {assetTypes.map(t => <option key={t.id} value={t.name}>{t.name}</option>)}
+                </select>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Service Lane</label>
+                <select className="w-full p-2 border border-slate-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-sm" value={filterService} onChange={e => {setFilterService(e.target.value); setFilterCategory("all");}}>
+                  <option value="all">All Service Lanes</option>
+                  <option value="none">No Service Lane</option>
+                  {services.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Category</label>
+                <select className="w-full p-2 border border-slate-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-sm" value={filterCategory} onChange={e => setFilterCategory(e.target.value)} disabled={filterService === "none"}>
+                  <option value="all">All Categories</option>
+                  {filteredCategories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                </select>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Is KPI</label>
+                <select className="w-full p-2 border border-slate-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-sm" value={filterIsKpi} onChange={e => setFilterIsKpi(e.target.value as any)}>
+                  <option value="all">Any</option>
+                  <option value="true">Yes</option>
+                  <option value="false">No</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Is Critical</label>
+                <select className="w-full p-2 border border-slate-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-sm" value={filterIsCritical} onChange={e => setFilterIsCritical(e.target.value as any)}>
+                  <option value="all">Any</option>
+                  <option value="true">Yes</option>
+                  <option value="false">No</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="sm:col-span-2 lg:col-span-4 flex justify-end mt-2 pt-4 border-t border-slate-100 dark:border-zinc-800">
+              <button onClick={() => {
+                setFilterStatus("all"); setFilterCountry("all"); setFilterAssetType("all");
+                setFilterService("all"); setFilterCategory("all"); setFilterKiss24("all");
+                setFilterIsKpi("all"); setFilterIsCritical("all"); setPage(1);
+              }} className="text-sm text-blue-500 font-bold hover:text-blue-600 p-2 transition-colors">
+                Clear All Filters
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Assets List Container */}
@@ -571,7 +630,7 @@ export default function AssetsView() {
                     <div className="flex items-center gap-2">Country <SortIcon column="country"/></div>
                   </th>
                   <th className="p-4 font-semibold text-slate-500 uppercase cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"  onClick={() => handleSort("service")}>
-                    <div className="flex items-center gap-2">Service Lane <SortIcon column="service"/></div>
+                    <div className="flex items-center gap-2">Service Lane & Category <SortIcon column="service"/></div>
                   </th>
                   <th className="p-4 font-semibold text-slate-500 uppercase cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"  onClick={() => handleSort("status")}>
                     <div className="flex items-center gap-2">Status <SortIcon column="status"/></div>
@@ -595,13 +654,17 @@ export default function AssetsView() {
                       </td>
                       <td className="px-6 py-4 max-w-[200px]">
                         <div>
-                          <Link
-                            to={`/assets/raw/${asset.raw_asset_id}`}
-                            state={{ from: '/assets/pool', label: 'Active Pool' }}
-                            className="text-sm font-bold text-blue-600 dark:text-blue-400 hover:underline truncate block"
-                          >
-                            {asset.name}
-                          </Link>
+                          <div className="flex items-center gap-2">
+                            <Link
+                              to={`/assets/raw/${asset.raw_asset_id}`}
+                              state={{ from: '/assets/pool', label: 'Active Pool' }}
+                              className="text-sm font-bold text-blue-600 dark:text-blue-400 hover:underline truncate block"
+                            >
+                              {asset.name}
+                            </Link>
+                            {asset.is_kpi && <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300">KPI</span>}
+                            {asset.is_critical && <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300">CRIT</span>}
+                          </div>
                           <div className="text-xs text-slate-500 dark:text-zinc-400 mt-1">Pool ID: {asset.id.substring(0, 8)}...</div>
                         </div>
                       </td>
@@ -615,7 +678,10 @@ export default function AssetsView() {
                       </td>
                       <td className="px-6 py-4">
                         {asset.service_name ? (
-                          <div className="text-sm font-medium whitespace-nowrap">{asset.service_name}</div>
+                          <>
+                            <div className="text-sm font-medium whitespace-nowrap">{asset.service_name}</div>
+                            <div className="text-xs text-slate-500 whitespace-nowrap">{asset.category_name || '-'}</div>
+                          </>
                         ) : (
                           <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-800 dark:bg-red-500/10 dark:text-red-400 border border-red-200 dark:border-red-500/20 whitespace-nowrap">
                             MISSING SERVICE LANE
@@ -696,7 +762,6 @@ export default function AssetsView() {
 
                 return (
                   <div key={asset.id} className={`p-4 flex flex-col gap-3 transition-colors ${isSelected ? 'bg-blue-50 dark:bg-blue-900/10' : ''}`}>
-
                     {/* Top Row: Checkbox & Title Block */}
                     <div className="flex items-start gap-3 w-full">
                       <input
@@ -707,13 +772,17 @@ export default function AssetsView() {
                         className="mt-1 h-4 w-4 text-blue-600 rounded border-slate-300 disabled:opacity-40 flex-shrink-0"
                       />
                       <div className="flex flex-col flex-1 min-w-0">
-                        <Link
-                          to={`/assets/raw/${asset.raw_asset_id}`}
-                          state={{ from: '/assets/pool', label: 'Active Pool' }}
-                          className="text-sm font-bold text-blue-600 dark:text-blue-400 hover:underline break-words"
-                        >
-                          {asset.name}
-                        </Link>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <Link
+                            to={`/assets/raw/${asset.raw_asset_id}`}
+                            state={{ from: '/assets/pool', label: 'Active Pool' }}
+                            className="text-sm font-bold text-blue-600 dark:text-blue-400 hover:underline break-words"
+                          >
+                            {asset.name}
+                          </Link>
+                          {asset.is_kpi && <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300">KPI</span>}
+                          {asset.is_critical && <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300">CRIT</span>}
+                        </div>
                         <div className="text-[11px] text-slate-500 dark:text-zinc-400 mt-1 flex flex-wrap gap-1 items-center">
                           <span className="font-medium text-slate-700 dark:text-zinc-300">{asset.asset_type_name || 'Unknown Type'}</span>
                           <span>•</span>
@@ -729,7 +798,10 @@ export default function AssetsView() {
                       <div className="flex flex-col gap-1">
                         <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Service Lane</span>
                         {asset.service_name ? (
-                          <span className="text-xs font-medium text-slate-700 dark:text-zinc-300 truncate">{asset.service_name}</span>
+                          <>
+                            <span className="text-xs font-medium text-slate-700 dark:text-zinc-300 truncate">{asset.service_name}</span>
+                            <span className="text-[10px] text-slate-500 truncate">{asset.category_name || '-'}</span>
+                          </>
                         ) : (
                           <span className="inline-flex w-fit items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-red-100 text-red-800 dark:bg-red-500/10 dark:text-red-400 border border-red-200 dark:border-red-500/20">
                             MISSING LANE

@@ -10,7 +10,6 @@ from audit_logger import log_audit_event
 
 router = APIRouter(prefix="/api/asset-criteria", tags=["Asset Criteria Engine"])
 
-
 @router.get("/fields", summary="Get valid asset criteria fields and their relation endpoints")
 def get_valid_fields(current_user: dict = Depends(require_admin)):
     """Returns the schema dictionary so the frontend can dynamically build the UI."""
@@ -31,11 +30,9 @@ def get_valid_fields(current_user: dict = Depends(require_admin)):
 def evaluate_kpi_rule(asset_value, operator: str, rule_value):
     """Safely evaluates a dynamic rule, explicitly supporting null/None values and empty strings."""
 
-    # Force ServiceNow empty strings to behave exactly like database NULLs
     if asset_value == "":
         asset_value = None
 
-    # Cast boolean asset values to lowercase strings so "true" / "false" string rules work
     if isinstance(asset_value, bool):
         asset_value = str(asset_value).lower()
 
@@ -84,7 +81,7 @@ def evaluate_kpi_rule(asset_value, operator: str, rule_value):
 
 @router.get("/", summary="List all asset criteria configurations")
 def get_all_criteria(current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
-    cursor.execute("SELECT id, year, criticality_threshold, kpi_rules FROM asset_criteria ORDER BY year DESC")
+    cursor.execute("SELECT id, year, criticality_threshold, kpi_rules, updated_at, is_evaluated FROM asset_criteria ORDER BY year DESC")
     columns = [col[0] for col in cursor.description]
     return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
@@ -94,13 +91,15 @@ def upsert_criteria(payload: AssetCriteriaBase, current_user: dict = Depends(req
                     cursor=Depends(get_db_cursor)):
     rules_json = json.dumps([rule.dict() for rule in payload.kpi_rules])
 
+    # If the rules are updated, we set is_evaluated to FALSE because they need to be re-run!
     cursor.execute("""
-        INSERT INTO asset_criteria (id, year, criticality_threshold, kpi_rules, updated_at)
-        VALUES (gen_random_uuid(), %s, %s, %s, CURRENT_TIMESTAMP)
+        INSERT INTO asset_criteria (id, year, criticality_threshold, kpi_rules, updated_at, is_evaluated)
+        VALUES (gen_random_uuid(), %s, %s, %s, CURRENT_TIMESTAMP, FALSE)
         ON CONFLICT (year) DO UPDATE SET 
             criticality_threshold = EXCLUDED.criticality_threshold,
             kpi_rules = EXCLUDED.kpi_rules,
-            updated_at = CURRENT_TIMESTAMP
+            updated_at = CURRENT_TIMESTAMP,
+            is_evaluated = FALSE
         RETURNING id
     """, (payload.year, payload.criticality_threshold, rules_json))
 
@@ -125,7 +124,6 @@ def delete_criteria(year: int, current_user: dict = Depends(require_admin), curs
 @router.post("/evaluate/{year}", summary="Execute evaluation engine on raw_assets")
 def evaluate_assets(year: int, req: EvaluateCriteriaRequest, current_user: dict = Depends(require_admin),
                     cursor=Depends(get_db_cursor)):
-    # 1. Fetch rules
     cursor.execute("SELECT criticality_threshold, kpi_rules FROM asset_criteria WHERE year = %s", (year,))
     criteria_row = cursor.fetchone()
     if not criteria_row:
@@ -133,7 +131,6 @@ def evaluate_assets(year: int, req: EvaluateCriteriaRequest, current_user: dict 
 
     threshold, kpi_rules = criteria_row
 
-    # 2. Fetch assets, EXCLUDING team countries, and JOIN snow_metadata for parsing
     query = """
         SELECT ra.*, sm.snow_data
         FROM raw_assets ra
@@ -152,35 +149,26 @@ def evaluate_assets(year: int, req: EvaluateCriteriaRequest, current_user: dict 
     columns = [col[0] for col in cursor.description]
 
     updates_made = 0
-
-    # === PRE-COMPUTE RULES (Moved outside the loop for performance) ===
     rules_by_field = defaultdict(list)
     if kpi_rules:
-        # Since kpi_rules is a JSONB column, psycopg2 returns a Python list natively
         for rule in kpi_rules:
             rules_by_field[rule.get('field')].append(rule)
 
-    updates_made = 0
-
-    # 3. Evaluate each asset
     for asset_row in assets:
         asset = dict(zip(columns, asset_row))
         asset_id = asset['id']
 
-        # === STEP 1: CALCULATE KPI FIRST ===
         new_is_kpi = True if kpi_rules else False
 
-        # Evaluate each field group
         for field_name, rules in rules_by_field.items():
             has_positive_rules = False
             passed_positive = False
-            passed_negative = True  # Exclusions default to true until one fails
+            passed_negative = True
 
             for rule in rules:
                 operator = rule.get('operator')
                 rule_value = rule.get('value')
 
-                # Extract ServiceNow metadata if field starts with "snow:"
                 if field_name.startswith('snow:'):
                     snow_key = field_name.split('snow:')[1]
                     snow_payload = asset.get('snow_data') or {}
@@ -190,29 +178,23 @@ def evaluate_assets(year: int, req: EvaluateCriteriaRequest, current_user: dict 
 
                 rule_passed = evaluate_kpi_rule(asset_value, operator, rule_value)
 
-                # Negative rules (!=, not_in) must ALL pass (AND logic)
                 if operator in ['!=', 'not_in']:
                     if not rule_passed:
                         passed_negative = False
-
-                # Positive rules (==, in, >, is_null, etc.) only need ONE to pass (OR logic)
                 else:
                     has_positive_rules = True
                     if rule_passed:
                         passed_positive = True
 
-            # Reconcile positive and negative rule results for this specific field
             if has_positive_rules:
                 field_passed = passed_positive and passed_negative
             else:
                 field_passed = passed_negative
 
-            # If the asset failed the reconciled rules for this field, it completely fails the KPI check
             if not field_passed:
                 new_is_kpi = False
-                break  # Exit early, no need to check other fields
+                break
 
-        # === STEP 2: CALCULATE CRITICALITY (STRICTLY DEPENDENT ON KPI) ===
         new_is_critical = False
         if new_is_kpi:
             try:
@@ -221,12 +203,13 @@ def evaluate_assets(year: int, req: EvaluateCriteriaRequest, current_user: dict 
                 biz_critical_val = 0
             new_is_critical = biz_critical_val >= threshold
 
-        # === STEP 3: UPDATE IF CHANGED ===
         if asset.get('is_critical') != new_is_critical or asset.get('is_kpi') != new_is_kpi:
             cursor.execute("UPDATE raw_assets SET is_critical = %s, is_kpi = %s WHERE id = %s",
                            (new_is_critical, new_is_kpi, str(asset_id)))
             updates_made += 1
 
+    # 4. Stamp the evaluation time AND set the boolean flag
+    cursor.execute("UPDATE asset_criteria SET updated_at = CURRENT_TIMESTAMP, is_evaluated = TRUE WHERE year = %s", (year,))
     cursor.connection.commit()
 
     log_audit_event(

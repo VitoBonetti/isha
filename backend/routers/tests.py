@@ -57,8 +57,10 @@ FRONTEND_TO_DB_STAGES = {
 KISS24_BASE_URL = str(os.environ.get("KISS_24_ENDPOINT"))
 BASE_URL = str(os.environ.get("FRONTEND_URL"))
 
-
-# --- HELPER: TEST HISTORY LOGGER ---
+####################################
+# ---        HELPERS          ---  #
+####################################
+# TEST HISTORY LOGGER
 def log_test_history(cursor, test_id: str, user_id: str, action: str, details: str = None):
     """Logs an event to the test_history AND cascades it to the asset_history of all attached assets."""
 
@@ -89,7 +91,7 @@ def log_test_history(cursor, test_id: str, user_id: str, action: str, details: s
         ''', (new_asset_hist_id, str(raw_asset_id), str(user_id) if user_id else None, action, asset_details))
 
 
-# --- HELPER: report generations --
+# report generations
 async def process_presentation_background(test_id: str, kiss24_id: str, user_id: str, user_email: str, user_role: str, test_name: str,
                                           drive_folder_id: str, service_name: str, snow_number: str,
                                           start_week: int, start_year: int, duration_weeks: float):
@@ -429,7 +431,7 @@ async def process_vuln_report_background(test_id: str, kiss24_id: str, user_id: 
         await manager.broadcast(json.dumps({"action": "REPORT_FAILED", "email": user_email, "message": user_message}))
 
 
-# --- HELPER: Vulnerability analysis ---
+# Vulnerability analysis
 async def process_vuln_analysis_background(test_id: str, kiss24_id: str, user_id: str, user_email: str, test_name: str):
     try:
         # 1. Build Payload
@@ -516,7 +518,7 @@ async def process_vuln_analysis_background(test_id: str, kiss24_id: str, user_id
         }))
 
 
-# --- HELPER: bulk generation ---
+# bulk generation
 def process_bulk_tests_background(asset_ids: List[UUID4], user_id: str, role: str,):
     tests_to_provision = []
 
@@ -581,7 +583,9 @@ def process_bulk_tests_background(asset_ids: List[UUID4], user_id: str, role: st
             DriveManager().provision_test_workspace(test_id, year, s_name, c_name, t_name)
 
 
-# --- Test endpoint api ---
+####################################
+# ---   Test endpoint api     ---  #
+####################################
 @router.post("/", summary="[Admin Only] Create a new Test")
 def create_test(t: TestCreate, background_tasks: BackgroundTasks,
                 current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
@@ -634,7 +638,10 @@ def get_all_tests(current_user: dict = Depends(get_current_user), cursor=Depends
             EXISTS(SELECT 1 FROM secret_notes WHERE test_id = t.id) as has_secret,
             t.drive_folder_url,
             t.kiss24,
-            (SELECT a.raw_asset_id FROM test_assets ta JOIN assets a ON ta.asset_id = a.id WHERE ta.test_id = t.id LIMIT 1) as raw_asset_id
+            (SELECT a.raw_asset_id FROM test_assets ta JOIN assets a ON ta.asset_id = a.id WHERE ta.test_id = t.id LIMIT 1) as raw_asset_id,
+            (SELECT ra.is_kpi FROM test_assets ta JOIN assets a ON ta.asset_id = a.id JOIN raw_assets ra ON a.raw_asset_id = ra.id WHERE ta.test_id = t.id LIMIT 1) as is_kpi,
+            (SELECT ra.is_critical FROM test_assets ta JOIN assets a ON ta.asset_id = a.id JOIN raw_assets ra ON a.raw_asset_id = ra.id WHERE ta.test_id = t.id LIMIT 1) as is_critical,
+            (SELECT at.name FROM test_assets ta JOIN assets a ON ta.asset_id = a.id JOIN raw_assets ra ON a.raw_asset_id = ra.id JOIN asset_types at ON ra.asset_type_id = at.id WHERE ta.test_id = t.id LIMIT 1) as asset_type_name
         FROM tests t 
         LEFT JOIN services_lanes s ON t.service_lane_id = s.id
         LEFT JOIN service_categories sc ON t.category_id = sc.id
@@ -872,6 +879,9 @@ def bulk_create_tests(req: BulkTestCreate, background_tasks: BackgroundTasks,
     return {"message": f"Generating {len(req.asset_ids)} tests from active pool."}
 
 
+####################################
+# ---       Action menu       ---  #
+####################################
 @router.post("/{test_id}/workspace", summary="Create workspace on Google for each test")
 def provision_workspace_manually(test_id: str, background_tasks: BackgroundTasks,
                                  current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
@@ -1151,7 +1161,9 @@ def uncomplete_test(test_id: str, background_tasks: BackgroundTasks,
     return {"message": "Test uncompleted."}
 
 
-# ---  Assign a test ---
+####################################
+# ---   Test Assignement      ---  #
+####################################
 @router.post("/assignments", summary="[Admin Only] Assigne a test to a pentester")
 def create_assignment(assign: AssignmentCreate, background_tasks: BackgroundTasks,
                       current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
@@ -1224,8 +1236,9 @@ def remove_assignment(test_id: str, user_id: str, background_tasks: BackgroundTa
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": "Successfully Unassigned"}
 
-
-# ---  History Test ---
+####################################
+# ---   Test History          ---  #
+####################################
 @router.get("/{test_id}/history", summary="Return the test history")
 def get_test_history(test_id: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
     """
@@ -1242,7 +1255,9 @@ def get_test_history(test_id: str, current_user: dict = Depends(get_current_user
     return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
 
-# --- Secure note ---
+####################################
+# ---   Test Secure note      ---  #
+####################################
 @router.get("/{test_id}/secret", summary="Return the encrypted test secret")
 def get_test_secret(test_id: str, current_user: dict = Depends(require_write_access), cursor=Depends(get_db_cursor)):
     # 1. Get the encrypted note
@@ -1311,6 +1326,9 @@ def delete_test_secret(test_id: str, background_tasks: BackgroundTasks, current_
     return {"message": "Secure note permanently deleted."}
 
 
+####################################
+# --- Test report generation  ---  #
+####################################
 # --- Generation PPT ---
 @router.post("/{test_id}/presentation", summary="Create a new presentation")
 def trigger_presentation_generation(test_id: str, background_tasks: BackgroundTasks,
@@ -1529,7 +1547,9 @@ def trigger_test_analysis(test_id: str, background_tasks: BackgroundTasks,
     return {"message": "Analysis started in the background."}
 
 
-# -- Milestones ---
+####################################
+# ---   Test Milestones       ---  #
+####################################
 @router.get("/{test_id}/milestones", summary="Get Milestones test")
 def get_milestones(test_id: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
     cursor.execute("SELECT step_name, is_completed FROM test_milestones WHERE test_id = %s", (test_id,))

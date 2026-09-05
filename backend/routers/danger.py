@@ -202,6 +202,7 @@ def reset_asset_kpi_criteria(background_tasks: BackgroundTasks, current_user: di
     """
     try:
         cursor.execute("UPDATE raw_assets SET is_kpi = FALSE, is_critical = FALSE;")
+        cursor.execute("UPDATE asset_criteria SET is_evaluated = FALSE;")
         cursor.connection.commit()
         log_audit_event(
             user_id=str(current_user["id"]),

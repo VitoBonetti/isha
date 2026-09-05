@@ -1,24 +1,33 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 import axios from "axios";
 import TopNav from "../components/TopNav";
 import SecureNoteModal from "../components/Modals/SecureNoteModal";
 import ConfirmModal from "../components/Modals/ConfirmModal";
 import toast, { Toaster } from "react-hot-toast";
-import { Search, ShieldAlert, Calendar, ChevronsUpDown, ChevronUp, ChevronDown, LockOpen, Lock, FolderOpen, FolderPlus, History, Database } from "lucide-react";
+import { Search, ShieldAlert, Calendar, ChevronsUpDown, ChevronUp, ChevronDown, LockOpen, Lock, FolderOpen, FolderPlus, Database, Filter } from "lucide-react";
 import { useAppContext } from "../context/AppContext";
 import type { Test } from "../types/board";
 
 export default function TestsView() {
   const { currentUser } = useAppContext();
   const [tests, setTests] = useState<any[]>([]);
+  const [assetTypes, setAssetTypes] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState("");
 
   // Filtering States
+  const [searchTerm, setSearchTerm] = useState("");
   const [filterYear, setFilterYear] = useState<string>("All");
   const [filterService, setFilterService] = useState<string>("All");
   const [filterStatus, setFilterStatus] = useState<string>("All");
+  const [filterAssetType, setFilterAssetType] = useState<string>("All");
+  const [filterIsKpi, setFilterIsKpi] = useState<"All" | "true" | "false">("All");
+  const [filterIsCritical, setFilterIsCritical] = useState<"All" | "true" | "false">("All");
+  const [filterPentester, setFilterPentester] = useState<string>("All");
+
+  const [showFilters, setShowFilters] = useState(false);
+  const filterRef = useRef<HTMLDivElement>(null);
+  const filterBtnRef = useRef<HTMLButtonElement>(null);
 
   // Pagination State
   const [page, setPage] = useState(1);
@@ -34,12 +43,21 @@ export default function TestsView() {
 
   useEffect(() => {
     fetchTests();
+    axios.get('/api/assets/types').then(res => setAssetTypes(res.data)).catch(console.error);
+
+    const handleClickOutside = (e: MouseEvent) => {
+      if (filterRef.current && !filterRef.current.contains(e.target as Node) && filterBtnRef.current && !filterBtnRef.current.contains(e.target as Node)) {
+        setShowFilters(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
   // Reset to page 1 whenever any filter or sort order changes
   useEffect(() => {
     setPage(1);
-  }, [searchTerm, filterYear, filterService, filterStatus, sortBy, sortDir]);
+  }, [searchTerm, filterYear, filterService, filterStatus, filterAssetType, filterIsKpi, filterIsCritical, filterPentester, sortBy, sortDir]);
 
   const fetchTests = async () => {
     try {
@@ -79,35 +97,49 @@ export default function TestsView() {
     return sortDir === "asc" ? <ChevronUp size={14} className="text-emerald-500 inline-block" /> : <ChevronDown size={14} className="text-emerald-500 inline-block" />;
   };
 
-  // Extract unique services dynamically for the dropdown
+  // Extract unique filter dropdown options dynamically
   const uniqueServices = Array.from(new Set(tests.map(t => t.service_lane_name).filter(Boolean))).sort();
-
-  // NEW: Extract unique years dynamically, sorted descending (newest first)
-  const uniqueYears = Array.from(new Set(tests.map(t => t.start_year).filter(Boolean))).sort((a, b) => Number(b) - Number(a))
+  const uniqueYears = Array.from(new Set(tests.map(t => t.start_year).filter(Boolean))).sort((a, b) => Number(b) - Number(a));
+  const uniquePentesters = Array.from(new Set(tests.flatMap(t => (t.assigned_pentesters || "Unassigned").split(", ")))).filter(p => p !== "Unassigned").sort();
 
   // 1. Filter
   const filteredTests = tests.filter(test => {
     // Text Search
-    const matchesSearch = test.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (test.assigned_pentesters && test.assigned_pentesters.toLowerCase().includes(searchTerm.toLowerCase()));
+    const matchesSearch = test.name.toLowerCase().includes(searchTerm.toLowerCase());
 
     // Dropdown Filters
-    const matchesYear = filterYear === "All" || String(test.start_year) === filterYear;
+    const matchesYear = filterYear === "All" || String(test.start_year) === filterYear || (filterYear === "null" && !test.start_year);
     const matchesService = filterService === "All" || test.service_lane_name === filterService;
+    const matchesAssetType = filterAssetType === "All" || test.asset_type_name === filterAssetType;
+    const matchesIsKpi = filterIsKpi === "All" || (filterIsKpi === "true" ? test.is_kpi : !test.is_kpi);
+    const matchesIsCritical = filterIsCritical === "All" || (filterIsCritical === "true" ? test.is_critical : !test.is_critical);
+
+    const assignedArray = (test.assigned_pentesters || "Unassigned").split(", ");
+    const matchesPentester = filterPentester === "All" || assignedArray.includes(filterPentester);
 
     // Status Logic
     let matchesStatus = true;
     if (filterStatus !== "All") {
-      const s = test.status.toUpperCase();
+      const s = test.status?.toUpperCase() || "";
       if (filterStatus === "Backlog") matchesStatus = (s === "NOT_PLANNED" || s === "NOT PLANNED");
       else matchesStatus = (s === filterStatus.toUpperCase());
     }
 
-    return matchesSearch && matchesYear && matchesService && matchesStatus;
+    return matchesSearch && matchesYear && matchesService && matchesStatus && matchesAssetType && matchesIsKpi && matchesIsCritical && matchesPentester;
   });
 
   // 2. Sort
   const sortedTests = [...filteredTests].sort((a, b) => {
+    if (sortBy === "schedule") {
+      const yearA = a.start_year || 0;
+      const yearB = b.start_year || 0;
+      const weekA = a.start_week || 0;
+      const weekB = b.start_week || 0;
+
+      if (yearA !== yearB) return sortDir === "asc" ? yearA - yearB : yearB - yearA;
+      return sortDir === "asc" ? weekA - weekB : weekB - weekA;
+    }
+
     let aValue = "";
     let bValue = "";
 
@@ -132,14 +164,14 @@ export default function TestsView() {
   const paginatedTests = sortedTests.slice((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE);
 
   const getStatusPill = (status: string) => {
-    const s = status.toUpperCase();
+    const s = status?.toUpperCase() || "";
     if (s === "COMPLETED") return <span className="px-2.5 py-1 rounded-md text-[10px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/20">Completed</span>;
     if (s === "STOPPED") return <span className="px-2.5 py-1 rounded-md text-[10px] font-black uppercase tracking-wider bg-red-100 text-red-800 dark:bg-red-500/10 dark:text-red-400 border border-red-200 dark:border-red-500/20">Stopped</span>;
     if (s === "NOT_PLANNED" || s === "NOT PLANNED") return <span className="px-2.5 py-1 rounded-md text-[10px] font-black uppercase tracking-wider bg-slate-100 text-slate-800 dark:bg-zinc-800 dark:text-zinc-400 border border-slate-200 dark:border-zinc-700">Backlog</span>;
     return <span className="px-2.5 py-1 rounded-md text-[10px] font-black uppercase tracking-wider bg-blue-100 text-blue-800 dark:bg-blue-500/10 dark:text-blue-400 border border-blue-200 dark:border-blue-500/20">Scheduled</span>;
   };
 
-  const selectStyles = "w-full sm:w-auto px-4 py-2 rounded-lg border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-sm font-bold text-slate-700 dark:text-zinc-300 outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer";
+  const selectStyles = "w-full p-2 border border-slate-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-sm outline-none focus:ring-2 focus:ring-indigo-500";
 
   return (
     <div className="min-h-screen text-slate-900 dark:text-zinc-100 pb-12">
@@ -158,47 +190,122 @@ export default function TestsView() {
       {secretTarget && <SecureNoteModal test={secretTarget} onClose={() => { setSecretTarget(null); fetchTests(); }} />}
 
       <div className="pt-28 md:pt-32 px-4 md:px-6 max-w-7xl mx-auto">
-        <h1 className="text-2xl font-extrabold flex items-center gap-2">
-          <ShieldAlert size={28} className="text-indigo-500" />
-          Test Registry
-        </h1>
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl font-extrabold flex items-center gap-2">
+            <ShieldAlert size={28} className="text-indigo-500" />
+            Test Registry
+          </h1>
+          {!loading && (
+            <span className="bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400 text-xs font-bold px-2.5 py-1 rounded-full border border-slate-200 dark:border-zinc-700 shadow-sm mt-1">
+              {filteredTests.length} Found
+            </span>
+          )}
+        </div>
         <p className="text-slate-500 dark:text-zinc-400 mb-6 md:mb-8 text-sm md:text-base">Comprehensive read-only log of all tests, stages, and assignments.</p>
 
-        {/* Action Bar with New Filters (Stacked on Mobile) */}
-        <div className="bg-white dark:bg-zinc-900 p-4 rounded-xl border border-slate-200 dark:border-zinc-800 shadow-sm mb-6 flex flex-col xl:flex-row justify-between items-stretch xl:items-center gap-4">
-          <div className="relative w-full xl:max-w-md shrink-0">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-            <input type="text" placeholder="Search by test name or pentester..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2.5 md:py-2 rounded-lg border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 focus:ring-2 focus:ring-indigo-500 outline-none text-sm" />
-          </div>
+        {/* Actions Bar with Advanced Dropdown Filters */}
+        <div className="flex flex-col gap-4 bg-white dark:bg-zinc-900 p-4 rounded-xl border border-slate-200 dark:border-zinc-800 shadow-sm relative z-10 mb-6">
+          <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 w-full">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 flex-1 w-full">
+              <div className="relative w-full md:max-w-md">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Search by test name..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2.5 md:py-2 rounded-lg border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 focus:ring-2 focus:ring-indigo-500 outline-none text-sm"
+                />
+              </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 xl:flex flex-wrap justify-end items-center gap-3 w-full xl:w-auto">
-            <select value={filterService} onChange={e => setFilterService(e.target.value)} className={selectStyles}>
-              <option value="All">All Services</option>
-              {uniqueServices.map(s => <option key={s as string} value={s as string}>{s as string}</option>)}
-            </select>
+              <button
+                ref={filterBtnRef}
+                onClick={() => setShowFilters(!showFilters)}
+                className={`w-full sm:w-auto flex justify-center items-center gap-2 px-4 py-2.5 md:py-2 rounded-lg border transition-colors text-sm ${showFilters ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-400 font-bold' : 'border-slate-300 dark:border-zinc-700 hover:bg-slate-100 dark:hover:bg-zinc-800'}`}
+              >
+                <Filter className="h-4 w-4" /> Advanced Filters
+              </button>
 
-            <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className={selectStyles}>
-              <option value="All">All Statuses</option>
-              <option value="Scheduled">Scheduled</option>
-              <option value="Backlog">Backlog</option>
-              <option value="Completed">Completed</option>
-              <option value="Stopped">Stopped</option>
-            </select>
-
-            <select value={filterYear} onChange={e => setFilterYear(e.target.value)} className={selectStyles}>
-              <option value="All">All Years</option>
-              {uniqueYears.map(year => (
-                <option key={year as number} value={String(year)}>
-                  {year as number}
-                </option>
-              ))}
-              <option value="null">Unscheduled</option>
-            </select>
-
-            <div className="hidden sm:block text-sm font-bold text-slate-500 bg-slate-100 dark:bg-zinc-800 px-3 py-1.5 rounded-lg shrink-0 text-center w-full xl:w-auto mt-2 xl:mt-0 col-span-3 xl:col-span-1">
-              {filteredTests.length} Tests
+              {/* Quick Filter: Year */}
+              <select value={filterYear} onChange={e => setFilterYear(e.target.value)} className={`${selectStyles} max-w-[120px] font-bold border-slate-300 dark:border-zinc-700`}>
+                <option value="All">All Years</option>
+                {uniqueYears.map(year => <option key={year as number} value={String(year)}>{year as number}</option>)}
+                <option value="null">Unscheduled</option>
+              </select>
             </div>
           </div>
+
+          {/* Advanced Filters Popover */}
+          {showFilters && (
+            <div ref={filterRef} className="absolute top-full left-0 right-0 mt-2 w-full bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-xl shadow-xl p-4 md:p-6 z-20 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 animate-in fade-in slide-in-from-top-2">
+              <div className="space-y-4">
+                <div>
+                  <label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Status</label>
+                  <select className={selectStyles} value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
+                    <option value="All">All Statuses</option>
+                    <option value="Scheduled">Scheduled</option>
+                    <option value="Backlog">Backlog</option>
+                    <option value="Completed">Completed</option>
+                    <option value="Stopped">Stopped</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Pentester</label>
+                  <select className={selectStyles} value={filterPentester} onChange={e => setFilterPentester(e.target.value)}>
+                    <option value="All">All Pentesters</option>
+                    <option value="Unassigned">Unassigned</option>
+                    {uniquePentesters.map(p => <option key={p as string} value={p as string}>{p as string}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Service Lane</label>
+                  <select className={selectStyles} value={filterService} onChange={e => setFilterService(e.target.value)}>
+                    <option value="All">All Services</option>
+                    {uniqueServices.map(s => <option key={s as string} value={s as string}>{s as string}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Asset Type</label>
+                  <select className={selectStyles} value={filterAssetType} onChange={e => setFilterAssetType(e.target.value)}>
+                    <option value="All">All Types</option>
+                    {assetTypes.map(t => <option key={t.id} value={t.name}>{t.name}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Is KPI</label>
+                  <select className={selectStyles} value={filterIsKpi} onChange={e => setFilterIsKpi(e.target.value as any)}>
+                    <option value="All">Any</option>
+                    <option value="true">Yes</option>
+                    <option value="false">No</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Is Critical</label>
+                  <select className={selectStyles} value={filterIsCritical} onChange={e => setFilterIsCritical(e.target.value as any)}>
+                    <option value="All">Any</option>
+                    <option value="true">Yes</option>
+                    <option value="false">No</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="sm:col-span-2 lg:col-span-4 flex justify-end mt-2 pt-4 border-t border-slate-100 dark:border-zinc-800">
+                <button onClick={() => {
+                  setFilterStatus("All"); setFilterService("All"); setFilterYear("All");
+                  setFilterAssetType("All"); setFilterIsKpi("All"); setFilterIsCritical("All");
+                  setFilterPentester("All"); setPage(1);
+                }} className="text-sm text-indigo-500 font-bold hover:text-indigo-600 p-2 transition-colors">
+                  Clear All Filters
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="bg-white dark:bg-zinc-900 rounded-xl border border-slate-200 dark:border-zinc-800 shadow-sm overflow-hidden flex flex-col w-full">
@@ -222,7 +329,12 @@ export default function TestsView() {
                     >
                       <div className="flex items-center gap-2">Service Lane <SortIcon column="service" /></div>
                     </th>
-                    <th className="p-4 font-semibold text-slate-500 uppercase tracking-wider">Schedule</th>
+                    <th
+                      className="p-4 font-semibold text-slate-500 uppercase tracking-wider cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"
+                      onClick={() => handleSort("schedule")}
+                    >
+                      <div className="flex items-center gap-2">Schedule <SortIcon column="schedule" /></div>
+                    </th>
                     <th className="p-4 font-semibold text-slate-500 uppercase tracking-wider">Assigned To</th>
                     <th
                       className="p-4 font-semibold text-slate-500 uppercase tracking-wider text-right cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"
@@ -237,14 +349,23 @@ export default function TestsView() {
                   {paginatedTests.map((test) => (
                     <tr key={test.id} className="hover:bg-slate-50 dark:hover:bg-zinc-800/30 transition-colors">
                       <td className="p-4 max-w-[200px]">
-                        <Link
-                          to={`/tests/${test.id}`}
-                          state={{ from: '/tests', label: 'Test Registry' }}
-                          className="font-bold text-blue-600 dark:text-blue-400 hover:underline text-left truncate block w-full"
-                          title={`View Test Details: ${test.name}`}
-                        >
-                          {test.name}
-                        </Link>
+                        <div className="flex flex-col">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <Link
+                              to={`/tests/${test.id}`}
+                              state={{ from: '/tests', label: 'Test Registry' }}
+                              className="font-bold text-blue-600 dark:text-blue-400 hover:underline text-left truncate block max-w-full"
+                              title={`View Test Details: ${test.name}`}
+                            >
+                              {test.name}
+                            </Link>
+                            {test.is_kpi && <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300 flex-shrink-0">KPI</span>}
+                            {test.is_critical && <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300 flex-shrink-0">CRIT</span>}
+                          </div>
+                          {test.asset_type_name && (
+                            <span className="text-[11px] text-slate-500 dark:text-zinc-400 mt-1">{test.asset_type_name}</span>
+                          )}
+                        </div>
                       </td>
                       <td className="p-4">
                         <div className="flex flex-col gap-1 items-start">
@@ -328,17 +449,24 @@ export default function TestsView() {
               {paginatedTests.map((test) => (
                 <div key={test.id} className="p-4 flex flex-col gap-3">
                   <div className="flex justify-between items-start gap-2">
-                    {/* 1. TEST NAME: Now a link to the asset details */}
-                    <Link
-                      to={`/tests/${test.id}`}
-                      state={{ from: '/tests', label: 'Test Registry' }}
-                      className="font-bold text-sm text-blue-600 dark:text-blue-400 hover:underline text-left break-words"
-                    >
-                      {test.name}
-                    </Link>
+                    <div className="flex flex-col">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Link
+                          to={`/tests/${test.id}`}
+                          state={{ from: '/tests', label: 'Test Registry' }}
+                          className="font-bold text-sm text-blue-600 dark:text-blue-400 hover:underline text-left break-words"
+                        >
+                          {test.name}
+                        </Link>
+                        {test.is_kpi && <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300">KPI</span>}
+                        {test.is_critical && <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300">CRIT</span>}
+                      </div>
+                      {test.asset_type_name && (
+                        <span className="text-[11px] text-slate-500 dark:text-zinc-400 mt-0.5">{test.asset_type_name}</span>
+                      )}
+                    </div>
 
                     <div className="flex shrink-0 gap-1">
-                      {/* 2. NEW HISTORY BUTTON */}
                       {currentUser?.role === 'admin' && test.raw_asset_id && (
                         <Link
                           to={`/raw/${test.raw_asset_id}`}
@@ -349,7 +477,6 @@ export default function TestsView() {
                           <Database size={14} />
                         </Link>
                       )}
-
                       {test.drive_folder_url ? (
                         <a
                           href={test.drive_folder_url}
