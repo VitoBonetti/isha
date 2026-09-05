@@ -66,17 +66,16 @@ def process_test_documents_background(test_id: str, user_id: str, user_role: str
     """Background task to extract, embed, and store document chunks using structural splitting."""
     with db_cursor_context() as cursor:
         try:
-            # 1. Fetch documents EXACTLY how you originally had it to guarantee it works
-            # (Added a safeguard just in case test_id is passed as the string "None")
+            # 1. Fetch documents
             if test_id and test_id != "None":
                 cursor.execute("""
-                    SELECT id, drive_file_id, mime_type, file_name, doc_type, is_virtual, last_modified 
+                    SELECT id, drive_file_id, mime_type, file_name, doc_type, is_virtual, last_modified, folder_path 
                     FROM test_documents 
                     WHERE test_id = %s
                 """, (test_id,))
             else:
                 cursor.execute("""
-                    SELECT id, drive_file_id, mime_type, file_name, doc_type, is_virtual, last_modified 
+                    SELECT id, drive_file_id, mime_type, file_name, doc_type, is_virtual, last_modified, folder_path 
                     FROM test_documents 
                     WHERE test_id IS NULL AND doc_type = 'KNOWLEDGE_BASE'
                 """)
@@ -94,7 +93,7 @@ def process_test_documents_background(test_id: str, user_id: str, user_role: str
             # 2. Incremental Sync Check (Done safely one-by-one so SQL doesn't drop rows)
             docs_to_process = []
             for doc in all_documents:
-                doc_id, drive_file_id, mime_type, file_name, doc_type, is_virtual, last_modified = doc
+                doc_id, drive_file_id, mime_type, file_name, doc_type, is_virtual, last_modified, folder_path = doc
 
                 # Check when this specific document was last embedded
                 cursor.execute("SELECT MAX(created_at) FROM document_chunks WHERE document_id = %s", (doc_id,))
@@ -121,7 +120,7 @@ def process_test_documents_background(test_id: str, user_id: str, user_role: str
 
             # 4. Extract and Embed
             for doc in docs_to_process:
-                doc_id, drive_file_id, mime_type, file_name, doc_type, is_virtual, last_modified = doc
+                doc_id, drive_file_id, mime_type, file_name, doc_type, is_virtual, last_modified, folder_path = doc
                 chunks = []
 
                 # Safely route virtual docs without faking Google Drive IDs
@@ -156,8 +155,18 @@ def process_test_documents_background(test_id: str, user_id: str, user_role: str
                 if not chunks:
                     continue
 
-                # 5. Rate-Limited Embedding Loop
+                # 5. Build the Context Prefix Metadata
+                taxonomy_string = f"SOURCE TYPE: [{doc_type}] | FILENAME: {file_name}"
+                if folder_path:
+                    taxonomy_string += f" | FOLDER PATH: {folder_path}"
+                taxonomy_string = f"[{taxonomy_string}]\n\n"
+
+                # 6. Rate-Limited Embedding Loop
                 for index, chunk_text_content in enumerate(chunks):
+
+                    # Inject the metadata right into the text vector!
+                    contextualized_chunk = taxonomy_string + chunk_text_content
+
                     max_retries = 3
                     base_delay = 5  # Start with a 5-second wait if rate-limited
 
@@ -165,7 +174,7 @@ def process_test_documents_background(test_id: str, user_id: str, user_role: str
                         try:
                             response = client.models.embed_content(
                                 model='gemini-embedding-2',
-                                contents=chunk_text_content,
+                                contents=contextualized_chunk,  # Embed the contextualized version!
                                 config=types.EmbedContentConfig(output_dimensionality=768)
                             )
 
@@ -175,7 +184,7 @@ def process_test_documents_background(test_id: str, user_id: str, user_role: str
                             cursor.execute("""
                                 INSERT INTO document_chunks (id, document_id, test_id, chunk_index, text_content, embedding, created_at)
                                 VALUES (gen_random_uuid(), %s, %s, %s, %s, %s::vector, CURRENT_TIMESTAMP)
-                            """, (doc_id, test_id, index, chunk_text_content, vector_str))
+                            """, (doc_id, test_id, index, contextualized_chunk, vector_str))
 
                             break  # Success! Exit the retry loop.
 
@@ -225,7 +234,7 @@ def sync_knowledge_base_background(user_id: str, user_role: str):
 
     # 1. Fetch new files from Google Drive
     try:
-        DriveManager().sync_global_knowledge_base()
+        DriveManager().sync_global_knowledge_base(user_id, user_role)
     except Exception as e:
         log_audit_event(
             user_id=user_id, role=user_role, action="SYNC_KB_DRIVE_FAILED",
@@ -301,7 +310,6 @@ def sync_test_to_rag(
 
 # --- GLOBAL SYNC WORKER ---
 def sync_all_active_tests_background(user_id: str, user_role: str):
-
     sync_knowledge_base_background(user_id, user_role)
 
     with db_cursor_context() as cursor:
@@ -691,7 +699,8 @@ def get_session_messages(session_id: str, current_user: dict = Depends(require_a
 
 
 @router.post("/logs/{log_id}/feedback", summary="Submit feedback for a response")
-def submit_rag_feedback(log_id: str, request: FeedbackRequest, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+def submit_rag_feedback(log_id: str, request: FeedbackRequest, current_user: dict = Depends(require_admin),
+                        cursor=Depends(get_db_cursor)):
     cursor.execute("""
         UPDATE rag_chat_logs 
         SET user_feedback = %s 
@@ -749,7 +758,8 @@ def bulk_delete_chat_sessions(request: RagChatBulkDeleteRequest, current_user: d
 
 
 @router.get("/sessions/shared/{session_id}", summary="Get messages for a shared session (Read-Only)")
-def get_shared_session_messages(session_id: str, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+def get_shared_session_messages(session_id: str, current_user: dict = Depends(require_admin),
+                                cursor=Depends(get_db_cursor)):
     """
     Allows any authenticated team member with the unique session URL
     to view a shared chat transcript in read-only mode.

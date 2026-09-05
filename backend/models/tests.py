@@ -56,6 +56,7 @@ class TestDocuments(Base):
     mime_type = Column(String(255), nullable=True)
     file_url = Column(String(1000), nullable=True)
     doc_type = Column(String(50), default='MANUAL_UPLOAD', nullable=False)
+    folder_path = Column(Text, nullable=True)
     last_modified = Column(DateTime(timezone=True), nullable=True)
     synced_at = Column(DateTime(timezone=True), default=aware_utcnow)
     is_virtual = Column(Boolean, default=False, nullable=False)

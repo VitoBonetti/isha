@@ -8,6 +8,7 @@ import uuid
 from datetime import datetime
 import asyncio
 from websockets_manager import manager
+from audit_logger import log_audit_event
 
 
 class DriveManager:
@@ -42,13 +43,12 @@ class DriveManager:
         folder = self.find_folder(name, parent_id)
         return folder if folder else self.create_folder(name, parent_id)
 
-    def scan_folder_recursive(self, folder_id: str) -> list:
-        """Recursively scans a folder and all subfolders, returning files only."""
+    def scan_folder_recursive(self, folder_id: str, current_path: str = "") -> list:
+        """Recursively scans a folder and all subfolders, passing down the relative path."""
         found_files = []
         try:
             query = f"'{folder_id}' in parents and trashed=false"
 
-            # Added includeItemsFromAllDrives=True for Shared Drives
             results = self.drive_service.files().list(
                 q=query,
                 fields="files(id, name, mimeType, webViewLink, modifiedTime)",
@@ -58,10 +58,12 @@ class DriveManager:
 
             for item in results.get('files', []):
                 if item['mimeType'] == 'application/vnd.google-apps.folder':
-                    # It found your subfolder! Dive into it:
-                    found_files.extend(self.scan_folder_recursive(item['id']))
+                    # It found a subfolder! Append its name to the path and dive deeper.
+                    new_path = f"{current_path}/{item['name']}" if current_path else item['name']
+                    found_files.extend(self.scan_folder_recursive(item['id'], current_path=new_path))
                 else:
-                    # It found your file! Keep it:
+                    # It found a file! Attach the current path before keeping it.
+                    item['folder_path'] = current_path
                     found_files.append(item)
 
             return found_files
@@ -69,7 +71,7 @@ class DriveManager:
             print(f"Error recursively scanning folder {folder_id}: {e}")
             return []
 
-    def sync_global_knowledge_base(self):
+    def sync_global_knowledge_base(self, user_id: str = "SYSTEM", user_role: str = "SYSTEM"):
         """Indexes files from the global knowledge base folder and removes deleted orphans."""
         kb_folder_id = os.getenv('KNOWLEDGE_BASE_FOLDER_ID')
 
@@ -78,30 +80,59 @@ class DriveManager:
 
         files = self.scan_folder_recursive(kb_folder_id)
 
-        if not files:
-            raise ValueError(
-                f"Drive scanner found 0 files in folder {kb_folder_id}. Check permissions or folder contents.")
-
         with db_cursor_context() as cursor:
-            # 1. Upsert files that currently exist in Drive
-            for f in files:
-                mod_time = datetime.strptime(f['modifiedTime'],
-                                             "%Y-%m-%dT%H:%M:%S.%fZ") if 'modifiedTime' in f else datetime.now()
-                # Upsert with test_id = NULL and doc_type = 'KNOWLEDGE_BASE'
-                cursor.execute('''
-                    INSERT INTO test_documents (id, test_id, drive_file_id, file_name, mime_type, file_url, doc_type, last_modified, synced_at)
-                    VALUES (%s, NULL, %s, %s, %s, %s, 'KNOWLEDGE_BASE', %s, CURRENT_TIMESTAMP)
-                    ON CONFLICT (drive_file_id) DO UPDATE SET 
-                        file_name = EXCLUDED.file_name, file_url = EXCLUDED.file_url, last_modified = EXCLUDED.last_modified, synced_at = CURRENT_TIMESTAMP
-                ''', (str(uuid.uuid4()), f['id'], f['name'], f.get('mimeType', 'unknown'), f.get('webViewLink', ''),
-                      mod_time))
+            # SCENARIO A: Folder is 100% empty (Wipe everything)
+            if not files:
+                print(f"Drive scanner found 0 files in folder {kb_folder_id}. Wiping Knowledge Base.")
+                log_audit_event(
+                    user_id=user_id, role=user_role, action="SYNC_KB_EMPTY_DRIVE",
+                    resource_type="RAG", resource_id="KNOWLEDGE_BASE",
+                    details="0 files found in Google Drive. Proceeding to wipe all Knowledge Base documents from the database."
+                )
 
-            # 2. Cleanup Step: Delete documents (and their AI chunks) that are no longer in Drive
-            current_drive_ids = [f['id'] for f in files]
-            if current_drive_ids:
+                # Delete all chunks linked to KB docs
+                cursor.execute("""
+                    DELETE FROM document_chunks 
+                    WHERE document_id IN (
+                        SELECT id FROM test_documents WHERE test_id IS NULL AND doc_type = 'KNOWLEDGE_BASE'
+                    )
+                """)
+
+                # Delete all KB docs
+                cursor.execute("DELETE FROM test_documents WHERE test_id IS NULL AND doc_type = 'KNOWLEDGE_BASE'")
+                deleted_docs = cursor.rowcount
+
+                if deleted_docs > 0:
+                    log_audit_event(
+                        user_id=user_id, role=user_role, action="SYNC_KB_ORPHAN_CLEANUP",
+                        resource_type="RAG", resource_id="KNOWLEDGE_BASE",
+                        details=f"Wiped {deleted_docs} orphaned documents from the Knowledge Base."
+                    )
+
+            # SCENARIO B: Folder has files (Upsert and Selective Cleanup)
+            else:
+                # 1. Upsert files that currently exist in Drive
+                for f in files:
+                    mod_time = datetime.strptime(f['modifiedTime'],
+                                                 "%Y-%m-%dT%H:%M:%S.%fZ") if 'modifiedTime' in f else datetime.now()
+                    # Upsert with test_id = NULL, doc_type = 'KNOWLEDGE_BASE', and the captured folder_path
+                    cursor.execute('''
+                        INSERT INTO test_documents (id, test_id, drive_file_id, file_name, mime_type, file_url, doc_type, folder_path, last_modified, synced_at)
+                        VALUES (%s, NULL, %s, %s, %s, %s, 'KNOWLEDGE_BASE', %s, %s, CURRENT_TIMESTAMP)
+                        ON CONFLICT (drive_file_id) DO UPDATE SET 
+                            file_name = EXCLUDED.file_name, 
+                            file_url = EXCLUDED.file_url, 
+                            folder_path = EXCLUDED.folder_path,
+                            last_modified = EXCLUDED.last_modified, 
+                            synced_at = CURRENT_TIMESTAMP
+                    ''', (str(uuid.uuid4()), f['id'], f['name'], f.get('mimeType', 'unknown'), f.get('webViewLink', ''),
+                          f.get('folder_path', ''), mod_time))
+
+                # 2. Cleanup Step: Delete documents (and their AI chunks) that are no longer in Drive
+                current_drive_ids = [f['id'] for f in files]
                 format_strings = ','.join(['%s'] * len(current_drive_ids))
 
-                # First, safely delete the AI chunks for any orphaned documents
+                # Safely delete the AI chunks for any orphaned documents
                 cursor.execute(f"""
                     DELETE FROM document_chunks 
                     WHERE document_id IN (
@@ -112,13 +143,21 @@ class DriveManager:
                     )
                 """, tuple(current_drive_ids))
 
-                # Second, delete the orphaned documents themselves
+                # Delete the orphaned documents themselves
                 cursor.execute(f"""
                     DELETE FROM test_documents 
                     WHERE test_id IS NULL 
                       AND doc_type = 'KNOWLEDGE_BASE' 
                       AND drive_file_id NOT IN ({format_strings})
                 """, tuple(current_drive_ids))
+
+                deleted_docs = cursor.rowcount
+                if deleted_docs > 0:
+                    log_audit_event(
+                        user_id=user_id, role=user_role, action="SYNC_KB_ORPHAN_CLEANUP",
+                        resource_type="RAG", resource_id="KNOWLEDGE_BASE",
+                        details=f"Removed {deleted_docs} orphaned documents that were deleted from Google Drive."
+                    )
 
             cursor.connection.commit()
 
@@ -162,20 +201,20 @@ class DriveManager:
             print(f"Failed to trash Drive workspace: {e}")
 
     def scan_folder_for_files(self, folder_id: str):
-            """Fetches all files (ignoring sub-folders) inside a specific Drive folder."""
-            # Query: Inside this folder, NOT trashed, and NOT a folder itself
-            query = f"'{folder_id}' in parents and trashed=false and mimeType != 'application/vnd.google-apps.folder'"
-            try:
-                results = self.drive_service.files().list(
-                    q=query,
-                    fields="files(id, name, mimeType, webViewLink, modifiedTime)",
-                    supportsAllDrives=True,
-                    includeItemsFromAllDrives=True
-                ).execute()
-                return results.get('files', [])
-            except Exception as e:
-                print(f"Error scanning folder {folder_id}: {e}")
-                return []
+        """Fetches all files (ignoring sub-folders) inside a specific Drive folder."""
+        # Query: Inside this folder, NOT trashed, and NOT a folder itself
+        query = f"'{folder_id}' in parents and trashed=false and mimeType != 'application/vnd.google-apps.folder'"
+        try:
+            results = self.drive_service.files().list(
+                q=query,
+                fields="files(id, name, mimeType, webViewLink, modifiedTime)",
+                supportsAllDrives=True,
+                includeItemsFromAllDrives=True
+            ).execute()
+            return results.get('files', [])
+        except Exception as e:
+            print(f"Error scanning folder {folder_id}: {e}")
+            return []
 
     def run_daily_document_sync(self):
         """Finds all provisioned test folders and indexes their files into the database."""
@@ -193,7 +232,8 @@ class DriveManager:
 
                 for f in files:
                     # Convert Google's ISO time string to standard timestamp
-                    mod_time = datetime.strptime(f['modifiedTime'], "%Y-%m-%dT%H:%M:%S.%fZ") if 'modifiedTime' in f else datetime.now()
+                    mod_time = datetime.strptime(f['modifiedTime'],
+                                                 "%Y-%m-%dT%H:%M:%S.%fZ") if 'modifiedTime' in f else datetime.now()
 
                     # 2. UPSERT into the database
                     cursor.execute('''
@@ -216,7 +256,8 @@ class DriveManager:
 
             print(f"✅ Document Sync Complete. Indexed/Updated {success_count} files.")
 
-    def relocate_test_workspace(self, folder_id: str, new_year: int, new_service_name: str, new_market: str, new_test_name: str):
+    def relocate_test_workspace(self, folder_id: str, new_year: int, new_service_name: str, new_market: str,
+                                new_test_name: str):
         """Moves an existing folder to a new path and updates its name if necessary."""
         try:
             # 1. Resolve what the NEW target parent folder should be
@@ -294,6 +335,7 @@ class DriveManager:
             print(f"Failed to upload file {filename}: {e}")
             raise e
 
+
 # Add this to the bottom with your other async helpers:
 async def background_relocate_workspace(folder_id, year, service_name, market, test_name):
     import asyncio
@@ -305,6 +347,7 @@ async def background_provision_workspace(test_id, year, service_name, market, te
     await asyncio.to_thread(DriveManager().provision_test_workspace, test_id, year, service_name, market, test_name)
 
     await manager.broadcast('{"action": "REFRESH_BOARD"}')
+
 
 async def background_archive_workspace(folder_id, test_name):
     await asyncio.to_thread(DriveManager().archive_test_workspace, folder_id, test_name)
