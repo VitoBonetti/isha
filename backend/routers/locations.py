@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, UUID4
 from database import get_db_cursor
 from schema import LocationBase
@@ -14,6 +14,9 @@ def get_locations(current_user: dict = Depends(get_current_user), cursor = Depen
     """
     Endpoint to Get Locations
     """
+    if current_user.get('role') == 'mantainer':
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"{current_user.get('role')} cannot access country data.")
+
     cursor.execute("SELECT id, name, is_active FROM locations ORDER BY name")
     return [{"id": r[0], "name": r[1], "is_active": r[2]} for r in cursor.fetchall()]
 

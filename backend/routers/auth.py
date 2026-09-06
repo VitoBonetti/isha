@@ -63,7 +63,7 @@ def get_current_user(request: Request, api_key: str = Depends(api_key_header), c
     if api_key:
         hashed = hash_api_key(api_key)
         cursor.execute("""
-            SELECT u.id, u.email, u.name, u.role, u.location_id
+            SELECT u.id, u.email, u.name, u.role, u.location_id, u.service_lane_id
             FROM users u
             JOIN api_keys ak ON u.id = ak.user_id
             WHERE ak.hashed_key = %s AND ak.is_active = TRUE
@@ -74,7 +74,8 @@ def get_current_user(request: Request, api_key: str = Depends(api_key_header), c
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or revoked API Key")
 
         return {
-            "id": user[0], "email": user[1], "name": user[2], "role": user[3], "location_id": user[4]
+            "id": user[0], "email": user[1], "name": user[2], "role": user[3], "location_id": user[4],
+            "service_lane_id": user[5]
         }
 
     # METHOD B: GOOGLE IAP HEADER AUTHENTICATION (For the React Frontend)
@@ -114,31 +115,66 @@ def get_current_user(request: Request, api_key: str = Depends(api_key_header), c
     except JWTError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
 
-    cursor.execute("SELECT id, email, name, role, location_id FROM users WHERE email = %s", (email,))
+    cursor.execute("SELECT id, email, name, role, location_id, service_lane_id FROM users WHERE email = %s", (email,))
     user = cursor.fetchone()
 
     if not user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User account is authenticated via Google, but has not been invited to this system.")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
+                            detail="User account is authenticated via Google, but has not been invited to this system.")
 
     return {
         "id": user[0],
         "email": user[1],
         "name": user[2],
         "role": user[3],
-        "location_id": user[4]
+        "location_id": user[4],
+        "service_lane_id": user[5]
     }
 
 
 def require_admin(current_user: dict = Depends(get_current_user)):
+    """Strictly for Global Admins."""
     if current_user.get('role') != 'admin':
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin privileges required.")
     return current_user
 
 
 def require_write_access(current_user: dict = Depends(get_current_user)):
+    """Blocks read-only users, but allows Pentester, Maintainer, and Admin."""
     if current_user.get('role') == 'read_only':
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
                             detail="Read-only account cannot perform this action.")
+    return current_user
+
+
+def verify_lane_access(current_user: dict, target_lane_id: str):
+    """
+    Helper function to call INSIDE endpoints (e.g., PUT /tests/{id})
+    to ensure Maintainers only edit their own lane's resources.
+    """
+    if current_user.get('role') == 'admin':
+        return True
+
+    if current_user.get('role') == 'maintainer':
+        if str(current_user.get('service_lane_id')) == str(target_lane_id):
+            return True
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Maintainers can only modify resources assigned to their specific Service Lane."
+        )
+
+    # If they are a Pentester or Read Only, they shouldn't be using admin endpoints anyway,
+    # but we block them here just in case.
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient privileges.")
+
+
+def require_maintainer_or_admin(current_user: dict = Depends(get_current_user)):
+    """Allows Global Admins and Maintainers, but blocks Pentesters and Read-Only users."""
+    if current_user.get('role') not in ['admin', 'maintainer']:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Maintainer or Admin privileges required."
+        )
     return current_user
 
 
@@ -173,7 +209,8 @@ def logout(background_tasks: BackgroundTasks, current_user: dict = Depends(get_c
 
 # --- 2. SESSION & API KEY MANAGEMENT ---
 @router.get("/keys")
-def list_api_keys(global_view: bool = False, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+def list_api_keys(global_view: bool = False, current_user: dict = Depends(get_current_user),
+                  cursor=Depends(get_db_cursor)):
     """
     Lists API keys. Admins see all keys, regular users see only their own.
     """
@@ -245,7 +282,7 @@ def revoke_api_key(key_id: str, current_user: dict = Depends(get_current_user), 
             role=current_user["role"],
             action="DELETE_API_KEY",
             resource_type="USER",
-            resource_id=f"User ID: {current_user["id"]} - API Key ID: {key_id} ",
+            resource_id=f"User ID: {current_user['id']} - API Key ID: {key_id} ",
             details=f"{current_user['role']} with ID: {current_user['id']} delete API Key ID: {key_id}."
         )
     else:
@@ -255,10 +292,9 @@ def revoke_api_key(key_id: str, current_user: dict = Depends(get_current_user), 
             role=current_user["role"],
             action="DELETE_ALL_API_KEY",
             resource_type="USER",
-            resource_id=f"User ID: {current_user["id"]} - API Key ID: {key_id} ",
+            resource_id=f"User ID: {current_user['id']} - API Key ID: {key_id} ",
             details=f"{current_user['role']} with ID: {current_user['id']} delete all API Key with ID: {key_id}."
         )
     cursor.connection.commit()
-
 
     return {"message": "API Key successfully revoked."}

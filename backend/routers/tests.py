@@ -11,7 +11,13 @@ from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 import google.auth.transport.requests
 import google.oauth2.id_token
 from database import get_db_cursor, db_cursor_context
-from routers.auth import get_current_user, require_admin, require_write_access
+from routers.auth import (
+    get_current_user,
+    require_admin,
+    require_write_access,
+    require_maintainer_or_admin,
+    verify_lane_access
+)
 from websockets_manager import manager
 from schema import (
     TestCreate,
@@ -520,14 +526,15 @@ async def process_vuln_analysis_background(test_id: str, kiss24_id: str, user_id
 
 
 # bulk generation
-def process_bulk_tests_background(asset_ids: List[UUID4], user_id: str, role: str,):
+def process_bulk_tests_background(asset_ids: List[UUID4], user_id: str, role: str, service_lane_id: str = None):
     tests_to_provision = []
 
     with db_cursor_context() as cursor:
         if not cursor: return
 
         for asset_id in asset_ids:
-            cursor.execute("""
+            # 1. Base query setup
+            query = """
                 SELECT r.name, r.service_forecast_id, s.default_credits, s.default_duration_weeks,
                        s.name as service_name, c.name as country_name, s.auto_provision_workspace, r.category_id
                 FROM assets a
@@ -535,17 +542,35 @@ def process_bulk_tests_background(asset_ids: List[UUID4], user_id: str, role: st
                 LEFT JOIN services_lanes s ON r.service_forecast_id = s.id
                 LEFT JOIN countries c ON r.country_id = c.id
                 WHERE a.id = %s
-                    AND (r.duplicate_allowed = TRUE OR NOT EXISTS (
-                        SELECT 1 FROM test_assets ta 
-                        JOIN tests t ON ta.test_id = t.id 
-                        WHERE ta.asset_id = a.id 
-                        AND t.stages::text IN ('NOT_PLANNED', 'SCHEDULED', 'IN_PROGRESS')
-                    ))
-            """, (str(asset_id),))
+            """
+            params = [str(asset_id)]
+
+            # 2. Add Service Lane constraint if user is a maintainer
+            if role == 'maintainer':
+                if service_lane_id:
+                    query += " AND r.service_forecast_id = %s"
+                    params.append(str(service_lane_id))
+                else:
+                    # Fallback to prevent unauthorized creation if maintainer has no lane assigned
+                    query += " AND r.service_forecast_id = '00000000-0000-0000-0000-000000000000'"
+
+            # 3. Add the duplicate check
+            query += """
+                AND (r.duplicate_allowed = TRUE OR NOT EXISTS (
+                    SELECT 1 FROM test_assets ta 
+                    JOIN tests t ON ta.test_id = t.id 
+                    WHERE ta.asset_id = a.id 
+                    AND t.stages::text IN ('NOT_PLANNED', 'SCHEDULED', 'IN_PROGRESS')
+                ))
+            """
+
+            cursor.execute(query, tuple(params))
             asset_data = cursor.fetchone()
+
+            # If asset_data is None, it means the asset doesn't exist, has duplicates, OR it belongs to a different lane
             if not asset_data or not asset_data[1]: continue
 
-            asset_name, service_lane_id, default_credits, default_duration_weeks, service_name, country_name, auto_provision, cat_id = asset_data
+            asset_name, asset_service_lane_id, default_credits, default_duration_weeks, service_name, country_name, auto_provision, cat_id = asset_data
 
             new_test_id = str(uuid.uuid4())
             credits = float(default_credits) if default_credits is not None else 2.0
@@ -555,7 +580,7 @@ def process_bulk_tests_background(asset_ids: List[UUID4], user_id: str, role: st
             cursor.execute("""
                 INSERT INTO tests (id, name, service_lane_id, category_id, credits_per_week, duration_weeks, stages)
                   VALUES (%s, %s, %s, %s, %s, %s, 'NOT_PLANNED') RETURNING id
-            """, (new_test_id, asset_name, str(service_lane_id), str(cat_id) if cat_id else None, credits,
+            """, (new_test_id, asset_name, str(asset_service_lane_id), str(cat_id) if cat_id else None, credits,
                   duration))
 
             log_audit_event(
@@ -564,7 +589,7 @@ def process_bulk_tests_background(asset_ids: List[UUID4], user_id: str, role: st
                 action="TEST_CREATED",
                 resource_type="TESTS",
                 resource_id=str(new_test_id),
-                details=f"Test {asset_name} with ID: {new_test_id} was created. Service Lane ID: {service_lane_id} in a Bulk Action."
+                details=f"Test {asset_name} with ID: {new_test_id} was created. Service Lane ID: {asset_service_lane_id} in a Bulk Action."
             )
 
             cursor.execute('INSERT INTO test_assets (test_id, asset_id) VALUES (%s, %s)', (new_test_id, str(asset_id)))
@@ -587,12 +612,15 @@ def process_bulk_tests_background(asset_ids: List[UUID4], user_id: str, role: st
 ####################################
 # ---   Test endpoint api     ---  #
 ####################################
-@router.post("/", summary="[Admin Only] Create a new Test")
+@router.post("/", summary="[Admin/Maintainer] Create a new Test")
 def create_test(t: TestCreate, background_tasks: BackgroundTasks,
-                current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+                current_user: dict = Depends(require_maintainer_or_admin), cursor=Depends(get_db_cursor)):
     """
-    Admin Only Endpoint to create a new Test
+    Admin or Maintainer Endpoint to create a new Test
     """
+    # 1. Enforce that Maintainers can only create tests for their own Service Lane
+    verify_lane_access(current_user, str(t.service_lane_id))
+
     new_test_id = str(uuid.uuid4())
     cat_id = str(t.category_id) if hasattr(t, 'category_id') and t.category_id else None
 
@@ -630,7 +658,23 @@ def get_all_tests(current_user: dict = Depends(get_current_user), cursor=Depends
     """
     Return all tests
     """
-    cursor.execute('''
+    where_clauses = []
+    params = []
+
+    # 1. Restrict maintainers to their assigned service lane
+    if current_user.get('role') == 'maintainer':
+        lane_id = current_user.get('service_lane_id')
+        if lane_id:
+            where_clauses.append("t.service_lane_id = %s")
+            params.append(str(lane_id))
+        else:
+            # Safely return nothing if the Maintainer hasn't been assigned a lane yet
+            where_clauses.append("t.service_lane_id = '00000000-0000-0000-0000-000000000000'")
+
+    # 2. Build the dynamic WHERE string
+    where_str = "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
+
+    query = f'''
         SELECT t.id, t.name, t.start_week, t.start_year, t.duration_weeks, t.stages::text as status,
             s.name as service_lane_name, s.is_active as is_service_active,
             s.auto_provision_workspace,
@@ -646,8 +690,12 @@ def get_all_tests(current_user: dict = Depends(get_current_user), cursor=Depends
         FROM tests t 
         LEFT JOIN services_lanes s ON t.service_lane_id = s.id
         LEFT JOIN service_categories sc ON t.category_id = sc.id
+        {where_str}
         ORDER BY t.start_year DESC NULLS LAST, t.start_week DESC NULLS LAST, t.name ASC
-    ''')
+    '''
+
+    cursor.execute(query, tuple(params))
+
     columns = [col[0] for col in cursor.description]
     return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
@@ -663,8 +711,25 @@ def get_test_details(test_id: str, current_user: dict = Depends(get_current_user
     5. Fetch Country Contacts (Combined across all linked asset regions)
     6. Fetch Test History
     """
-    # 1. Fetch Test Base Details
-    cursor.execute('''
+    # 0. Start with the base requirement: It must match the requested test_id!
+    where_clauses = ["t.id = %s"]
+    params = [test_id]
+
+    # 1. Restrict maintainers to their assigned service lane
+    if current_user.get('role') == 'maintainer':
+        lane_id = current_user.get('service_lane_id')
+        if lane_id:
+            where_clauses.append("t.service_lane_id = %s")
+            params.append(str(lane_id))
+        else:
+            # Safely return nothing if the Maintainer hasn't been assigned a lane yet
+            where_clauses.append("t.service_lane_id = '00000000-0000-0000-0000-000000000000'")
+
+    # 2. Build the dynamic WHERE string
+    where_str = "WHERE " + " AND ".join(where_clauses)
+
+    # 3. Inject the `where_str` using an f-string (f''') and pass the tuple(params)
+    cursor.execute(f'''
                 SELECT t.id, t.name, t.service_lane_id, t.credits_per_week, 
                        t.duration_weeks, t.stages::text as status, t.start_week, t.start_year, 
                        t.is_tentative, t.kiss24, t.drive_folder_id, t.drive_folder_url,
@@ -681,16 +746,18 @@ def get_test_details(test_id: str, current_user: dict = Depends(get_current_user
                 LEFT JOIN raw_assets ra ON a.raw_asset_id = ra.id
                 LEFT JOIN service_categories c ON ra.category_id = c.id
                 LEFT JOIN countries ct ON ra.country_id = ct.id
-                WHERE t.id = %s
+                {where_str}
                 LIMIT 1
-            ''', (test_id,))
+            ''', tuple(params))
+
     test_row = cursor.fetchone()
-    if not test_row: raise HTTPException(status_code=404, detail="Test not found")
+    if not test_row:
+        raise HTTPException(status_code=404, detail="Test not found")
 
     columns = [desc[0] for desc in cursor.description]
     test_data = dict(zip(columns, test_row))
 
-    # 2. Fetch Attached Assets
+    # 4. Fetch Attached Assets
     cursor.execute('''
             SELECT a.id as asset_id, a.raw_asset_id, r.name as asset_name, r.country_id, r.kiss24_asset_id
             FROM test_assets ta
@@ -706,7 +773,7 @@ def get_test_details(test_id: str, current_user: dict = Depends(get_current_user
     raw_asset_ids = [a['raw_asset_id'] for a in assets_data if a['raw_asset_id']]
     country_ids = list(set([a['country_id'] for a in assets_data if a['country_id']]))
 
-    # 3. Fetch Asset Contacts (Combined across all linked assets)
+    # 5. Fetch Asset Contacts (Combined across all linked assets)
     asset_contacts = []
     if raw_asset_ids:
         format_strings = ','.join(['%s'] * len(raw_asset_ids))
@@ -722,7 +789,7 @@ def get_test_details(test_id: str, current_user: dict = Depends(get_current_user
         asset_contacts = [dict(zip(ac_cols, row)) for row in cursor.fetchall()]
     test_data["asset_contacts"] = asset_contacts
 
-    # 4. Fetch Country Contacts (Combined across all linked asset regions)
+    # 6. Fetch Country Contacts (Combined across all linked asset regions)
     country_contacts = []
     if country_ids:
         format_strings = ','.join(['%s'] * len(country_ids))
@@ -738,7 +805,7 @@ def get_test_details(test_id: str, current_user: dict = Depends(get_current_user
         country_contacts = [dict(zip(cc_cols, row)) for row in cursor.fetchall()]
     test_data["country_contacts"] = country_contacts
 
-    # 5. Fetch Test History
+    # 7. Fetch Test History
     cursor.execute('''
         SELECT th.id, th.action, th.details, th.timestamp, u.name as user_name
         FROM test_history th
@@ -752,15 +819,19 @@ def get_test_details(test_id: str, current_user: dict = Depends(get_current_user
     return test_data
 
 
-@router.put("/{test_id}", summary="[Admin Only] Update a specific test")
+@router.put("/{test_id}", summary="[Admin/Maintainer] Update a specific test")
 def update_test(test_id: str, t: TestBase, background_tasks: BackgroundTasks,
-                current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+                current_user: dict = Depends(require_maintainer_or_admin), cursor=Depends(get_db_cursor)):
     """
-    Admin Only Endpoint to update a specific test
+    Admin or Maintainer Endpoint to update a specific test
+    0. Enforce that Maintainers can only edit tests for their own Service Lane
     1. Fetch old data to see if we need to relocate the Google Drive folder
     2. Update the test
     3. Trigger Folder Relocation if a folder exists
     """
+    # 0. Enforce that Maintainers can only edit tests for their own Service Lane
+    verify_lane_access(current_user, str(t.service_lane_id))
+
     # 1. Fetch old data to see if we need to relocate the Google Drive folder
     cursor.execute('''
         SELECT t.drive_folder_id, s.name, c.name, t.start_year
@@ -832,16 +903,22 @@ def update_test(test_id: str, t: TestBase, background_tasks: BackgroundTasks,
     return {"message": "Test updated successfully."}
 
 
-@router.delete("/{test_id}", summary="[Admin Only] Delete a specific test")
+@router.delete("/{test_id}", summary="[Admin/Maintainer] Delete a specific test")
 def delete_test(test_id: str, background_tasks: BackgroundTasks,
-                current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+                current_user: dict = Depends(require_maintainer_or_admin), cursor=Depends(get_db_cursor)):
     """
-    Admin Only Endpoint to delete a specific test
+    Admin or Maintainer Endpoint to delete a specific test
     """
 
-    # Fetch test name and drive_folder_id before deleting
-    cursor.execute("SELECT name, drive_folder_id FROM tests WHERE id = %s", (test_id,))
+    # 1. Fetch test name, drive_folder_id, and service_lane_id
+    cursor.execute("SELECT name, drive_folder_id, service_lane_id FROM tests WHERE id = %s", (test_id,))
     test_data = cursor.fetchone()
+
+    if not test_data:
+        raise HTTPException(status_code=404, detail="Test not found")
+
+    # 2. Enforce that Maintainers can only delete tests in their own lane
+    verify_lane_access(current_user, str(test_data[2]))
 
     # Log deletion BEFORE removing links, so the assets receive the cascade
     log_test_history(cursor, test_id, current_user['id'], "DELETED", "Test permanently deleted and assets freed.")
@@ -868,14 +945,17 @@ def delete_test(test_id: str, background_tasks: BackgroundTasks,
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
     return {"message": "Test permanently deleted and assets freed."}
 
-
-@router.post("/bulk", summary="[Admin Only] bulk creation of tests")
+@router.post("/bulk", summary="[Admin/Maintainer] bulk creation of tests")
 def bulk_create_tests(req: BulkTestCreate, background_tasks: BackgroundTasks,
-                      current_user: dict = Depends(require_admin)):
+                      current_user: dict = Depends(require_maintainer_or_admin)): # CHANGED DEPENDENCY
     """
-    Admin Only Endpoint to bulk create new tests
+    Admin or Maintainer Endpoint to bulk create new tests
     """
-    background_tasks.add_task(process_bulk_tests_background, req.asset_ids, str(current_user['id']), str(current_user['role']))
+    # Extract service_lane_id safely
+    sl_id = str(current_user.get('service_lane_id')) if current_user.get('service_lane_id') else None
+
+    # Pass the lane ID down to the background worker
+    background_tasks.add_task(process_bulk_tests_background, req.asset_ids, str(current_user['id']), str(current_user['role']), sl_id)
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": f"Generating {len(req.asset_ids)} tests from active pool."}
 
@@ -890,15 +970,32 @@ def provision_workspace_manually(test_id: str, background_tasks: BackgroundTasks
     Admin Only Endpoint to create new workspace on Google for each test
     """
     # Fetch required metadata to create the folder path
-    cursor.execute('''
+    where_clauses = ["t.id = %s"]
+    params = [test_id]
+
+    # 1. Restrict maintainers to their assigned service lane
+    if current_user.get('role') == 'maintainer':
+        lane_id = current_user.get('service_lane_id')
+        if lane_id:
+            where_clauses.append("t.service_lane_id = %s")
+            params.append(str(lane_id))
+        else:
+            # Safely return nothing if the Maintainer hasn't been assigned a lane yet
+            where_clauses.append("t.service_lane_id = '00000000-0000-0000-0000-000000000000'")
+
+    # 2. Build the dynamic WHERE string
+    where_str = "WHERE " + " AND ".join(where_clauses)
+
+    cursor.execute(f'''
         SELECT t.name, s.name, c.name, t.start_year
         FROM tests t
         LEFT JOIN services_lanes s ON t.service_lane_id = s.id
         LEFT JOIN test_assets ta ON t.id = ta.test_id
         LEFT JOIN assets a ON ta.asset_id = a.id
         LEFT JOIN countries c ON a.country_id = c.id
-        WHERE t.id = %s LIMIT 1
-    ''', (test_id,))
+        {where_str}
+        LIMIT 1
+    ''', tuple(params))
 
     test_data = cursor.fetchone()
     if not test_data:
@@ -923,12 +1020,22 @@ def provision_workspace_manually(test_id: str, background_tasks: BackgroundTasks
     return {"message": "Workspace provisioning started."}
 
 
-@router.put("/{test_id}/tentative", summary="[Admin Only] Flag the test as Tentative")
+@router.put("/{test_id}/tentative", summary="[Admin/Maintainer] Flag the test as Tentative")
 def toggle_tentative(test_id: str, background_tasks: BackgroundTasks,
-                     current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+                     current_user: dict = Depends(require_maintainer_or_admin), cursor=Depends(get_db_cursor)):
     """
-    Admin Only Endpoint to toggle Tentative
+    Admin/Maintainer Endpoint to toggle Tentative
     """
+    cursor.execute("SELECT service_lane_id FROM tests WHERE id = %s", (test_id,))
+    test_data = cursor.fetchone()
+
+    if not test_data:
+        raise HTTPException(status_code=404, detail="Test not found")
+
+    # 2. Enforce that Maintainers can only delete tests in their own lane
+    verify_lane_access(current_user, str(test_data[0]))
+
+
     # Flips the boolean from True to False, or False to True
     cursor.execute("UPDATE tests SET is_tentative = NOT is_tentative WHERE id = %s", (test_id,))
 
@@ -944,18 +1051,20 @@ def toggle_tentative(test_id: str, background_tasks: BackgroundTasks,
 
 
 # --- test Scheduling ---
-@router.put("/{test_id}/schedule", summary="[Admin Only] Schedule a test")
+@router.put("/{test_id}/schedule", summary="[Admin/Maintainer] Schedule a test")
 def schedule_test(test_id: str, schedule: TestSchedule, background_tasks: BackgroundTasks,
-                  current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+                  current_user: dict = Depends(require_maintainer_or_admin), cursor=Depends(get_db_cursor)):
     """
     Admin Only Endpoint to schedule a test
     """
     # Fetch old schedule to see if the dates are actively shifting
-    cursor.execute('SELECT start_week, start_year, name FROM tests WHERE id = %s', (test_id,))
+    cursor.execute('SELECT start_week, start_year, name, service_lane_id FROM tests WHERE id = %s', (test_id,))
     test_row = cursor.fetchone()
 
+    verify_lane_access(current_user, str(test_row[3]))
+
     if test_row:
-        old_week, old_year, test_name = test_row
+        old_week, old_year, test_name, _ = test_row
         # If the test was already scheduled, and the target week or year has changed:
         if old_week is not None and old_year is not None:
             if old_week != schedule.start_week or old_year != schedule.start_year:
@@ -975,6 +1084,8 @@ def schedule_test(test_id: str, schedule: TestSchedule, background_tasks: Backgr
                 cursor.execute('DELETE FROM assignments WHERE test_id = %s', (test_id,))
                 log_test_history(cursor, test_id, current_user['id'], "UNASSIGNED",
                                  "Pentesters removed due to schedule shift. Reassignment required.")
+    else:
+        raise HTTPException(status_code=404, detail="Test not found")
 
     #Proceed with updating the new schedule
     cursor.execute('UPDATE tests SET start_week = %s, start_year = %s, stages = %s WHERE id = %s',
@@ -997,16 +1108,18 @@ def schedule_test(test_id: str, schedule: TestSchedule, background_tasks: Backgr
     return {"message": "Test scheduled on the board."}
 
 
-@router.put("/{test_id}/unschedule", summary="[Admin Only] Unschedule a test")
+@router.put("/{test_id}/unschedule", summary="[Admin/Maintainer] Unschedule a test")
 def unschedule_test(test_id: str, background_tasks: BackgroundTasks,
-                    current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+                    current_user: dict = Depends(require_maintainer_or_admin), cursor=Depends(get_db_cursor)):
     """
-    Admin Only Endpoint to unschedule a test
+    Admin/Maintainer Endpoint to unschedule a test
     """
     cursor.execute('SELECT user_id FROM assignments WHERE test_id = %s', (test_id,))
     assigned_users = cursor.fetchall()
-    cursor.execute("SELECT name FROM tests WHERE id = %s", (test_id,))
+    cursor.execute("SELECT name, service_lane_id FROM tests WHERE id = %s", (test_id,))
     test_row = cursor.fetchone()
+
+    verify_lane_access(current_user, str(test_row[1]))
 
     if test_row:
         for (user_id,) in assigned_users:
@@ -1036,12 +1149,21 @@ def unschedule_test(test_id: str, background_tasks: BackgroundTasks,
     return {"message": "Test returned to backlog."}
 
 
-@router.put("/{test_id}/complete", summary="[Admin Only] Flag a test as complete")
+@router.put("/{test_id}/complete", summary="[Admin/Maintainer] Flag a test as complete")
 def complete_test(test_id: str, background_tasks: BackgroundTasks,
-                  current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+                  current_user: dict = Depends(require_maintainer_or_admin), cursor=Depends(get_db_cursor)):
     """
-    Admin Only Endpoint to complete a test
+    Admin/Maintainer Endpoint to complete a test
     """
+    cursor.execute("SELECT service_lane_id FROM tests WHERE id = %s", (test_id,))
+    test_data = cursor.fetchone()
+
+    if not test_data:
+        raise HTTPException(status_code=404, detail="Test not found")
+
+    # 2. Enforce that Maintainers can only delete tests in their own lane
+    verify_lane_access(current_user, str(test_data[0]))
+
     cursor.execute("UPDATE tests SET stages = 'COMPLETED' WHERE id = %s", (test_id,))
 
     log_test_history(cursor, test_id, current_user['id'], "COMPLETED", "Test successfully marked as completed.")
@@ -1053,11 +1175,11 @@ def complete_test(test_id: str, background_tasks: BackgroundTasks,
     return {"message": "Test marked as Completed."}
 
 
-@router.put("/{test_id}/unable", summary="[Admin Only] Flag a test as unable")
+@router.put("/{test_id}/unable", summary="[Admin/Maintainer] Flag a test as unable")
 def mark_test_unable(test_id: str, background_tasks: BackgroundTasks,
-                     current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+                     current_user: dict = Depends(require_maintainer_or_admin), cursor=Depends(get_db_cursor)):
     """
-    Admin Only Endpoint to mark a test as unable
+    Admin/Maintainer Endpoint to mark a test as unable
     """
     #  original test details
     cursor.execute('SELECT name, service_lane_id, credits_per_week, duration_weeks FROM tests WHERE id = %s',
@@ -1065,6 +1187,8 @@ def mark_test_unable(test_id: str, background_tasks: BackgroundTasks,
     row = cursor.fetchone()
     if not row: raise HTTPException(status_code=404, detail="Test not found.")
     name, service_lane_id, credits, duration = row
+
+    verify_lane_access(current_user, str(service_lane_id))
 
     # keep the original test on the board  marked  as STOPPED and adding [BLOCKED] text as prefix
     cursor.execute("UPDATE tests SET stages = 'STOPPED', name = %s WHERE id = %s", (f"[BLOCKED] {name}", test_id))
@@ -1101,16 +1225,18 @@ def mark_test_unable(test_id: str, background_tasks: BackgroundTasks,
     return {"message": "Test marked as Stopped."}
 
 
-@router.put("/{test_id}/unstop", summary="[Admin Only] Roll back a unable test to normal")
+@router.put("/{test_id}/unstop", summary="[Admin/Maintainer] Roll back a unable test to normal")
 def unstop_test(test_id: str, background_tasks: BackgroundTasks,
-                current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+                current_user: dict = Depends(require_maintainer_or_admin), cursor=Depends(get_db_cursor)):
     """
-    Admin Only Endpoint to roll back a unable test to normal
+    Admin/Maintainer Endpoint to roll back a unable test to normal
     """
 
-    cursor.execute("SELECT name FROM tests WHERE id = %s AND stages = 'STOPPED'", (test_id,))
+    cursor.execute("SELECT name, service_lane_id FROM tests WHERE id = %s AND stages = 'STOPPED'", (test_id,))
     row = cursor.fetchone()
     if not row: raise HTTPException(status_code=404, detail="Stopped test not found.")
+
+    verify_lane_access(current_user, str(row[1]))
 
     name = row[0]
     original_name = name.replace("[BLOCKED] ", "") if name.startswith("[BLOCKED] ") else name
@@ -1149,12 +1275,21 @@ def unstop_test(test_id: str, background_tasks: BackgroundTasks,
     return {"message": "Test unstopped successfully."}
 
 
-@router.put("/{test_id}/uncomplete", summary="[Admin Only] Make un-completing a test cleaner on the backend")
+@router.put("/{test_id}/uncomplete", summary="[Admin/Maintainer] Make un-completing a test cleaner on the backend")
 def uncomplete_test(test_id: str, background_tasks: BackgroundTasks,
-                    current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+                    current_user: dict = Depends(require_maintainer_or_admin), cursor=Depends(get_db_cursor)):
     """
-    Admin Only Endpoint to make un-completing a test cleaner on the backend
+    Admin/Maintainer Endpoint to make un-completing a test cleaner on the backend
     """
+    cursor.execute("SELECT service_lane_id FROM tests WHERE id = %s", (test_id,))
+    test_data = cursor.fetchone()
+
+    if not test_data:
+        raise HTTPException(status_code=404, detail="Test not found")
+
+    # 2. Enforce that Maintainers can only delete tests in their own lane
+    verify_lane_access(current_user, str(test_data[0]))
+
     cursor.execute("UPDATE tests SET stages = 'SCHEDULED' WHERE id = %s", (test_id,))
     log_test_history(cursor, test_id, current_user['id'], "UNCOMPLETED", "Test reverted to Scheduled.")
     cursor.connection.commit()
@@ -1245,13 +1380,29 @@ def get_test_history(test_id: str, current_user: dict = Depends(get_current_user
     """
     Endpoint to get test history
     """
-    cursor.execute('''
+    where_clauses = ["th.test_id = %s"]
+    params = [test_id]
+
+    # 1. Restrict maintainers to their assigned service lane
+    if current_user.get('role') == 'maintainer':
+        lane_id = current_user.get('service_lane_id')
+        if lane_id:
+            where_clauses.append("t.service_lane_id = %s")
+            params.append(str(lane_id))
+        else:
+            # Safely return nothing if the Maintainer hasn't been assigned a lane yet
+            where_clauses.append("t.service_lane_id = '00000000-0000-0000-0000-000000000000'")
+
+    # 2. Build the dynamic WHERE string
+    where_str = "WHERE " + " AND ".join(where_clauses)
+
+    cursor.execute(f'''
         SELECT th.id, th.action, th.details, th.timestamp, u.name as user_name
         FROM test_history th
         LEFT JOIN users u ON th.user_id = u.id
-        WHERE th.test_id = %s
+        {where_str}
         ORDER BY th.timestamp DESC
-    ''', (test_id,))
+    ''', tuple(params))
     columns = [col[0] for col in cursor.description]
     return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
@@ -1261,6 +1412,12 @@ def get_test_history(test_id: str, current_user: dict = Depends(get_current_user
 ####################################
 @router.get("/{test_id}/secret", summary="Return the encrypted test secret")
 def get_test_secret(test_id: str, current_user: dict = Depends(require_write_access), cursor=Depends(get_db_cursor)):
+
+    role_allowed = ['admin', 'pentester']
+
+    if current_user.get('role') not in role_allowed:
+        raise HTTPException(status_code=403, detail=f"{current_user.get('role')} do not have access to Secure Notes.")
+
     # 1. Get the encrypted note
     cursor.execute("SELECT encrypted_data FROM secret_notes WHERE test_id = %s", (test_id,))
     note_row = cursor.fetchone()
@@ -1290,6 +1447,11 @@ def get_test_secret(test_id: str, current_user: dict = Depends(require_write_acc
 def update_test_secret(test_id: str, payload: dict, background_tasks: BackgroundTasks,
                        current_user: dict = Depends(require_write_access), cursor=Depends(get_db_cursor)):
 
+    role_allowed = ['admin', 'pentester']
+
+    if current_user.get('role') not in role_allowed:
+        raise HTTPException(status_code=403, detail=f"{current_user.get('role')} do not have access to Secure Notes.")
+
     # payload expects: { encrypted_data: "...", access_list: [{"user_id": "...", "encrypted_key": "..."}] }
 
     # 1. Upsert the encrypted note
@@ -1318,6 +1480,11 @@ def update_test_secret(test_id: str, payload: dict, background_tasks: Background
 @router.delete("/{test_id}/secret", summary="[Admin Only] Delete the test secret")
 def delete_test_secret(test_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin),
                        cursor=Depends(get_db_cursor)):
+
+    role_allowed = ['admin', 'pentester']
+
+    if current_user.get('role') not in role_allowed:
+        raise HTTPException(status_code=403, detail=f"{current_user.get('role')} do not have access to Secure Notes.")
     # Because of our ON DELETE CASCADE rule on the table, deleting the note automatically wipes the access_list table too!
     cursor.execute("DELETE FROM secret_notes WHERE test_id = %s", (test_id,))
     log_audit_event(str(current_user["id"]), current_user["name"], "SECRET_DELETED", "TEST_SECRET",
@@ -1340,7 +1507,23 @@ def trigger_presentation_generation(test_id: str, background_tasks: BackgroundTa
     if current_user.get('role') == 'read_only':
         raise HTTPException(status_code=403, detail="Read-only users cannot trigger generation.")
 
-    cursor.execute("""
+    where_clauses = ["t.id = %s"]
+    params = [test_id]
+
+    # 1. Restrict maintainers to their assigned service lane
+    if current_user.get('role') == 'maintainer':
+        lane_id = current_user.get('service_lane_id')
+        if lane_id:
+            where_clauses.append("t.service_lane_id = %s")
+            params.append(str(lane_id))
+        else:
+            # Safely return nothing if the Maintainer hasn't been assigned a lane yet
+            where_clauses.append("t.service_lane_id = '00000000-0000-0000-0000-000000000000'")
+
+    # 2. Build the dynamic WHERE string
+    where_str = "WHERE " + " AND ".join(where_clauses)
+
+    cursor.execute(f"""
         SELECT t.name, t.kiss24, t.drive_folder_id, sl.name as service_name, ra.snow_number,
                t.start_week, t.start_year, t.duration_weeks
         FROM tests t
@@ -1348,8 +1531,9 @@ def trigger_presentation_generation(test_id: str, background_tasks: BackgroundTa
         LEFT JOIN test_assets ta ON t.id = ta.test_id
         LEFT JOIN assets a ON ta.asset_id = a.id
         LEFT JOIN raw_assets ra ON a.raw_asset_id = ra.id
-        WHERE t.id = %s LIMIT 1
-    """, (test_id,))
+        {where_str}
+        LIMIT 1
+    """, tuple(params))
 
     row = cursor.fetchone()
 
@@ -1419,13 +1603,30 @@ def trigger_report_generation(test_id: str, background_tasks: BackgroundTasks,
     if current_user.get('role') == 'read_only':
         raise HTTPException(status_code=403, detail="Read-only users cannot trigger generation.")
 
-    cursor.execute("""
+    where_clauses = ["t.id = %s"]
+    params = [test_id]
+
+    # 1. Restrict maintainers to their assigned service lane
+    if current_user.get('role') == 'maintainer':
+        lane_id = current_user.get('service_lane_id')
+        if lane_id:
+            where_clauses.append("t.service_lane_id = %s")
+            params.append(str(lane_id))
+        else:
+            # Safely return nothing if the Maintainer hasn't been assigned a lane yet
+            where_clauses.append("t.service_lane_id = '00000000-0000-0000-0000-000000000000'")
+
+    # 2. Build the dynamic WHERE string
+    where_str = "WHERE " + " AND ".join(where_clauses)
+
+    cursor.execute(f"""
         SELECT t.name, t.kiss24, t.drive_folder_id, sl.display_order,
                t.start_week, t.start_year, t.duration_weeks
         FROM tests t
         LEFT JOIN services_lanes sl ON t.service_lane_id = sl.id
-        WHERE t.id = %s LIMIT 1
-    """, (test_id,))
+        {where_str} 
+        LIMIT 1
+    """, tuple(params))
     row = cursor.fetchone()
 
     if not row:
@@ -1468,16 +1669,33 @@ def trigger_vuln_reports(test_id: str, payload: dict, background_tasks: Backgrou
     if current_user.get('role') == 'read_only':
         raise HTTPException(status_code=403, detail="Read-only users cannot trigger generation.")
 
+    where_clauses = ["t.id = %s"]
+    params = [test_id]
+
+    # 1. Restrict maintainers to their assigned service lane
+    if current_user.get('role') == 'maintainer':
+        lane_id = current_user.get('service_lane_id')
+        if lane_id:
+            where_clauses.append("t.service_lane_id = %s")
+            params.append(str(lane_id))
+        else:
+            # Safely return nothing if the Maintainer hasn't been assigned a lane yet
+            where_clauses.append("t.service_lane_id = '00000000-0000-0000-0000-000000000000'")
+
+    # 2. Build the dynamic WHERE string
+    where_str = "WHERE " + " AND ".join(where_clauses)
+
     vuln_uuids = payload.get("vuln_uuids", [])
     if not vuln_uuids:
         raise HTTPException(status_code=400, detail="No vulnerabilities selected.")
 
-    cursor.execute("""
+    cursor.execute(f"""
         SELECT t.name, t.kiss24, t.drive_folder_id, sl.display_order
         FROM tests t
         LEFT JOIN services_lanes sl ON t.service_lane_id = sl.id
-        WHERE t.id = %s LIMIT 1
-    """, (test_id,))
+       {where_str} 
+        LIMIT 1
+    """, tuple(params))
     row = cursor.fetchone()
     if not row: raise HTTPException(status_code=404, detail="Test not found.")
 
@@ -1502,6 +1720,12 @@ def get_test_analysis(test_id: str, current_user: dict = Depends(get_current_use
     """
     Check if an analysis exists and retrieve it.
     """
+
+    role_allowed = ['admin', 'pentester']
+
+    if current_user.get('role') not in role_allowed:
+        raise HTTPException(status_code=403, detail=f"{current_user.get('role')} users cannot trigger generation.")
+
     cursor.execute("SELECT status, analysis_text, timestamp FROM test_analyses WHERE test_id = %s", (test_id,))
     row = cursor.fetchone()
     if not row:
@@ -1520,8 +1744,10 @@ def trigger_test_analysis(test_id: str, background_tasks: BackgroundTasks,
     """
     Creates a PENDING record and triggers the background generator.
     """
-    if current_user.get('role') == 'read_only':
-        raise HTTPException(status_code=403, detail="Read-only users cannot trigger generation.")
+    role_allowed = ['admin', 'pentester']
+
+    if current_user.get('role') not in role_allowed:
+        raise HTTPException(status_code=403, detail=f"{current_user.get('role')} users cannot trigger generation.")
 
     # Get Test Data
     cursor.execute("SELECT name, kiss24 FROM tests WHERE id = %s", (test_id,))
@@ -1553,33 +1779,62 @@ def trigger_test_analysis(test_id: str, background_tasks: BackgroundTasks,
 ####################################
 @router.get("/{test_id}/milestones", summary="Get Milestones test")
 def get_milestones(test_id: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+    # 1. Fetch the service lane ID to verify access
+    cursor.execute("SELECT service_lane_id FROM tests WHERE id = %s", (test_id,))
+    row = cursor.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Test not found.")
+    verify_lane_access(current_user, str(row[0]))
+
     cursor.execute("SELECT step_name, is_completed FROM test_milestones WHERE test_id = %s", (test_id,))
     # Return a simple dictionary: {"Information Email Sent": true, "Intake Meeting Planned": false}
     return {row[0]: row[1] for row in cursor.fetchall()}
 
 
 @router.put("/{test_id}/milestones", summary="Update Milestones test")
-def update_milestone(test_id: str, payload: MilestoneUpdate, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+def update_milestone(test_id: str, payload: MilestoneUpdate, current_user: dict = Depends(require_write_access), cursor=Depends(get_db_cursor)):
     """
     UPSERT logic: Insert it, or if it exists, update the boolean
     """
+    # 1. Fetch the service lane ID to verify access
+    cursor.execute("SELECT service_lane_id FROM tests WHERE id = %s", (test_id,))
+    row = cursor.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Test not found.")
+    verify_lane_access(current_user, str(row[0]))
+
     cursor.execute("""
         INSERT INTO test_milestones (id, test_id, step_name, is_completed) 
         VALUES (gen_random_uuid(), %s, %s, %s)
         ON CONFLICT (test_id, step_name) DO UPDATE SET is_completed = EXCLUDED.is_completed
     """, (test_id, payload.step_name, payload.is_completed))
+
     cursor.connection.commit()
     return {"message": "Updated"}
 
 
 @router.get("/{test_id}/requirements", summary="Get Requirement test")
 def get_requirements(test_id: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+    # 1. Fetch the service lane ID to verify access
+    cursor.execute("SELECT service_lane_id FROM tests WHERE id = %s", (test_id,))
+    row = cursor.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Test not found.")
+    verify_lane_access(current_user, str(row[0]))
+
     cursor.execute("SELECT id, description, is_completed FROM test_requirements WHERE test_id = %s ORDER BY id", (test_id,))
     return [{"id": str(r[0]), "description": r[1], "is_completed": r[2]} for r in cursor.fetchall()]
 
 
 @router.post("/{test_id}/requirements", summary="Add Requirement test")
-def add_requirement(test_id: str, req: RequirementCreate, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+def add_requirement(test_id: str, req: RequirementCreate, current_user: dict = Depends(require_write_access), cursor=Depends(get_db_cursor)):
+    # 1. Fetch the service lane ID to verify access
+    cursor.execute("SELECT service_lane_id FROM tests WHERE id = %s", (test_id,))
+    row = cursor.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Test not found.")
+    verify_lane_access(current_user, str(row[0]))
+
     cursor.execute("""
         INSERT INTO test_requirements (id, test_id, description, is_completed) 
         VALUES (gen_random_uuid(), %s, %s, false) RETURNING id
@@ -1589,52 +1844,22 @@ def add_requirement(test_id: str, req: RequirementCreate, current_user: dict = D
     return {"id": str(req_id), "description": req.description, "is_completed": False}
 
 
-@router.put("/requirements/{req_id}/toggle", summary="Edit Requirement test")
-def toggle_requirement(req_id: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
-    # 1. Toggle the requirement and fetch the parent test_id
+@router.delete("/requirements/{req_id}", summary="Delete Requirement test")
+def delete_requirement(req_id: str, current_user: dict = Depends(require_write_access), cursor=Depends(get_db_cursor)):
+    # 1. Fetch the requirement to get its parent test's service_lane_id
     cursor.execute("""
-        UPDATE test_requirements SET is_completed = NOT is_completed 
-        WHERE id = %s RETURNING is_completed, test_id
+        SELECT tr.test_id, t.service_lane_id 
+        FROM test_requirements tr
+        JOIN tests t ON tr.test_id = t.id
+        WHERE tr.id = %s
     """, (req_id,))
-
     row = cursor.fetchone()
+
     if not row:
         raise HTTPException(status_code=404, detail="Requirement not found.")
 
-    new_status, test_id = row
+    verify_lane_access(current_user, str(row[1]))
 
-    # 2. Check if ALL requirements for this test are now complete
-    cursor.execute("""
-        SELECT 
-            COUNT(*) as total_reqs,
-            SUM(CASE WHEN is_completed THEN 1 ELSE 0 END) as completed_reqs
-        FROM test_requirements
-        WHERE test_id = %s
-    """, (test_id,))
-
-    total_reqs, completed_reqs = cursor.fetchone()
-
-    # 3. If all are complete, auto-complete the milestone
-    if total_reqs > 0 and total_reqs == completed_reqs:
-        cursor.execute("""
-                INSERT INTO test_milestones (id, test_id, step_name, is_completed) 
-                VALUES (gen_random_uuid(), %s, 'Requirements', true)
-                ON CONFLICT (test_id, step_name) DO UPDATE SET is_completed = true
-            """, (test_id,))
-    else:
-        # If they uncheck a requirement, uncheck the milestone
-        cursor.execute("""
-                UPDATE test_milestones 
-                SET is_completed = false 
-                WHERE test_id = %s AND step_name = 'Requirements'
-            """, (test_id,))
-
-    cursor.connection.commit()
-    return {"is_completed": new_status, "all_completed": total_reqs == completed_reqs}
-
-
-@router.delete("/requirements/{req_id}", summary="Delete Requirement test")
-def delete_requirement(req_id: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
     cursor.execute("DELETE FROM test_requirements WHERE id = %s", (req_id,))
     cursor.connection.commit()
     return {"message": "Deleted"}

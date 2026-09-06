@@ -1,16 +1,18 @@
 import { useState, useRef, useEffect } from 'react';
 import { Link, useLocation } from "react-router-dom";
 import toast from 'react-hot-toast';
+import axios from 'axios';
 import { useAppContext } from '../context/AppContext';
 import { useTheme } from './ThemeProvider';
 import ApiKeysModal from './Modals/ApiKeysModal';
 import MeetingProposalsModal from './Modals/MeetingProposalsModal';
 import Kiss24KeyModal from './Modals/Kiss24KeyModal';
 import E2EEKeyModal from './Modals/E2EEKeyModal';
+import TemplateEditorModal from './Modals/TemplateEditorModal'; // IMPORT THE MODAL
 import {
   Sun, Moon, Laptop, LogOut, Bell,
   SprayCan, Snail, SunMoon, Fingerprint, Rabbit, Cat, Shell, Turtle, Radar, HandMetal, Drum, TentTree,
-  Wifi, WifiOff, Loader2, Key, LockOpen, Lock, Menu, X, Feather, PawPrint, Origami, KeySquare, BellElectric, Siren
+  Wifi, WifiOff, Loader2, Key, LockOpen, Lock, Menu, X, Feather, PawPrint, Origami, KeySquare, BellElectric, Siren, Mail
 } from 'lucide-react';
 
 export default function TopNav() {
@@ -26,6 +28,12 @@ export default function TopNav() {
   const [isKiss24KeyModalOpen, setIsKiss24KeyModalOpen] = useState(false);
   const [isE2EEModalOpen, setIsE2EEModalOpen] = useState(false);
 
+  // Maintainer Template State
+  const [maintainerService, setMaintainerService] = useState<any>(null);
+  const [templateModal, setTemplateModal] = useState<{
+    isOpen: boolean; serviceId: string; serviceName: string; type: 'intro' | 'final' | null; initialTemplate: string;
+  }>({ isOpen: false, serviceId: '', serviceName: '', type: null, initialTemplate: '' });
+
   const themeRef = useRef<HTMLDivElement>(null);
   const userRef = useRef<HTMLDivElement>(null);
   const notificationRef = useRef<HTMLDivElement>(null);
@@ -39,6 +47,30 @@ export default function TopNav() {
   const ICON_ROTATION_TIME = 1000 * 60 * 5;
   const iconIndex = Math.floor(Date.now() / ICON_ROTATION_TIME) % logoIcons.length;
   const LogoIcon = logoIcons[iconIndex];
+
+  // Fetch the Maintainer's specific service lane data on load
+  useEffect(() => {
+    if (currentUser?.role === 'maintainer' && currentUser?.service_lane_id) {
+      axios.get(`/api/services/`) // This endpoint is already filtered by RBAC for maintainers!
+        .then(res => {
+          if (res.data && res.data.length > 0) {
+            setMaintainerService(res.data[0]);
+          }
+        })
+        .catch(err => console.error("Failed to load maintainer service lane details.", err));
+    }
+  }, [currentUser]);
+
+  const refreshMaintainerService = () => {
+    if (currentUser?.role === 'maintainer') {
+      axios.get(`/api/services/`)
+        .then(res => {
+          if (res.data && res.data.length > 0) {
+            setMaintainerService(res.data[0]);
+          }
+        });
+    }
+  };
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -171,10 +203,18 @@ export default function TopNav() {
       {/* Desktop Nav Links (Hidden on mobile) */}
       <div className="hidden md:flex items-center gap-2 text-sm font-medium">
         <Link to="/planner" className={navClass("/planner")}>Planner</Link>
-        <Link to="/calendar" className={navClass("/calendar")}>Holidays</Link>
         <Link to="/tests" className={navClass("/tests")}>Tests</Link>
-        <Link to="/validating" className={navClass("/validating")}>Validation</Link>
-
+        {currentUser?.role !== 'maintainer' && (
+          <>
+            <Link to="/calendar" className={navClass("/calendar")}>Holidays</Link>
+            <Link to="/validating" className={navClass("/validating")}>Validation</Link>
+          </>
+        )}
+        {currentUser?.role === 'maintainer' && (
+          <>
+            <Link to="/assets/pool" className={navClass("/assets/pool")}>Assets Pool</Link>
+          </>
+        )}
         {currentUser?.role === 'admin' && (
           <>
             <Link to="/assets" className={navClass("/assets")}>Assets</Link>
@@ -278,15 +318,31 @@ export default function TopNav() {
                   {currentUser?.role}
                 </span>
               </div>
+
+              {/* Maintainer Specific Actions */}
+              {currentUser?.role === 'maintainer' && maintainerService && (
+                <>
+                  <button onClick={() => { setIsUserOpen(false); setTemplateModal({ isOpen: true, serviceId: maintainerService.id, serviceName: maintainerService.name, type: 'intro', initialTemplate: maintainerService.intro_email_template }); }} className="w-full flex items-center px-4 py-2 text-sm text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors">
+                    <Mail className="mr-2 h-4 w-4 text-blue-500" /> Intro Email Template
+                  </button>
+                  <button onClick={() => { setIsUserOpen(false); setTemplateModal({ isOpen: true, serviceId: maintainerService.id, serviceName: maintainerService.name, type: 'final', initialTemplate: maintainerService.final_email_template }); }} className="w-full flex items-center px-4 py-2 text-sm text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors">
+                    <Mail className="mr-2 h-4 w-4 text-emerald-500" /> Final Email Template
+                  </button>
+                  <div className="h-px bg-slate-100 dark:bg-zinc-800 my-1"></div>
+                </>
+              )}
+
               <button onClick={() => { setIsUserOpen(false); setIsApiModalOpen(true); }} className="w-full flex items-center px-4 py-2 text-sm text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors">
                 <KeySquare className="mr-2 h-4 w-4" /> Developer API
               </button>
               <button onClick={() => { setIsUserOpen(false); setIsKiss24KeyModalOpen(true); }} className="w-full flex items-center px-4 py-2 text-sm text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors">
                 <Key className="mr-2 h-4 w-4" /> KISS24 API Key
               </button>
-              <button onClick={() => { setIsUserOpen(false); setIsE2EEModalOpen(true); }} className="w-full flex items-center px-4 py-2 text-sm text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors">
-               <Lock className="mr-2 h-4 w-4" /> Setup Secure Vault Keys
-              </button>
+              {currentUser?.role !== 'maintainer' && (
+                <button onClick={() => { setIsUserOpen(false); setIsE2EEModalOpen(true); }} className="w-full flex items-center px-4 py-2 text-sm text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors">
+                 <Lock className="mr-2 h-4 w-4" /> Setup Secure Vault Keys
+                </button>
+              )}
               <div className="h-px bg-slate-100 dark:bg-zinc-800 my-1"></div>
               <button onClick={handleLogout} className="w-full flex items-center px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors">
                 <LogOut className="mr-2 h-4 w-4" /> Log out
@@ -303,9 +359,17 @@ export default function TopNav() {
           className="md:hidden absolute top-full left-0 right-0 mt-4 bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-2xl shadow-xl p-4 flex flex-col gap-2 animate-in fade-in slide-in-from-top-4 origin-top z-40"
         >
           <Link to="/planner" className={mobileNavClass("/planner")}>Planner</Link>
-          <Link to="/calendar" className={mobileNavClass("/calendar")}>Holidays</Link>
           <Link to="/tests" className={mobileNavClass("/tests")}>Tests</Link>
-          <Link to="/validating" className={mobileNavClass("/validating")}>Validation</Link>
+          {currentUser?.role !== 'maintainer' && (
+            <>
+              <Link to="/calendar" className={mobileNavClass("/calendar")}>Holidays</Link>
+              <Link to="/validating" className={mobileNavClass("/validating")}>Validation</Link>
+            </>
+          )}
+
+          {currentUser?.role === 'maintainer' && (
+            <Link to="/assets/pool" className={mobileNavClass("/assets/pool")} onClick={() => setIsMobileMenuOpen(false)}>Assets Pool</Link>
+          )}
 
           {currentUser?.role === 'admin' && (
             <>
@@ -334,6 +398,17 @@ export default function TopNav() {
       />
       <Kiss24KeyModal isOpen={isKiss24KeyModalOpen} onClose={() => setIsKiss24KeyModalOpen(false)} />
       <E2EEKeyModal isOpen={isE2EEModalOpen} onClose={() => setIsE2EEModalOpen(false)} />
+
+      {/* GLOBAL TEMPLATE MODAL FOR MAINTAINERS */}
+      <TemplateEditorModal
+        isOpen={templateModal.isOpen}
+        serviceId={templateModal.serviceId}
+        serviceName={templateModal.serviceName}
+        templateType={templateModal.type}
+        initialTemplate={templateModal.initialTemplate}
+        onClose={() => setTemplateModal({ ...templateModal, isOpen: false })}
+        onSuccess={refreshMaintainerService}
+      />
     </>
   );
 }

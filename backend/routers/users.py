@@ -33,8 +33,9 @@ def get_all_users(current_user: dict = Depends(require_admin), cursor=Depends(ge
     """
     Admin Only Endpoint to get all users
     """
+    # Added service_lane_id to the SELECT
     cursor.execute("""
-        SELECT id, email, name, role, base_capacity, start_week, start_year, end_week, end_year, location_id, kiss24_uuid, kiss24_api_key   
+        SELECT id, email, name, role, base_capacity, start_week, start_year, end_week, end_year, location_id, kiss24_uuid, kiss24_api_key, service_lane_id   
         FROM users ORDER BY name
     """)
     users = []
@@ -43,7 +44,7 @@ def get_all_users(current_user: dict = Depends(require_admin), cursor=Depends(ge
             "id": r[0], "email": r[1], "name": r[2], "role": r[3],
             "base_capacity": r[4], "start_week": r[5], "start_year": r[6],
             "end_week": r[7], "end_year": r[8], "location_id": r[9], "kiss24_uuid": r[10],
-            "kiss24_api_key": r[11]
+            "kiss24_api_key": r[11], "service_lane_id": r[12]
         })
     return users
 
@@ -54,19 +55,24 @@ def create_user(u: UserCreate, background_tasks: BackgroundTasks,
     """
     Admin Only Endpoint to create new user
     """
-    if u.role.value == 'read_only':
+    # Base capacity overrides
+    if u.role.value == 'read_only' or u.role.value == 'maintainer':
         u.base_capacity = 0.0
 
     ew = u.end_week if str(u.end_week).strip() != '' else None
     ey = u.end_year if str(u.end_year).strip() != '' else None
 
-    # Safely convert UUID to string
+    # Safely convert UUIDs to string
     loc_id = str(u.location_id) if u.location_id else None
+    sl_id = str(u.service_lane_id) if u.service_lane_id else None
     new_user_id = str(uuid.uuid4())
+
+    # Added service_lane_id to INSERT
     cursor.execute(
-        '''INSERT INTO users (id, email, name, role, location_id, base_capacity, start_week, start_year, end_week, end_year)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)''',
-        (new_user_id, u.email.lower(), u.name, u.role.value, loc_id, u.base_capacity, u.start_week, u.start_year, ew, ey)
+        '''INSERT INTO users (id, email, name, role, location_id, base_capacity, start_week, start_year, end_week, end_year, service_lane_id)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)''',
+        (new_user_id, u.email.lower(), u.name, u.role.value, loc_id, u.base_capacity, u.start_week, u.start_year, ew,
+         ey, sl_id)
     )
 
     cursor.connection.commit()
@@ -74,7 +80,7 @@ def create_user(u: UserCreate, background_tasks: BackgroundTasks,
     log_audit_event(
         user_id=str(current_user["id"]),
         role=current_user["role"],
-        action="LOCATION_CREATED",
+        action="USER_CREATED",
         resource_type="USER",
         resource_id=str(new_user_id),
         details=f"User with ID: {new_user_id} was created."
@@ -120,7 +126,7 @@ def delete_user(user_id: str, background_tasks: BackgroundTasks,
         log_audit_event(
             user_id=str(current_user["id"]),
             role=current_user["role"],
-            action="LOCATION_DELETED",
+            action="USER_DELETED",
             resource_type="USER",
             resource_id=str(user_id),
             details=f"User with ID: {user_id} was deleted."
@@ -138,12 +144,14 @@ def update_user(user_id: str, u: UserBase, background_tasks: BackgroundTasks,
 
     On role change any Isha API keys are revoked.
     """
-    if u.role == 'read_only':
+    # Base capacity overrides
+    if u.role == 'read_only' or u.role == 'maintainer':
         u.base_capacity = 0.0
 
     ew = u.end_week if str(u.end_week).strip() != '' else None
     ey = u.end_year if str(u.end_year).strip() != '' else None
     loc_id = str(u.location_id) if u.location_id else None
+    sl_id = str(u.service_lane_id) if u.service_lane_id else None
 
     # revoking the keys
     cursor.execute("SELECT role FROM users WHERE id = %s", (user_id,))
@@ -163,19 +171,21 @@ def update_user(user_id: str, u: UserBase, background_tasks: BackgroundTasks,
             INSERT INTO notifications (id, user_id, message, type, created_at) VALUES (%s, %s, %s, 'REMOVAL', CURRENT_TIMESTAMP)
         """, (new_notif_id, user_id, message))
 
+    # Added service_lane_id to UPDATE
     cursor.execute(
         '''UPDATE users 
            SET name=%s, role=%s, location_id=%s, base_capacity=%s, 
-               start_week=%s, start_year=%s, end_week=%s, end_year=%s 
+               start_week=%s, start_year=%s, end_week=%s, end_year=%s, service_lane_id=%s
            WHERE id=%s''',
-        (u.name, u.role.value, loc_id, u.base_capacity, u.start_week, u.start_year, ew, ey, user_id)
+        (u.name, u.role.value if hasattr(u.role, 'value') else u.role, loc_id, u.base_capacity, u.start_week,
+         u.start_year, ew, ey, sl_id, user_id)
     )
     cursor.connection.commit()
 
     log_audit_event(
         user_id=str(current_user["id"]),
         role=current_user["role"],
-        action="LOCATION_UPDATED",
+        action="USER_UPDATED",
         resource_type="USER",
         resource_id=str(user_id),
         details=f"User with ID: {user_id} was updated."
@@ -253,7 +263,6 @@ def get_my_notifications(current_user: dict = Depends(get_current_user), cursor=
     """
     Get all notifications for current user.
     """
-    # FIX: Account for is_read being NULL, and cast the UUID to string!
     cursor.execute("""
         SELECT id, message, type, created_at 
         FROM notifications 
@@ -261,7 +270,6 @@ def get_my_notifications(current_user: dict = Depends(get_current_user), cursor=
         ORDER BY created_at DESC
     """, (str(current_user['id']),))
 
-    # FIX: Cast the notification ID to string to prevent JSON serialization crashes
     notifs = [{"id": str(r[0]), "message": r[1], "type": r[2], "created_at": r[3]} for r in cursor.fetchall()]
     return notifs
 
@@ -271,7 +279,6 @@ def mark_notifications_read(current_user: dict = Depends(get_current_user), curs
     """
     Mark notifications for current user.
     """
-    # FIX: Cast the UUID to string
     cursor.execute("UPDATE notifications SET is_read = TRUE WHERE user_id = %s", (str(current_user['id']),))
     cursor.connection.commit()
     return {"message": "Notifications marked as read."}
@@ -285,7 +292,6 @@ def get_user_public_keys(current_user: dict = Depends(get_current_user), cursor=
     """
     cursor.execute("SELECT id, name, public_key FROM users WHERE end_year IS NULL")
 
-    # Return them all, so the UI can show who is missing a key!
     return [
         {
             "id": str(r[0]),

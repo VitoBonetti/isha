@@ -104,3 +104,18 @@ export interface ExtendedMessage extends Message {
   log_id?: string;
   feedback?: boolean | null;
 }
+
+export interface UserFormState {
+  email: string;
+  name: string;
+  role: string;
+  service_lane_id: string;
+  base_capacity: number;
+  location_id: string;
+  start_week: number;
+  start_year: number;
+  end_week: string | number;
+  end_year: string | number;
+  kiss24_uuid: string;
+  kiss24_api_key: string;
+}

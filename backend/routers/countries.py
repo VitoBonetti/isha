@@ -14,8 +14,9 @@ router = APIRouter(prefix="/api/countries", tags=["Countries"])
 
 @router.get("/")
 def get_countries(current_user: dict = Depends(get_current_user), cursor = Depends(get_db_cursor)):
+
     if current_user.get('role') == 'pentester':
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Pentesters cannot access country data.")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"{current_user.get('role')} cannot access country data.")
 
     cursor.execute("""
         SELECT c.id, c.code, c.name, c.is_active, c.region_id, r.name as region_name, c.kiss24_uuid, c.is_team
@@ -85,6 +86,7 @@ def update_country(country_id: str, c: CountryBase, current_user: dict = Depends
 
     cursor.connection.commit()
     return {"message": "Country updated successfully."}
+
 
 @router.delete("/{country_id}", summary="[Admin Only]")
 def delete_country(country_id: str, current_user: dict = Depends(require_admin), cursor = Depends(get_db_cursor)):

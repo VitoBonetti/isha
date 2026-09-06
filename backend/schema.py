@@ -8,6 +8,7 @@ class UserRole(str, Enum):
     admin = "admin"
     pentester = "pentester"
     read_only = "read_only"
+    maintainer = "maintainer"
 
 class TestStatus(str, Enum):
     not_planned = "Not Planned"
@@ -81,6 +82,7 @@ class UserBase(BaseModel):
     end_week: Optional[int] = None
     end_year: Optional[int] = None
     location_id: Optional[UUID4] = None
+    service_lane_id: Optional[UUID4] = None
     kiss24_uuid: Optional[str] = None
     kiss24_api_key: Optional[str] = None
 

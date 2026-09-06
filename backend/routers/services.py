@@ -1,6 +1,12 @@
 from fastapi import APIRouter, Depends, BackgroundTasks, Query, HTTPException
 from database import get_db_cursor
-from routers.auth import require_admin, get_current_user
+from routers.auth import (
+    get_current_user,
+    require_admin,
+    require_write_access,
+    require_maintainer_or_admin,
+    verify_lane_access
+)
 from schema import ServiceLaneBase, PlaceholderResponse, PlaceholderCreate, ServiceLaneTemplatesUpdate
 from websockets_manager import manager
 import uuid
@@ -11,11 +17,31 @@ router = APIRouter(prefix="/api/services", tags=["Services"])
 
 
 @router.get("/")
-def get_services(year: int = Query(default_factory=lambda: datetime.now().year), current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+def get_services(year: int = Query(default_factory=lambda: datetime.now().year),
+                 current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
     """
     Endpoint to get all services
     """
-    cursor.execute('''
+    where_clauses = []
+
+    # Note: `year` is our first parameter because of the LEFT JOIN condition
+    params = [year]
+
+    # 1. Restrict maintainers to their assigned service lane
+    if current_user.get('role') == 'maintainer':
+        lane_id = current_user.get('service_lane_id')
+        if lane_id:
+            where_clauses.append("sl.id = %s")
+            params.append(str(lane_id))
+        else:
+            # Safely return nothing if the Maintainer hasn't been assigned a lane yet
+            where_clauses.append("sl.id = '00000000-0000-0000-0000-000000000000'")
+
+    # 2. Build the dynamic WHERE string
+    where_str = "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
+
+    # 3. Inject it into the query using an f-string
+    cursor.execute(f'''
         SELECT sl.id, sl.name, sl.max_concurrent_per_week, sl.theme_color, 
                 sl.default_credits, sl.default_duration_weeks, sl.display_order, sl.is_active,
                 sl.auto_provision_workspace, 
@@ -23,8 +49,9 @@ def get_services(year: int = Query(default_factory=lambda: datetime.now().year),
                 COALESCE(slg.target_goal, 0) as target_goal
         FROM services_lanes sl
         LEFT JOIN service_lane_goals slg ON sl.id = slg.service_lane_id AND slg.year = %s
+        {where_str}
         ORDER BY sl.display_order ASC, sl.name ASC
-    ''', (year,))
+    ''', tuple(params))
 
     columns = [desc[0] for desc in cursor.description]
     services = [dict(zip(columns, row)) for row in cursor.fetchall()]
@@ -35,6 +62,7 @@ def get_services(year: int = Query(default_factory=lambda: datetime.now().year),
         s['target_goal'] = int(s['target_goal'] or 0)
 
     return services
+
 
 @router.post("/", summary="[Admin Only]")
 def create_service(s: ServiceLaneBase, year: int = Query(default_factory=lambda: datetime.now().year), background_tasks: BackgroundTasks = BackgroundTasks(),
@@ -146,7 +174,7 @@ def delete_service(service_id: str, background_tasks: BackgroundTasks,
 
 
 @router.get("/{service_id}/goals")
-def get_service_goals(service_id: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+def get_service_goals(service_id: str, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
     """
     Fetches the complete ledger of yearly goals for a single Service Lane.
     """
@@ -235,16 +263,18 @@ def delete_placeholder(placeholder_id: str, background_tasks: BackgroundTasks,
     return {"message": "Placeholder deleted"}
 
 
-@router.patch("/{service_lane_id}/templates")
+@router.patch("/{service_lane_id}/templates", summary="[Admin/Maintainer]")
 def update_service_lane_templates(
         service_lane_id: str,
         payload: ServiceLaneTemplatesUpdate,
-        current_user: dict = Depends(require_admin),
+        current_user: dict = Depends(require_maintainer_or_admin),
         cursor=Depends(get_db_cursor)
 ):
     """
-    Admin Only Endpoint to update service lane templates
+    Admin/Maintainer Endpoint to update service lane templates
     """
+    verify_lane_access(current_user, str(service_lane_id))
+
     # Update the templates in the database
     cursor.execute("""
         UPDATE services_lanes

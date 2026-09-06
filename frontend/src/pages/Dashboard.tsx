@@ -35,9 +35,9 @@ export default function Dashboard() {
     {
       name: "Operations & Planning",
       features: [
-        { title: 'Planner', desc: 'Manage and schedule active pentest assignments across the team.', icon: <CalendarDays size={24} />, view: 'planner', color: 'text-blue-500', allowedRoles: ['admin', 'pentester', 'read_only'] },
+        { title: 'Planner', desc: 'Manage and schedule active pentest assignments across the team.', icon: <CalendarDays size={24} />, view: 'planner', color: 'text-blue-500', allowedRoles: ['admin', 'pentester', 'read_only', 'maintainer'] },
         { title: 'Holidays', desc: 'Visual timeline of personal time off and national holidays.', icon: <Palmtree size={24} />, view: 'calendar', color: 'text-purple-500', allowedRoles: ['admin', 'pentester', 'read_only'] },
-        { title: 'Tests', desc: 'Manage generated tests and lifecycle milestones.', icon: <ShieldAlert size={24} />, view: 'tests', color: 'text-indigo-500', allowedRoles: ['admin', 'pentester', 'read_only'] },
+        { title: 'Tests', desc: 'Manage generated tests and lifecycle milestones.', icon: <ShieldAlert size={24} />, view: 'tests', color: 'text-indigo-500', allowedRoles: ['admin', 'pentester', 'read_only', 'maintainer'] },
         { title: 'Validation', desc: 'Live reconciliation of Keep Secure 24 vulnerabilities pending retest.', icon: <CheckSquare size={24} />, view: 'validating', color: 'text-rose-500', allowedRoles: ['admin', 'pentester', 'read_only'] }
       ]
     },
@@ -45,10 +45,10 @@ export default function Dashboard() {
       name: "Asset Management",
       features: [
         { title: 'Raw Data Lab', desc: 'Data staging, sheet importation, and asset promotion pipeline.', icon: <Database size={24} />, view: 'assets/raw', color: 'text-slate-600 dark:text-slate-400', allowedRoles: ['admin', 'read_only'] },
-        { title: 'Active Pool', desc: 'Centralized inventory of applications prioritized for testing.', icon: <Server size={24} />, view: 'assets/pool', color: 'text-emerald-500', allowedRoles: ['admin', 'read_only'] },
+        { title: 'Active Pool', desc: 'Centralized inventory of applications prioritized for testing.', icon: <Server size={24} />, view: 'assets/pool', color: 'text-emerald-500', allowedRoles: ['admin', 'read_only', 'maintainer'] },
         { title: 'Analytics', desc: 'Regional/country logic and aggregated analytics.', icon: <ChartNoAxesCombined size={24} />, view: 'assets/analytics', color: 'text-emerald-600', allowedRoles: ['admin', 'read_only'] },
         { title: 'Insights', desc: 'Analyze throughput, workload distribution, and goal tracking.', icon: <LineChart size={24} />, view: 'assets/insights', color: 'text-amber-500', allowedRoles: ['admin', 'read_only'] },
-        { title: 'Contacts', desc: 'Manage stakeholders and developers across all countries and assets.', icon: <Users size={24} />, view: 'settings/contacts', color: 'text-blue-500', allowedRoles: ['admin'] }
+        { title: 'Contacts', desc: 'Manage stakeholders and developers across all countries and assets.', icon: <Users size={24} />, view: 'settings/contacts', color: 'text-blue-500', allowedRoles: ['admin', 'read_only'] }
       ]
     },
     {

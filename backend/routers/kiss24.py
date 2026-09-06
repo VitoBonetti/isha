@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.testing.pickleable import User
 from google.cloud import pubsub_v1, storage
 from database import get_db_cursor
-from routers.auth import get_current_user, require_admin
+from routers.auth import get_current_user, require_admin, require_write_access, require_maintainer_or_admin, verify_lane_access
 from audit_logger import log_audit_event
 from utils.timeaware import aware_utcnow
 from utils.secret_manager import get_secret
@@ -39,6 +39,20 @@ KISS_24_TEMP_BUCKET = os.environ.get("KISS_24_TEMP_BUCKET")
 PUBSUB_TOPIC_PATH = os.environ.get("PUBSUB_TOPIC_PATH")
 KISS_24_ENDPOINT = os.environ.get("KISS_24_ENDPOINT")
 KISS_24_API_KEY_NAME = os.environ.get("KISS_24_API_KEY_NAME")
+
+
+def check_maintainer_lane_access(current_user: dict, target_lane_id: str):
+    """
+    Locally checks if a Maintainer is accessing their assigned lane.
+    Allows Pentesters and Admins to pass through naturally.
+    """
+    if current_user.get('role') == 'maintainer':
+        if str(current_user.get('service_lane_id')) != str(target_lane_id):
+            from fastapi import HTTPException
+            raise HTTPException(
+                status_code=403,
+                detail="Maintainers can only perform actions on tests in their assigned Service Lane."
+            )
 
 
 def get_user_kiss24_key(cursor, user_id: str) -> str:
@@ -422,24 +436,9 @@ def create_kiss24_test(
     Creates a new test in Keep Secure 24 using the user's personal API Key.
     """
     try:
-        # fetch & Decrypt User's Personal API Key
-        cursor.execute("SELECT kiss24_api_key FROM users WHERE id = %s", (str(current_user["id"]),))
-        key_row = cursor.fetchone()
-
-        if not key_row or not key_row[0]:
-            raise HTTPException(status_code=400,
-                                detail="You must configure your personal Keep Secure 24 API key first.")
-
-        cipher = get_cipher()
-        try:
-            user_api_key = cipher.decrypt(key_row[0].encode('utf-8')).decode('utf-8')
-        except Exception:
-            raise HTTPException(status_code=400,
-                                detail="Failed to decrypt your personal API key. Please reset it in your profile.")
-
         # fetch required data for payload
         cursor.execute("""
-            SELECT t.name, t.start_year, t.start_week, t.kiss24,
+            SELECT t.name, t.start_year, t.start_week, t.kiss24, t.service_lane_id,
                    sl.name as service_lane_name,
                    c.kiss24_uuid as country_kiss24_uuid,
                    ra.kiss24_asset_id
@@ -456,7 +455,10 @@ def create_kiss24_test(
         if not row:
             raise HTTPException(status_code=404, detail="Test not found.")
 
-        test_name, start_year, start_week, existing_kiss24, service_lane, country_uuid, asset_uuid = row
+        test_name, start_year, start_week, existing_kiss24, t_lane_id, service_lane, country_uuid, asset_uuid = row
+
+        # Security: Block Maintainers from interacting outside their lane
+        check_maintainer_lane_access(current_user, str(t_lane_id))
 
         # Block if already created or missing identifiers
         if existing_kiss24:
@@ -465,6 +467,21 @@ def create_kiss24_test(
             raise HTTPException(status_code=400, detail="Missing Country UUID or Asset ID.")
         if not start_year or not start_week:
             raise HTTPException(status_code=400, detail="Test must be scheduled (Year and Week) before creation.")
+
+        # fetch & Decrypt User's Personal API Key
+        cursor.execute("SELECT kiss24_api_key FROM users WHERE id = %s", (str(current_user["id"]),))
+        key_row = cursor.fetchone()
+
+        if not key_row or not key_row[0]:
+            raise HTTPException(status_code=400,
+                                detail="You must configure your personal Keep Secure 24 API key first.")
+
+        cipher = get_cipher()
+        try:
+            user_api_key = cipher.decrypt(key_row[0].encode('utf-8')).decode('utf-8')
+        except Exception:
+            raise HTTPException(status_code=400,
+                                detail="Failed to decrypt your personal API key. Please reset it in your profile.")
 
         # Format Payload Data
         start_date = datetime.fromisocalendar(start_year, start_week, 1)
@@ -521,14 +538,21 @@ def get_kiss24_live_status(
     Fetches the live status and details of a specific test from Keep Secure 24.
     """
     try:
-        # 1. Get the KISS24 UUID for this test from our DB
-        cursor.execute("SELECT kiss24 FROM tests WHERE id = %s", (test_id,))
+        # 1. Get the KISS24 UUID and Service Lane for this test from our DB
+        cursor.execute("SELECT kiss24, service_lane_id FROM tests WHERE id = %s", (test_id,))
         row = cursor.fetchone()
 
-        if not row or not row[0]:
+        if not row:
+            raise HTTPException(status_code=404, detail="Test not found in the database.")
+
+        if not row[0]:
             raise HTTPException(status_code=404, detail="This test is not yet linked to Keep Secure 24.")
 
         kiss24_uuid = str(row[0])
+        t_lane_id = str(row[1])
+
+        # Security: Block Maintainers from interacting outside their lane
+        check_maintainer_lane_access(current_user, t_lane_id)
 
         # 2. Fetch from KISS24 API
         raw_data = get_test_info(kiss24_uuid)
@@ -569,14 +593,21 @@ def get_kiss24_vulnerabilities(
     Fetches the published vulnerabilities for a specific test from Keep Secure 24.
     """
     try:
-        # 1. Get the KISS24 UUID for this test from our DB
-        cursor.execute("SELECT kiss24 FROM tests WHERE id = %s", (test_id,))
+        # 1. Get the KISS24 UUID and Service Lane for this test from our DB
+        cursor.execute("SELECT kiss24, service_lane_id FROM tests WHERE id = %s", (test_id,))
         row = cursor.fetchone()
 
-        if not row or not row[0]:
+        if not row:
+            raise HTTPException(status_code=404, detail="Test not found in the database.")
+
+        if not row[0]:
             raise HTTPException(status_code=404, detail="This test is not yet linked to Keep Secure 24.")
 
         kiss24_uuid = str(row[0])
+        t_lane_id = str(row[1])
+
+        # Security: Block Maintainers from interacting outside their lane
+        check_maintainer_lane_access(current_user, t_lane_id)
 
         # 2. Fetch from KISS24 API
         raw_data = get_test_vulns_info(kiss24_uuid)
@@ -636,31 +667,11 @@ def publish_vulnerability(test_id: str, payload: dict, current_user: dict = Depe
                           cursor=Depends(get_db_cursor)):
     """
     Main publishing vulnerabilities sequence endpoint.
-    1. Decrypt user's API key
-    2. Get Test Identifiers
-    3. Map CVSS v4 based on Severity
-    4. Convert newlines to HTML break tags so the formatting survives, then strip the literal newlines so KISS24 doesn't crash
-    5. Preserve code blocks: Converts \n to <br/> ONLY inside <pre> tags
-    6. Strip all remaining newlines so the Keep Secure 24 API doesn't crash with a 400 error
-    7. Destroy any hallucinatory empty paragraphs or list items the AI generated
-    8. country_uuid maps to the KISS24 'ouuid' for remediation effort (Keep Secure 24 developers are out of mind)
-    9. Build the custom fields array dynamically
-    10. Build Create Payload
-    11. Execute Creation
-    12. Upload Images sequentially
     """
     try:
-        # 1. Decrypt user's API key
-        cursor.execute("SELECT kiss24_api_key FROM users WHERE id = %s", (str(current_user["id"]),))
-        key_row = cursor.fetchone()
-        if not key_row or not key_row[0]:
-            raise HTTPException(status_code=400, detail="Configure your personal Keep Secure 24 API key first.")
-        cipher = get_cipher()
-        user_api_key = cipher.decrypt(key_row[0].encode('utf-8')).decode('utf-8')
-
-        # 2. Get Test Identifiers
+        # 1. Get Test Identifiers and check security
         cursor.execute("""
-            SELECT t.kiss24, c.kiss24_uuid, ra.kiss24_asset_id
+            SELECT t.kiss24, c.kiss24_uuid, ra.kiss24_asset_id, t.service_lane_id
             FROM tests t
             LEFT JOIN test_assets ta ON t.id = ta.test_id
             LEFT JOIN assets a ON ta.asset_id = a.id
@@ -673,7 +684,18 @@ def publish_vulnerability(test_id: str, payload: dict, current_user: dict = Depe
         if not row or not row[0] or not row[1] or not row[2]:
             raise HTTPException(status_code=400, detail="Test is missing required Keep Secure 24 UUIDs.")
 
-        test_uuid, country_uuid, asset_uuid = row
+        test_uuid, country_uuid, asset_uuid, t_lane_id = row
+
+        # Security: Block Maintainers from interacting outside their lane
+        check_maintainer_lane_access(current_user, str(t_lane_id))
+
+        # 2. Decrypt user's API key
+        cursor.execute("SELECT kiss24_api_key FROM users WHERE id = %s", (str(current_user["id"]),))
+        key_row = cursor.fetchone()
+        if not key_row or not key_row[0]:
+            raise HTTPException(status_code=400, detail="Configure your personal Keep Secure 24 API key first.")
+        cipher = get_cipher()
+        user_api_key = cipher.decrypt(key_row[0].encode('utf-8')).decode('utf-8')
 
         # 3. Map CVSS v4 based on Severity
         cvss_map = {
@@ -704,8 +726,7 @@ def publish_vulnerability(test_id: str, payload: dict, current_user: dict = Depe
 
         # country_uuid maps to the KISS24 'ouuid'
         remediation_uuid = get_custom_fields_choice_uuid(str(country_uuid), "Remediation Effort",
-                                           payload.get("remediation_effort", "Minimal"))
-        # verified_uuid = get_custom_fields_choice_uuid(str(country_uuid), "Is Verified?", "No")
+                                                         payload.get("remediation_effort", "Minimal"))
 
         # Build the custom fields array dynamically
         custom_fields = [
@@ -719,12 +740,6 @@ def publish_vulnerability(test_id: str, payload: dict, current_user: dict = Depe
                 "parent": "Remediation Effort",
                 "choices": remediation_uuid
             })
-
-        # if verified_uuid:
-        #     custom_fields.append({
-        #         "parent": "Is Verified?",
-        #         "choices": verified_uuid
-        #     })
 
         # 4. Build Create Payload
         create_payload = {
@@ -964,20 +979,33 @@ def trigger_luigi_verification_pipeline(vuln_uuid: str, user_api_key: str):
 
 
 @router.post("/validating-vulns/{uuid}/analyze")
-def start_ai_analysis(uuid: str, background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+def start_ai_analysis(uuid: str, background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user),
+                      cursor=Depends(get_db_cursor)):
     """
     Trigs trigger_luigi_verification_pipeline: Background task to prep the JSON payload and alert Luigi.
-    0. Fetch personal key before triggering the background pipeline and Pass it into the background task
-    1. Get the cleaned JSON payload
-    2. Process root vulnerability attachments
-    3. Process comment attachments
-    4. Ship to Pub/Sub
-    5. future.result() forces the background task to wait for Google to confirm the message
     """
+
+    # 1. Fetch the vulnerability to get its parent test's service lane
+    cursor.execute("""
+        SELECT t.service_lane_id 
+        FROM kiss24_validating_vulns v
+        JOIN tests t ON v.test_id = t.id
+        WHERE v.uuid = %s
+    """, (uuid,))
+    row = cursor.fetchone()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Vulnerability not found.")
+
+    t_lane_id = str(row[0])
+
+    # Security: Block Maintainers from interacting outside their lane
+    check_maintainer_lane_access(current_user, t_lane_id)
+
+    # 2. Proceed with analysis
     user_api_key = get_user_kiss24_key(cursor, str(current_user["id"]))
     background_tasks.add_task(trigger_luigi_verification_pipeline, uuid, user_api_key)
     return {"message": "Luigi pipeline started"}
-
 
 # Sync asset with Kiss Secure 24
 # --- Helper: String Normalization for Fuzzy Math ---

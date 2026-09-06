@@ -18,8 +18,10 @@ def get_regions(current_user: dict = Depends(get_current_user), cursor=Depends(g
     """
     Endpoint to get all regions
     """
-    if current_user.get('role') == 'pentester':
-        raise HTTPException(status_code=403, detail="Pentesters cannot access region data.")
+    role_allowed = ['admin', 'read-only']
+
+    if current_user.get('role') not in role_allowed:
+        raise HTTPException(status_code=403, detail=f"{current_user.get('role')} cannot access region data.")
 
     cursor.execute("SELECT id, name, is_active FROM regions ORDER BY name")
     return [{"id": r[0], "name": r[1], "is_active": r[2]} for r in cursor.fetchall()]

@@ -4,7 +4,13 @@ from typing import Optional
 import uuid
 from datetime import datetime, timedelta
 from database import get_db_cursor, db_cursor_context
-from routers.auth import get_current_user, require_admin, require_write_access
+from routers.auth import (
+    get_current_user,
+    require_admin,
+    require_write_access,
+    require_maintainer_or_admin,
+    verify_lane_access
+)
 from schema import EventCreate, EventBase, ServiceCategoryCreate, ServiceCategoryBase
 from websockets_manager import manager
 from audit_logger import log_audit_event
@@ -178,6 +184,21 @@ def get_quarterly_board(year: int, quarter: int, response: Response,
     weeks = list(get_quarter_weeks(quarter, year))
     weeks_in_prev_year = datetime(year - 1, 12, 28).isocalendar()[1]
 
+    # --- RBAC SETUP FOR MAINTAINERS ---
+    user_role = current_user.get('role')
+    lane_id = current_user.get('service_lane_id')
+
+    maintainer_clause = ""
+    maintainer_params = []
+
+    if user_role == 'maintainer':
+        if lane_id:
+            maintainer_clause = " AND t.service_lane_id = %s "
+            maintainer_params = [str(lane_id)]
+        else:
+            # Fallback to prevent data leak if maintainer lacks an assignment
+            maintainer_clause = " AND t.service_lane_id = '00000000-0000-0000-0000-000000000000' "
+
     # 1. Services & Categories
     cursor.execute('''
             SELECT sl.id, sl.name, sl.theme_color, sl.display_order, sl.max_concurrent_per_week, sl.is_active, sl.auto_provision_workspace 
@@ -260,7 +281,7 @@ def get_quarterly_board(year: int, quarter: int, response: Response,
     }
 
     # 3. Tests (Backlog) - Force stages::text to prevent serialization errors
-    cursor.execute('''
+    cursor.execute(f'''
             SELECT t.id, t.name, t.service_lane_id, t.category_id, 
                    t.credits_per_week, t.duration_weeks, t.stages::text,
                    (SELECT COUNT(*) FROM test_assets WHERE test_id = t.id),
@@ -269,7 +290,9 @@ def get_quarterly_board(year: int, quarter: int, response: Response,
                    t.is_tentative, t.kiss24
             FROM tests t
             WHERE t.stages::text = 'NOT_PLANNED'
-        ''')
+            {maintainer_clause}
+        ''', tuple(maintainer_params))
+
     backlog = []
     for r in cursor.fetchall():
         backlog.append({
@@ -283,7 +306,9 @@ def get_quarterly_board(year: int, quarter: int, response: Response,
         })
 
     # 4. Tests (Scheduled) - Force stages::text to prevent serialization errors
-    cursor.execute('''
+    scheduled_params = [year, weeks[0], weeks[-1], year, weeks_in_prev_year, weeks[0]] + maintainer_params
+
+    cursor.execute(f'''
         SELECT t.id, t.name, t.service_lane_id, t.category_id, 
             t.credits_per_week, t.duration_weeks, t.start_week, t.start_year, t.stages::text,
             (SELECT COUNT(*) FROM test_assets WHERE test_id = t.id),
@@ -297,7 +322,8 @@ def get_quarterly_board(year: int, quarter: int, response: Response,
                 OR 
                 (t.start_year = %s - 1 AND (t.start_week + t.duration_weeks - 1) - %s >= %s)
             )
-    ''', (year, weeks[0], weeks[-1], year, weeks_in_prev_year, weeks[0]))
+            {maintainer_clause}
+    ''', tuple(scheduled_params))
 
     scheduled = []
     for r in cursor.fetchall():

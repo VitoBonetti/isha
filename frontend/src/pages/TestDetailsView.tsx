@@ -18,8 +18,12 @@ export default function TestDetailsView() {
   const navigate = useNavigate();
   const location = useLocation();
   const { currentUser } = useAppContext();
+
+  // Role checks
   const isAdmin = currentUser?.role === 'admin';
+  const isMaintainer = currentUser?.role === 'maintainer';
   const isReadOnly = currentUser?.role === 'read_only';
+  const isManagementRole = isAdmin || isMaintainer;
 
   const backPath = location.state?.from || "/tests";
   const backLabel = location.state?.label || "Test Registry";
@@ -70,6 +74,7 @@ export default function TestDetailsView() {
 
   const [isIntroEmailOpen, setIsIntroEmailOpen] = useState(false);
   const [isFinalEmailOpen, setIsFinalEmailOpen] = useState(false);
+
   const refreshMilestones = async () => {
     try {
       const resMiles = await axios.get(`/api/tests/${id}/milestones`);
@@ -214,7 +219,7 @@ export default function TestDetailsView() {
 
   const handleUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isAdmin) return;
+    if (!isManagementRole) return;
     try {
       const payload = {
         name: test.name,
@@ -305,7 +310,7 @@ export default function TestDetailsView() {
     return new Date(dateString).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
   };
 
-  const inputClasses = isAdmin
+  const inputClasses = isManagementRole
     ? "w-full mt-1 p-2.5 border border-slate-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-900 text-slate-900 dark:text-zinc-100 focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
     : "w-full mt-1 p-2.5 border border-transparent rounded-lg bg-slate-50 dark:bg-zinc-950/50 text-slate-900 dark:text-zinc-100 outline-none cursor-default font-medium appearance-none";
 
@@ -371,7 +376,7 @@ export default function TestDetailsView() {
                             <FolderPlus size={14} /> <span className="hidden sm:inline">Create Workspace</span>
                           </button>
                         )}
-                        {!isReadOnly && (
+                        {!isReadOnly && !isMaintainer && (
                           <button onClick={() => setSecretConfirmOpen(test)} className={`px-3 py-1.5 rounded-lg border transition-colors flex items-center gap-2 text-xs font-bold ${test.has_secret ? 'text-indigo-600 bg-indigo-50 border-indigo-200 dark:bg-indigo-900/30 dark:border-indigo-900/50' : 'text-slate-500 bg-slate-100 border-slate-200 dark:bg-zinc-800 dark:border-zinc-700 hover:text-indigo-600'}`}>
                             {test.has_secret ? <><Lock size={14} /><span className="hidden sm:inline">View Secret</span></> : <><LockOpen size={14} /><span className="hidden sm:inline">Add Secret</span></>}
                           </button>
@@ -415,9 +420,11 @@ export default function TestDetailsView() {
                         <Calendar size={14} className="text-slate-400"/> Unscheduled
                       </span>
                     )}
-                    <span className="flex items-center gap-1.5 font-bold text-slate-700 dark:text-zinc-300">
-                      <Users size={14} className="text-blue-500"/> Team: {test.assigned_pentesters}
-                    </span>
+                    {!isMaintainer && (
+                      <span className="flex items-center gap-1.5 font-bold text-slate-700 dark:text-zinc-300">
+                        <Users size={14} className="text-blue-500"/> Team: {test.assigned_pentesters}
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -437,12 +444,12 @@ export default function TestDetailsView() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 md:gap-6">
                 <div className="sm:col-span-2">
                   <label className="text-sm font-bold text-slate-700 dark:text-zinc-300">Test Name</label>
-                  <input required disabled={!isAdmin} className={inputClasses} value={test.name} onChange={e => setTest({...test, name: e.target.value})} />
+                  <input required disabled={!isAdmin} className={isAdmin ? inputClasses : "w-full mt-1 p-2.5 border border-transparent rounded-lg bg-slate-50 dark:bg-zinc-950/50 text-slate-900 dark:text-zinc-100 outline-none cursor-default font-medium appearance-none"} value={test.name} onChange={e => setTest({...test, name: e.target.value})} />
                 </div>
 
                 <div>
                   <label className="text-sm font-bold text-slate-700 dark:text-zinc-300">Service Lane</label>
-                  <select required disabled={!isAdmin} className={inputClasses} value={test.service_lane_id} onChange={e => setTest({...test, service_lane_id: e.target.value, category_id: ""})}>
+                  <select required disabled={!isAdmin} className={isAdmin ? inputClasses : "w-full mt-1 p-2.5 border border-transparent rounded-lg bg-slate-50 dark:bg-zinc-950/50 text-slate-900 dark:text-zinc-100 outline-none cursor-default font-medium appearance-none"} value={test.service_lane_id} onChange={e => setTest({...test, service_lane_id: e.target.value, category_id: ""})}>
                     {services.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                   </select>
                 </div>
@@ -452,7 +459,7 @@ export default function TestDetailsView() {
                     Forecast Category
                     {isAdmin && <span className="text-[10px] bg-slate-100 dark:bg-zinc-800 text-slate-500 px-2 py-0.5 rounded-full font-normal">(Updates Linked Asset)</span>}
                   </label>
-                  <select disabled={!isAdmin || !test.service_lane_id} className={inputClasses} value={test.category_id || ""} onChange={e => setTest({...test, category_id: e.target.value})}>
+                  <select disabled={!isAdmin || !test.service_lane_id} className={isAdmin ? inputClasses : "w-full mt-1 p-2.5 border border-transparent rounded-lg bg-slate-50 dark:bg-zinc-950/50 text-slate-900 dark:text-zinc-100 outline-none cursor-default font-medium appearance-none"} value={test.category_id || ""} onChange={e => setTest({...test, category_id: e.target.value})}>
                     <option value="">-- None --</option>
                     {filteredCategories.map(c => <option key={c.id} value={c.id}>{c.name} - {c.goal_year || 'Not Set'}</option>)}
                   </select>
@@ -460,21 +467,21 @@ export default function TestDetailsView() {
 
                 <div>
                   <label className="text-sm font-bold text-slate-700 dark:text-zinc-300">Credits Per Week</label>
-                  <input type="number" step="0.5" min="0.5" required disabled={!isAdmin} className={inputClasses} value={test.credits_per_week} onChange={e => setTest({...test, credits_per_week: parseFloat(e.target.value)})} />
+                  <input type="number" step="0.5" min="0.5" required disabled={!isAdmin} className={isAdmin ? inputClasses : "w-full mt-1 p-2.5 border border-transparent rounded-lg bg-slate-50 dark:bg-zinc-950/50 text-slate-900 dark:text-zinc-100 outline-none cursor-default font-medium appearance-none"} value={test.credits_per_week} onChange={e => setTest({...test, credits_per_week: parseFloat(e.target.value)})} />
                 </div>
 
                 <div>
                   <label className="text-sm font-bold text-slate-700 dark:text-zinc-300">Duration (Weeks)</label>
-                  <input type="number" step="0.5" min="0.5" required disabled={!isAdmin} className={inputClasses} value={test.duration_weeks} onChange={e => setTest({...test, duration_weeks: parseFloat(e.target.value)})} />
+                  <input type="number" step="0.5" min="0.5" required disabled={!isAdmin} className={isAdmin ? inputClasses : "w-full mt-1 p-2.5 border border-transparent rounded-lg bg-slate-50 dark:bg-zinc-950/50 text-slate-900 dark:text-zinc-100 outline-none cursor-default font-medium appearance-none"} value={test.duration_weeks} onChange={e => setTest({...test, duration_weeks: parseFloat(e.target.value)})} />
                 </div>
 
                 <div className="sm:col-span-2">
                   <label className="text-sm font-bold text-slate-700 dark:text-zinc-300 flex items-center gap-1.5">
                     KISS24 Test UUID
-                    {isAdmin && <span className="text-[10px] bg-slate-100 dark:bg-zinc-800 text-slate-500 px-2 py-0.5 rounded-full font-normal">(Required for Report Generation)</span>}
+                    {isManagementRole && <span className="text-[10px] bg-slate-100 dark:bg-zinc-800 text-slate-500 px-2 py-0.5 rounded-full font-normal">(Required for Report Generation)</span>}
                   </label>
                   <input
-                    disabled={!isAdmin}
+                    disabled={!isManagementRole}
                     className={`${inputClasses} font-mono text-sm`}
                     placeholder="e.g. 123e4567-e89b-12d3-a456-426614174000"
                     value={test.kiss24 || ""}
@@ -482,7 +489,7 @@ export default function TestDetailsView() {
                   />
                 </div>
 
-                {isAdmin && (
+                {isManagementRole && (
                   <div className="sm:col-span-2 flex items-center gap-3 p-4 bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-lg cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800/50 transition-colors">
                     <input type="checkbox" className="h-4 w-4 rounded text-indigo-500 border-slate-300" checked={test.is_tentative} onChange={e => setTest({...test, is_tentative: e.target.checked})} />
                     <span className="text-sm font-bold text-slate-700 dark:text-zinc-300">Mark Schedule as Tentative (TBC)</span>
@@ -490,7 +497,7 @@ export default function TestDetailsView() {
                 )}
               </div>
 
-              {isAdmin && (
+              {isManagementRole && (
                 <div className="flex justify-end pt-6 md:pt-8 border-t border-slate-100 dark:border-zinc-800 animate-in fade-in slide-in-from-bottom-2">
                   <button type="submit" className="w-full md:w-auto flex justify-center items-center gap-2 px-6 py-2.5 text-sm font-bold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg shadow-sm transition-colors">
                     <Save size={16} /> Save Changes
@@ -527,7 +534,7 @@ export default function TestDetailsView() {
 
                 {/* 5-Column Grid for Square Buttons */}
                 <div className="grid grid-cols-8 gap-2 md:gap-3">
-                  {isAdmin ? (
+                  {isManagementRole ? (
                     <button
                       onClick={(e) => { e.stopPropagation(); setIsIntroEmailOpen(true); }}
                       title="Send Intro Email"
@@ -538,7 +545,7 @@ export default function TestDetailsView() {
                   ) : (
                     <button
                       disabled
-                      title="Send Intro Email (Admin Only)"
+                      title="Send Intro Email (Admin/Maintainer Only)"
                       className="aspect-square flex flex-col items-center justify-center gap-1 bg-slate-100 dark:bg-zinc-800/50 text-slate-400 dark:text-zinc-600 rounded-xl border border-slate-200 dark:border-zinc-800 p-2 shadow-sm cursor-not-allowed opacity-70"
                     >
                       <CircleFadingPlus size={16} className="shrink-0" />

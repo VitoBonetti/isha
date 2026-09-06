@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, Outlet } from "react-router-dom";
 import { ThemeProvider } from "./components/ThemeProvider";
 import { AppProvider, useAppContext } from "./context/AppContext";
 import Dashboard from "./pages/Dashboard";
@@ -34,6 +34,18 @@ import Kiss24SyncSettings from './pages/settings/Kiss24SyncSettings';
 import AssetCriteriaSettings from './pages/settings/AssetCriteriaSettings';
 import AssetsLayout from './layouts/AssetsLayout';
 
+// --- ROUTE GUARD COMPONENT ---
+// Rejects users who do not have an explicitly allowed role
+const RoleGuard = ({ allowedRoles }: { allowedRoles: string[] }) => {
+  const { currentUser } = useAppContext();
+
+  if (currentUser && !allowedRoles.includes(currentUser.role)) {
+    return <Navigate to="/dashboard" replace />;
+  }
+
+  return <Outlet />;
+};
+
 function AppContent() {
   return (
     <div className="bg-slate-50 dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 min-h-screen transition-colors">
@@ -41,48 +53,66 @@ function AppContent() {
       <div className="fixed bottom-[-20%] right-[-10%] w-[50vw] h-[50vh] rounded-full bg-indigo-500/10 dark:bg-indigo-500/5 blur-[120px] pointer-events-none z-0" />
 
       <Routes>
-        {/* Core Application */}
+        {/* Core Application - Accessible by Everyone */}
         <Route path="/dashboard" element={<Dashboard />} />
-        <Route path="/calendar" element={<CalendarView />} />
         <Route path="/planner" element={<Planner />} />
         <Route path="/tests" element={<TestsView />} />
         <Route path="/tests/:id" element={<TestDetailsView />} />
         <Route path="/tests/:id/analysis" element={<VulnAnalysisView />} />
-        <Route path="/validating" element={<ValidatingVulnsView />} />
+
+        {/* Pentesters, Admins, & Read-Only (Maintainer Blocked) */}
+        <Route element={<RoleGuard allowedRoles={['admin', 'pentester', 'read_only']} />}>
+          <Route path="/calendar" element={<CalendarView />} />
+          <Route path="/validating" element={<ValidatingVulnsView />} />
+        </Route>
 
         {/* Modular Assets & Analytics Area */}
         <Route path="/assets" element={<AssetsLayout />}>
-          <Route index element={<Navigate to="raw" replace />} />
-          <Route path="raw" element={<RawAssetsView />} />
-          <Route path="raw/:id" element={<AssetDetailView />} />
-          <Route path="pool" element={<AssetsView />} />
-          <Route path="analytics" element={<CountriesView />} />
-          <Route path="insights" element={<InsightsView />} />
-          <Route path="documents" element={<DocumentsView />} />
-          <Route path="rag" element={<RagChatPage />} />
-          <Route path="rag/share/:sharedSessionId" element={<RagChatPage />} />
+          {/* Default to pool instead of raw, since maintainers can't access raw */}
+          <Route index element={<Navigate to="pool" replace />} />
+
+          {/* Admin, Maintainer, Read-Only (Pentester Blocked from viewing unassigned inventory) */}
+          <Route element={<RoleGuard allowedRoles={['admin', 'maintainer', 'read_only']} />}>
+            <Route path="pool" element={<AssetsView />} />
+          </Route>
+
+          {/* Admin & Maintainer */}
+          <Route element={<RoleGuard allowedRoles={['admin', 'maintainer']} />}>
+            <Route path="raw/:id" element={<AssetDetailView />} />
+          </Route>
+
+          {/* Admin Only Assets */}
+          <Route element={<RoleGuard allowedRoles={['admin']} />}>
+            <Route path="raw" element={<RawAssetsView />} />
+            <Route path="analytics" element={<CountriesView />} />
+            <Route path="insights" element={<InsightsView />} />
+            <Route path="documents" element={<DocumentsView />} />
+            <Route path="rag" element={<RagChatPage />} />
+            <Route path="rag/share/:sharedSessionId" element={<RagChatPage />} />
+          </Route>
         </Route>
 
         {/* Modular Control Panel */}
-        <Route path="/settings" element={<ControlPanelLayout />}>
-          <Route index element={<ControlPanelHome />} />
-          <Route path="users" element={<UsersSettings />} />
-          <Route path="locations" element={<LocationsSettings />} />
-          <Route path="asset-types" element={<AssetTypesSettings />} />
-          <Route path="asset-criteria" element={<AssetCriteriaSettings />} />
-          <Route path="services" element={<ServicesSettings />} />
-          <Route path="categories" element={<CategoriesSettings />} />
-          <Route path="regions" element={<RegionsSettings />} />
-          <Route path="countries" element={<CountriesSettings />} />
-          <Route path="contacts" element={<ContactsSettings />} />
-          <Route path="kiss24" element={<Kiss24SyncSettings />} />
-          <Route path="servicenow" element={<ServiceNowSyncSettings />} />
-          <Route path="reconciliation" element={<AssetReconciliationView />} />
-          <Route path="api-keys" element={<ApiKeysSettings />} />
-          <Route path="logs" element={<SystemLogsSettings />} />
-          <Route path="danger" element={<DangerZoneSettings />} />
+        <Route element={<RoleGuard allowedRoles={['admin']} />}>
+          <Route path="/settings" element={<ControlPanelLayout />}>
+            <Route index element={<ControlPanelHome />} />
+            <Route path="users" element={<UsersSettings />} />
+            <Route path="locations" element={<LocationsSettings />} />
+            <Route path="asset-types" element={<AssetTypesSettings />} />
+            <Route path="asset-criteria" element={<AssetCriteriaSettings />} />
+            <Route path="services" element={<ServicesSettings />} />
+            <Route path="categories" element={<CategoriesSettings />} />
+            <Route path="regions" element={<RegionsSettings />} />
+            <Route path="countries" element={<CountriesSettings />} />
+            <Route path="contacts" element={<ContactsSettings />} />
+            <Route path="kiss24" element={<Kiss24SyncSettings />} />
+            <Route path="servicenow" element={<ServiceNowSyncSettings />} />
+            <Route path="reconciliation" element={<AssetReconciliationView />} />
+            <Route path="api-keys" element={<ApiKeysSettings />} />
+            <Route path="logs" element={<SystemLogsSettings />} />
+            <Route path="danger" element={<DangerZoneSettings />} />
+          </Route>
         </Route>
-
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
     </div>

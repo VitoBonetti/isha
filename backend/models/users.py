@@ -15,6 +15,7 @@ class Users(Base):
     name = Column(String(255), nullable=False)
     role = Column(String(50), nullable=False)
     location_id = Column(UUID(as_uuid=True), ForeignKey("locations.id", ondelete='SET NULL'), nullable=True)
+    service_lane_id = Column(UUID(as_uuid=True), ForeignKey("services_lanes.id", ondelete='SET NULL'), nullable=True)
     base_capacity = Column(Float, default=1.0)
     start_week = Column(Integer, default=1)
     start_year = Column(Integer, default=2024)
@@ -30,6 +31,7 @@ class Users(Base):
     events = relationship("Events", back_populates="users")
     notifications = relationship("Notifications", back_populates="users")
     rag_chat_logs = relationship("RagChatLogs", back_populates="users")
+    service_lane = relationship("ServiceLanes")
 
 
 class ApiKeys(Base):

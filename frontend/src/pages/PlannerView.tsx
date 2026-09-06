@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import toast from 'react-hot-toast';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import type { DropResult, DragStart } from '@hello-pangea/dnd';
@@ -91,15 +91,32 @@ export default function PlannerView({
   const [searchQuery, setSearchQuery] = useState('');
   const [highlightMine, setHighlightMine] = useState(false);
 
+  // Maintainer Scoping: Filter visible services strictly for maintainers
+  const visibleServices = useMemo(() => {
+    if (!boardData?.services) return [];
+    if (currentUser?.role === 'maintainer' && currentUser?.service_lane_id) {
+      return boardData.services.filter(s => String(s.id) === String(currentUser.service_lane_id));
+    }
+    return boardData.services;
+  }, [boardData?.services, currentUser]);
+
   // Mobile View Nav Tracking
-  const [mobileSelectedServiceId, setMobileSelectedServiceId] = useState<string>(() => boardData?.services?.[0]?.id || '');
+  const [mobileSelectedServiceId, setMobileSelectedServiceId] = useState<string>(() => visibleServices[0]?.id || '');
   const [mobileActiveWeekIndex, setMobileActiveWeekIndex] = useState(0);
+
+  useEffect(() => {
+    if (visibleServices.length > 0 && (!mobileSelectedServiceId || !visibleServices.some(s => s.id === mobileSelectedServiceId))) {
+      setMobileSelectedServiceId(visibleServices[0].id);
+    }
+  }, [visibleServices, mobileSelectedServiceId]);
 
   const currentRealWeek = getISOWeek(new Date());
   const currentRealYear = new Date().getFullYear();
 
   const [secretTarget, setSecretTarget] = useState<Test | null>(null);
   const [secretConfirmOpen, setSecretConfirmOpen] = useState<Test | null>(null);
+
+  const isManagementRole = ['admin', 'maintainer'].includes(currentUser?.role || '');
 
   const handleDragStart = (start: DragStart) => {
     const { draggableId, source } = start;
@@ -118,7 +135,6 @@ export default function PlannerView({
 
   const handleMobileSchedule = async (testId: string, weekNum: number) => {
     try {
-      // Fake drop result to reuse onDragEnd logic without changing parent
       onDragEnd({
         destination: { droppableId: `${mobileSelectedServiceId}_${weekNum}`, index: 0 },
         source: { droppableId: 'backlog', index: 0 },
@@ -127,7 +143,7 @@ export default function PlannerView({
         mode: 'FLUID',
         reason: 'DROP'
       });
-      setIsBacklogOpen(false); // Auto close backlog on mobile after schedule
+      setIsBacklogOpen(false);
     } catch (err) {
       console.error(err);
     }
@@ -137,7 +153,7 @@ export default function PlannerView({
     return <div className="p-12 text-slate-500 font-bold text-center mt-20">Loading board architecture...</div>;
   }
 
-  const selectedMobileService = boardData.services.find(s => s.id === mobileSelectedServiceId) || boardData.services[0];
+  const selectedMobileService = visibleServices.find(s => s.id === mobileSelectedServiceId) || visibleServices[0];
   const activeMobileWeek = displayWeeks[mobileActiveWeekIndex] || displayWeeks[0];
 
   const isTestActiveInCell = (test: any, checkWeek: number, checkYear: number) => {
@@ -218,7 +234,7 @@ export default function PlannerView({
               </div>
             </div>
 
-            {currentUser?.role === 'admin' && (
+            {isManagementRole && (
               <div className="flex items-center gap-2">
                 <button className="px-3 md:px-4 py-1.5 text-[11px] md:text-xs font-bold text-slate-700 dark:text-zinc-300 bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 rounded-lg transition-colors" onClick={() => setIsBacklogOpen(!isBacklogOpen)}>
                   {isBacklogOpen ? 'Close Backlog' : 'Backlog'}
@@ -275,7 +291,7 @@ export default function PlannerView({
                 </tr>
               </thead>
               <tbody>
-                {boardData.services.map(service => (
+                {visibleServices.map(service => (
                   <tr key={service.id} style={{ backgroundColor: getTintedBg(service.theme_color) }}>
 
                     <td className="px-4 py-3 font-bold text-slate-900 dark:text-zinc-100 border-b border-r-2 border-slate-300 dark:border-zinc-700 sticky left-0 z-[30] bg-slate-50/95 dark:bg-zinc-900/95 backdrop-blur-xl shadow-[2px_0_5px_rgba(0,0,0,0.05)]">
@@ -323,7 +339,7 @@ export default function PlannerView({
                                       <span className="text-sm font-black text-amber-600 dark:text-amber-500 uppercase tracking-widest opacity-90 drop-shadow-sm">
                                          Placeholder
                                       </span>
-                                      {currentUser?.role === 'admin' && (
+                                      {isManagementRole && (
                                         <button
                                           onClick={(e) => { e.stopPropagation(); handleRemovePlaceholder(p.id); }}
                                           className="absolute top-2 right-2 text-amber-600/60 hover:text-red-500 hover:bg-white dark:hover:bg-zinc-900 opacity-0 group-hover/ph:opacity-100 transition-all rounded p-1.5 shadow-sm"
@@ -351,8 +367,6 @@ export default function PlannerView({
                                   const progressColor = percentage >= 100 ? 'bg-emerald-500' : percentage > 70 ? 'bg-blue-500' : 'bg-orange-500';
 
                                   const renderQualityAndTeam = () => {
-                                    // 1. Determine Operational Leader for this entire test
-                                    // By looking at ALL assignments for the test, the leader is consistent across multi-week tests
                                     const testAllAssignments = boardData.assignments.filter(a => a.test_id === test.id);
                                     const operationalLeaderId = testAllAssignments.length > 0 ? testAllAssignments[0].user_id : null;
 
@@ -372,7 +386,6 @@ export default function PlannerView({
                                             const isMe = String(a.user_id) === String(currentUser?.id);
                                             const isLeader = String(a.user_id) === String(operationalLeaderId);
 
-                                            // 2. Dynamic styling for the Operational Leader
                                             let badgeClasses = "text-[10px] flex items-center gap-1 px-1.5 py-0.5 rounded-md transition-all ";
 
                                             if (isMe) {
@@ -426,32 +439,32 @@ export default function PlannerView({
                                               </div>
 
                                               {renderQualityAndTeam()}
-                                              {/* Action Menu (Accessible by Pentesters & Admins) */}
+                                              {/* Action Menu (Accessible by Management Roles & Pentesters) */}
                                               {currentUser?.role !== 'read_only' && (
                                               <div className="absolute top-0 left-[calc(100%-16px)] pl-4 opacity-0 group-hover:opacity-100 transition-opacity z-[100] pointer-events-none group-hover:pointer-events-auto">
                                                 <div className="bg-white/95 dark:bg-zinc-800/95 backdrop-blur-xl rounded-xl shadow-2xl border border-slate-200 dark:border-zinc-700 p-1.5 w-max">
                                                   <div className="grid grid-cols-4 gap-1">
                                                     {test.status === 'Completed' ? (
                                                       <>
-                                                        {currentUser?.role === 'admin' && (
+                                                        {isManagementRole && (
                                                           <button title="Undo Done" className="p-1.5 flex items-center justify-center rounded text-slate-400 hover:text-slate-700 dark:hover:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-700 transition-colors" onClick={() => handleRevertComplete(test.id)}><XCircle size={14}/></button>
                                                         )}
                                                         <button title="History" className="p-1.5 flex items-center justify-center rounded text-blue-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors" onClick={() => setHistoryTest(test)}><History size={14}/></button>
                                                       </>
                                                     ) : test.status === 'Stopped' ? (
                                                       <>
-                                                        {currentUser?.role === 'admin' && (
+                                                        {isManagementRole && (
                                                           <button title="Undo Stop" className="p-1.5 flex items-center justify-center rounded text-slate-400 hover:text-slate-700 dark:hover:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-700 transition-colors" onClick={() => handleRevertUnable(test.id)}><XCircle size={14}/></button>
                                                         )}
                                                         <button title="History" className="p-1.5 flex items-center justify-center rounded text-blue-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors" onClick={() => setHistoryTest(test)}><History size={14}/></button>
                                                       </>
                                                     ) : (
                                                       <>
-                                                        {currentUser?.role === 'admin' && (
+                                                        {currentUser?.role === 'admin' && service?.is_active && (
+                                                          <button title="Assign Staff" className="p-1.5 flex items-center justify-center rounded text-blue-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors" onClick={() => setAssignModalTest(test)}><Users size={14}/></button>
+                                                        )}
+                                                        {isManagementRole && (
                                                           <>
-                                                            {service?.is_active && (
-                                                              <button title="Assign Staff" className="p-1.5 flex items-center justify-center rounded text-blue-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors" onClick={() => setAssignModalTest(test)}><Users size={14}/></button>
-                                                            )}
                                                             <button title="Mark Done" className="p-1.5 flex items-center justify-center rounded text-emerald-500 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 transition-colors" onClick={() => handleCompleteTest(test.id)}><CheckCircle size={14}/></button>
                                                             <button title="Stop Test" className="p-1.5 flex items-center justify-center rounded text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors" onClick={() => handleMarkUnable(test.id)}><XCircle size={14}/></button>
                                                             <button title="Unschedule" className="p-1.5 flex items-center justify-center rounded text-amber-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/30 transition-colors" onClick={() => handleUnscheduleTest(test.id)}><CalendarOff size={14}/></button>
@@ -486,7 +499,7 @@ export default function PlannerView({
                                                         </button>
                                                       )
                                                     )}
-                                                    {(test.has_secret || (service?.is_active && service?.auto_provision_workspace)) && (
+                                                    {currentUser?.role !== 'maintainer' && (test.has_secret || (service?.is_active && service?.auto_provision_workspace)) && (
                                                       <button
                                                         onClick={() => setSecretConfirmOpen(test)}
                                                         className={`p-1.5 flex items-center justify-center rounded transition-colors ${test.has_secret ? 'text-indigo-600 bg-indigo-100 dark:bg-indigo-900/30' : 'text-slate-400 hover:text-indigo-500 hover:bg-slate-100 dark:hover:bg-zinc-800'}`}
@@ -563,7 +576,7 @@ export default function PlannerView({
                                   }
                                 })}
                                 {provided.placeholder}
-                                {currentUser?.role === 'admin' && service.auto_provision_workspace && (
+                                {isManagementRole && service.auto_provision_workspace && (
                                   <button
                                     onClick={() => handleAddPlaceholder(service.id, week)}
                                     className="w-full mt-2 py-2.5 rounded-xl border-2 border-dashed border-slate-300 dark:border-zinc-700 text-slate-500 dark:text-zinc-400 flex items-center justify-center gap-1.5 hover:bg-slate-100 dark:hover:bg-zinc-800 hover:text-blue-600 dark:hover:text-blue-400 hover:border-blue-400 dark:hover:border-blue-500 transition-all shadow-sm bg-slate-50/80 dark:bg-zinc-900/80"
@@ -595,7 +608,7 @@ export default function PlannerView({
                 value={mobileSelectedServiceId}
                 onChange={e => setMobileSelectedServiceId(e.target.value)}
               >
-                {boardData.services.map(s => (
+                {visibleServices.map(s => (
                   <option key={s.id} value={s.id}>{s.name}</option>
                 ))}
               </select>
@@ -640,7 +653,7 @@ export default function PlannerView({
                     <span className="text-sm font-black text-amber-600 dark:text-amber-500 uppercase tracking-widest opacity-90 drop-shadow-sm">
                        Placeholder
                     </span>
-                    {currentUser?.role === 'admin' && (
+                    {isManagementRole && (
                       <button
                         onClick={() => handleRemovePlaceholder(p.id)}
                         className="absolute top-2 right-2 text-amber-600/60 hover:text-red-500 hover:bg-white dark:hover:bg-zinc-900 transition-all rounded p-1.5 shadow-sm"
@@ -691,25 +704,25 @@ export default function PlannerView({
                       <div className="pl-2 w-full flex flex-wrap gap-2 border-t border-slate-100 dark:border-zinc-800 pt-3 mt-3">
                         {test.status === 'Completed' ? (
                           <>
-                            {currentUser?.role === 'admin' && (
+                            {isManagementRole && (
                               <button title="Undo Done" className="p-2 flex items-center justify-center rounded-lg text-slate-500 bg-slate-100 dark:bg-zinc-800" onClick={() => handleRevertComplete(test.id)}><XCircle size={14}/></button>
                             )}
                             <button title="History" className="p-2 flex items-center justify-center rounded-lg text-blue-500 bg-blue-50 dark:bg-blue-900/20" onClick={() => setHistoryTest(test)}><History size={14}/></button>
                           </>
                         ) : test.status === 'Stopped' ? (
                           <>
-                            {currentUser?.role === 'admin' && (
+                            {isManagementRole && (
                               <button title="Undo Stop" className="p-2 flex items-center justify-center rounded-lg text-slate-500 bg-slate-100 dark:bg-zinc-800" onClick={() => handleRevertUnable(test.id)}><XCircle size={14}/></button>
                             )}
                             <button title="History" className="p-2 flex items-center justify-center rounded-lg text-blue-500 bg-blue-50 dark:bg-blue-900/20" onClick={() => setHistoryTest(test)}><History size={14}/></button>
                           </>
                         ) : (
                           <>
-                            {currentUser?.role === 'admin' && (
+                            {currentUser?.role === 'admin' && selectedMobileService?.is_active && (
+                              <button title="Assign Staff" className="p-2 flex items-center justify-center rounded-lg text-blue-600 bg-blue-50 dark:bg-blue-900/20" onClick={() => setAssignModalTest(test)}><Users size={14}/></button>
+                            )}
+                            {isManagementRole && (
                               <>
-                                {selectedMobileService?.is_active && (
-                                  <button title="Assign Staff" className="p-2 flex items-center justify-center rounded-lg text-blue-600 bg-blue-50 dark:bg-blue-900/20" onClick={() => setAssignModalTest(test)}><Users size={14}/></button>
-                                )}
                                 <button title="Mark Done" className="p-2 flex items-center justify-center rounded-lg text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20" onClick={() => handleCompleteTest(test.id)}><CheckCircle size={14}/></button>
                                 <button title="Stop Test" className="p-2 flex items-center justify-center rounded-lg text-red-600 bg-red-50 dark:bg-red-900/20" onClick={() => handleMarkUnable(test.id)}><XCircle size={14}/></button>
                                 <button title="Unschedule" className="p-2 flex items-center justify-center rounded-lg text-amber-600 bg-amber-50 dark:bg-amber-900/20" onClick={() => handleUnscheduleTest(test.id)}><CalendarOff size={14}/></button>
@@ -722,11 +735,11 @@ export default function PlannerView({
                         {test.drive_folder_url ? (
                           <a href={test.drive_folder_url} target="_blank" rel="noopener noreferrer" className="p-2 flex items-center justify-center rounded-lg text-blue-600 bg-blue-50 dark:bg-blue-900/20"><FolderOpen size={14} /></a>
                         ) : (
-                          currentUser?.role === 'admin' && selectedMobileService?.auto_provision_workspace && (
+                          currentUser?.role !== 'read_only' && selectedMobileService?.auto_provision_workspace && (
                             <button className="p-2 flex items-center justify-center rounded-lg text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20" onClick={(e) => { e.stopPropagation(); handleCreateWorkspace(test.id); }}><FolderPlus size={14} /></button>
                           )
                         )}
-                        {(test.has_secret || (selectedMobileService?.is_active && selectedMobileService?.auto_provision_workspace)) && (
+                        {currentUser?.role !== 'maintainer' && (test.has_secret || (selectedMobileService?.is_active && selectedMobileService?.auto_provision_workspace)) && (
                           <button onClick={() => setSecretConfirmOpen(test)} className={`p-2 flex items-center justify-center rounded-lg ${test.has_secret ? 'text-indigo-600 bg-indigo-100 dark:bg-indigo-900/30' : 'text-slate-500 bg-slate-100 dark:bg-zinc-800'}`}>
                             {test.has_secret ? <Lock size={14} /> : <LockOpen size={14} />}
                           </button>
@@ -770,7 +783,7 @@ export default function PlannerView({
                               className="p-2 flex items-center justify-center rounded-lg text-teal-600 bg-teal-50 dark:bg-teal-900/20"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                toast.error("Verify Findings is still under development.");
+                                handleVerifyFindings(test);
                               }}
                             >
                               <ListChecks size={14}/>
@@ -789,7 +802,7 @@ export default function PlannerView({
                 </div>
               )}
 
-              {currentUser?.role === 'admin' && selectedMobileService?.auto_provision_workspace && (
+              {isManagementRole && selectedMobileService?.auto_provision_workspace && (
                 <button
                   onClick={() => handleAddPlaceholder(selectedMobileService.id, activeMobileWeek)}
                   className="w-full mt-2 py-3 rounded-xl border-2 border-dashed border-slate-300 dark:border-zinc-700 text-slate-500 dark:text-zinc-400 flex items-center justify-center gap-1.5 hover:bg-slate-100 dark:hover:bg-zinc-800 hover:text-blue-600 dark:hover:text-blue-400 hover:border-blue-400 dark:hover:border-blue-500 transition-all shadow-sm bg-slate-50/80 dark:bg-zinc-900/80"
@@ -809,7 +822,12 @@ export default function PlannerView({
                   <div className="flex items-center gap-2">
                     <h3 className="font-bold text-sm text-slate-900 dark:text-zinc-100">Backlog Queue</h3>
                     <span className="bg-slate-200 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 px-2 py-0.5 rounded-full text-xs font-bold">
-                      {boardData.backlog.filter(t => backlogFilter === 'All' || String(t.service_lane_id) === String(backlogFilter)).length}
+                      {boardData.backlog.filter(t => {
+                        if (currentUser?.role === 'maintainer' && currentUser?.service_lane_id) {
+                          if (String(t.service_lane_id) !== String(currentUser.service_lane_id)) return false;
+                        }
+                        return backlogFilter === 'All' || String(t.service_lane_id) === String(backlogFilter);
+                      }).length}
                     </span>
                   </div>
                   <button onClick={() => setIsBacklogOpen(false)} className="text-slate-400 hover:text-slate-700 dark:hover:text-zinc-200 transition-colors p-2 md:p-1 bg-slate-100 md:bg-transparent dark:bg-zinc-800 md:dark:bg-transparent rounded-full md:rounded-none">
@@ -818,25 +836,30 @@ export default function PlannerView({
                 </div>
 
                 <select className="w-full p-2 bg-white dark:bg-zinc-900 border border-slate-300 dark:border-zinc-700 rounded-lg text-xs font-medium text-slate-700 dark:text-zinc-300 focus:ring-2 focus:ring-blue-500 outline-none" value={backlogFilter} onChange={e => setBacklogFilter(e.target.value)}>
-                  <option value="All">All Services</option>
-                  {boardData.services.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  {currentUser?.role !== 'maintainer' && <option value="All">All Services</option>}
+                  {visibleServices.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                 </select>
               </div>
 
               <div className="flex-1 overflow-y-auto p-4 bg-slate-50/50 dark:bg-zinc-950/30">
                 <Droppable droppableId="backlog" direction="vertical" isDropDisabled={['pentester', 'read_only'].includes(currentUser?.role)}>
                   {(provided) => {
-                    const sortedBacklog = [...boardData.backlog].filter(t => backlogFilter === 'All' || String(t.service_lane_id) === String(backlogFilter))
+                    const sortedBacklog = [...boardData.backlog].filter(t => {
+                        if (currentUser?.role === 'maintainer' && currentUser?.service_lane_id) {
+                          if (String(t.service_lane_id) !== String(currentUser.service_lane_id)) return false;
+                        }
+                        return backlogFilter === 'All' || String(t.service_lane_id) === String(backlogFilter);
+                      })
                       .sort((a, b) => {
-                        const sA = boardData.services.find(s => s.id === a.service_lane_id)?.name || '';
-                        const sB = boardData.services.find(s => s.id === b.service_lane_id)?.name || '';
+                        const sA = visibleServices.find(s => s.id === a.service_lane_id)?.name || '';
+                        const sB = visibleServices.find(s => s.id === b.service_lane_id)?.name || '';
                         return sA.localeCompare(sB);
                       });
 
                     return (
                       <div ref={provided.innerRef} {...provided.droppableProps} className="min-h-full">
                         {sortedBacklog.map((test, index) => {
-                          const service = boardData.services.find(s => s.id === test.service_lane_id);
+                          const service = visibleServices.find(s => s.id === test.service_lane_id) || boardData.services.find(s => s.id === test.service_lane_id);
                           const isSearchActive = searchQuery.trim().length > 0;
                           const testMatchesSearch = !isSearchActive || (test.name || '').toLowerCase().includes(searchQuery.toLowerCase());
 
@@ -854,7 +877,7 @@ export default function PlannerView({
                                   <div className="flex justify-between items-center text-[10px] text-slate-500 dark:text-zinc-400 font-medium mt-1">
                                     <span>{test.credits} cr • {test.duration} wk</span>
 
-                                    {currentUser?.role === 'admin' && (
+                                    {isManagementRole && (
                                       <div className="flex gap-1.5 md:opacity-0 md:group-hover:opacity-100 transition-opacity flex-wrap justify-end">
                                         {/* Mobile Schedule Button */}
                                         <button

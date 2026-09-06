@@ -2,29 +2,18 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import toast from 'react-hot-toast';
 import { useSettings } from '../../hooks/useSettings';
+import type { UserFormState} from "../../types/board";
 import ConfirmModal from '../../components/Modals/ConfirmModal';
 import {
   Users, Plus, Edit2, Trash2, X, ChevronsUpDown, ChevronUp, ChevronDown
 } from 'lucide-react';
 
-interface UserFormState {
-  email: string;
-  name: string;
-  role: string;
-  base_capacity: number;
-  location_id: string;
-  start_week: number;
-  start_year: number;
-  end_week: string | number;
-  end_year: string | number;
-  kiss24_uuid: string;
-  kiss24_api_key: string;
-}
 
 const defaultUserForm: UserFormState = {
   email: '',
   name: '',
   role: 'read_only',
+  service_lane_id: '',
   base_capacity: 1.0,
   location_id: '',
   start_week: 1,
@@ -37,6 +26,7 @@ const defaultUserForm: UserFormState = {
 
 export default function UsersSettings() {
   const { users, locations, handleSave, handleDelete, isLoading } = useSettings();
+  const [services, setServices] = useState<any[]>([]);
 
   // Panel & Edit State
   const [isPanelOpen, setIsPanelOpen] = useState(false);
@@ -59,6 +49,10 @@ export default function UsersSettings() {
   useEffect(() => {
     axios.get('/api/users/system/time')
       .then(res => setServerTime(res.data))
+      .catch(console.error);
+
+    axios.get('/api/services/')
+      .then(res => setServices(res.data))
       .catch(console.error);
   }, []);
 
@@ -91,6 +85,7 @@ export default function UsersSettings() {
       email: u.email || '',
       name: u.name || '',
       role: u.role || 'read_only',
+      service_lane_id: u.service_lane_id || '',
       base_capacity: u.base_capacity || 1.0,
       location_id: u.location_id || '',
       start_week: u.start_week || 1,
@@ -111,9 +106,15 @@ export default function UsersSettings() {
 
   const submitUser = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (userForm.role === 'maintainer' && !userForm.service_lane_id) {
+      toast.error("Please select a Service Lane for the Maintainer role.");
+      return;
+    }
+
     const payload = {
       ...userForm,
       location_id: userForm.location_id === '' ? null : userForm.location_id,
+      service_lane_id: userForm.role === 'maintainer' && userForm.service_lane_id !== '' ? userForm.service_lane_id : null,
       end_week: userForm.end_week === '' ? null : parseInt(userForm.end_week as string),
       end_year: userForm.end_year === '' ? null : parseInt(userForm.end_year as string)
     };
@@ -129,6 +130,10 @@ export default function UsersSettings() {
       await handleDelete('/api/users/', deleteModal.id);
       setDeleteModal(null);
     }
+  };
+
+  const getServiceLaneName = (laneId: string) => {
+    return services.find(s => s.id === laneId)?.name || 'Unknown Lane';
   };
 
   const displayUsers = users?.filter(u => userTab === 'active' ? !isOffboarded(u) : isOffboarded(u)) || [];
@@ -230,6 +235,11 @@ export default function UsersSettings() {
                     <span className="px-2.5 py-0.5 rounded-full bg-slate-100 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 text-[11px] font-extrabold uppercase tracking-wider text-slate-700 dark:text-zinc-300">
                       {u.role.replace('_', ' ')}
                     </span>
+                    {u.role === 'maintainer' && u.service_lane_id && (
+                      <span className="px-2 py-0.5 rounded bg-purple-50 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 text-[10px] font-bold border border-purple-200 dark:border-purple-800">
+                        {getServiceLaneName(u.service_lane_id)}
+                      </span>
+                    )}
                     {u.end_year && (
                       <span className="px-2 py-0.5 rounded-full bg-red-100 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-[10px] font-extrabold uppercase tracking-wider text-red-700 dark:text-red-400">
                         Offboarded (W{u.end_week}/{u.end_year})
@@ -277,9 +287,16 @@ export default function UsersSettings() {
                 </div>
               </div>
               <div className="flex justify-between items-center bg-slate-50 dark:bg-zinc-950 p-2.5 rounded-xl border border-slate-100 dark:border-zinc-800">
-                <span className="px-2.5 py-0.5 rounded-full bg-white dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 text-[10px] font-extrabold uppercase tracking-wider text-slate-700 dark:text-zinc-300">
-                  {u.role.replace('_', ' ')}
-                </span>
+                <div className="flex flex-col items-start gap-1">
+                  <span className="px-2.5 py-0.5 rounded-full bg-white dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 text-[10px] font-extrabold uppercase tracking-wider text-slate-700 dark:text-zinc-300">
+                    {u.role.replace('_', ' ')}
+                  </span>
+                  {u.role === 'maintainer' && u.service_lane_id && (
+                    <span className="px-2 py-0.5 rounded bg-purple-50 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 text-[10px] font-bold border border-purple-200 dark:border-purple-800">
+                      {getServiceLaneName(u.service_lane_id)}
+                    </span>
+                  )}
+                </div>
                 <span className="font-bold text-xs text-slate-700 dark:text-zinc-300">{u.base_capacity} cr/wk</span>
               </div>
               <div className="flex justify-end gap-2 mt-1">
@@ -395,13 +412,33 @@ export default function UsersSettings() {
                   <select
                     className={inputClasses}
                     value={userForm.role}
-                    onChange={e => setUserForm({ ...userForm, role: e.target.value })}
+                    onChange={e => setUserForm({ ...userForm, role: e.target.value, service_lane_id: e.target.value === 'maintainer' ? userForm.service_lane_id : '' })}
                   >
                     <option value="read_only">Read Only</option>
                     <option value="pentester">Pentester</option>
+                    <option value="maintainer">Maintainer</option>
                     <option value="admin">Admin</option>
                   </select>
                 </div>
+
+                {userForm.role === 'maintainer' && (
+                  <div className="animate-in fade-in slide-in-from-top-1">
+                    <label className="text-xs font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider flex items-center gap-1">
+                      Assigned Service Lane
+                    </label>
+                    <select
+                      className={`${inputClasses} border-blue-300 dark:border-blue-800 focus:ring-blue-500`}
+                      value={userForm.service_lane_id}
+                      onChange={e => setUserForm({ ...userForm, service_lane_id: e.target.value })}
+                      required
+                    >
+                      <option value="">-- Select Service Lane --</option>
+                      {services.map(s => (
+                        <option key={s.id} value={s.id}>{s.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
 
                 <div>
                   <label className="text-xs font-bold text-slate-700 dark:text-zinc-300 uppercase tracking-wider">

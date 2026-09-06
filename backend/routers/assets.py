@@ -7,7 +7,13 @@ import anyio
 import sys
 from datetime import datetime
 from database import get_db_cursor, db_cursor_context, SessionLocal
-from routers.auth import get_current_user, require_admin
+from routers.auth import (
+    get_current_user,
+    require_admin,
+    require_write_access,
+    require_maintainer_or_admin,
+    verify_lane_access
+)
 from schema import RawAssetCreate, AssetBase, PromoteAssetRequest, BulkAssetRequest, AssetTypeBase, BulkServiceUpdateRequest, SnowSyncRequest
 from starlette import status
 from websockets_manager import manager
@@ -150,7 +156,7 @@ def get_raw_assets(
         business_critical: Optional[int] = None, status: Optional[str] = None,
         is_kpi: Optional[bool] = None, is_critical: Optional[bool] = None,
         sort_by: Optional[str] = "name", sort_dir: Optional[str] = "asc",
-        current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)
+        current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)
 ):
     """
     Get all raw assets available in the database.
@@ -295,7 +301,21 @@ def get_single_raw_asset(raw_id: str, current_user: dict = Depends(get_current_u
     """
     Endpoint to Get Raw Asset.
     """
-    cursor.execute("""
+    where_clauses = ["r.id = %s"]
+    params = [raw_id]
+
+    # 1. Restrict maintainers to their assigned service lane
+    if current_user.get('role') == 'maintainer':
+        lane_id = current_user.get('service_lane_id')
+        if lane_id:
+            where_clauses.append("r.service_forecast_id = %s")
+            params.append(str(lane_id))
+        else:
+            where_clauses.append("r.service_forecast_id = '00000000-0000-0000-0000-000000000000'")
+
+    where_str = "WHERE " + " AND ".join(where_clauses)
+
+    cursor.execute(f"""
         SELECT r.id, r.name, r.description, r.business_critical, r.confidentiality_rating, 
             r.integrity_rating, r.availability_rating, r.country_id, r.service_forecast_id, 
             r.category_id, r.asset_type_id, r.facing_internet, r.duplicate_allowed, r.create_date, r.update_date,
@@ -305,8 +325,8 @@ def get_single_raw_asset(raw_id: str, current_user: dict = Depends(get_current_u
         FROM raw_assets r
         LEFT JOIN assets a ON r.id = a.raw_asset_id
         LEFT JOIN raw_assets_snow_metadata m ON r.id = m.correlation_id
-        WHERE r.id = %s
-    """, (raw_id,))
+        {where_str}
+    """, tuple(params))
     row = cursor.fetchone()
     if not row: raise HTTPException(status_code=404, detail="Asset not found")
 
@@ -342,22 +362,18 @@ def get_single_raw_asset(raw_id: str, current_user: dict = Depends(get_current_u
     return asset_data
 
 
-@router.put("/raw/{raw_id}", summary="[Admin Only]")
+@router.put("/raw/{raw_id}", summary="[Admin/Maintainer]")
 def update_raw_asset(raw_id: str, asset: RawAssetCreate, background_tasks: BackgroundTasks,
-                     current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+                     current_user: dict = Depends(require_maintainer_or_admin), cursor=Depends(get_db_cursor)):
     """
-    Admin-only endpoint to Update Raw Asset.
-    1. Fetch the OLD state (including relational names via JOINs) and Unpack old state and handle NULLs gracefully
-    2. Fetch the NEW state names based on the submitted UUIDs
-    3. Perform the Database Update
-    4. Supercharged Diff Engine
-    5. Standardized Update Log
+    Admin or Maintainer endpoint to Update Raw Asset.
+    Maintainers are strictly restricted to updating team_note and kiss24_asset_id.
     """
-    # 1. Fetch the OLD state (including relational names via JOINs)
+    # 1. Fetch the OLD state (We added r.service_forecast_id to the SELECT)
     cursor.execute("""
             SELECT r.name, r.facing_internet, r.duplicate_allowed, r.confidentiality_rating, r.integrity_rating, r.availability_rating,
                    c.name as country_name, s.name as service_name, cat.name as category_name, at.name as type_name,
-                   r.snow_number, r.team_note, r.kiss24_asset_id, r.is_kpi, r.is_critical, r.snow_active
+                   r.snow_number, r.team_note, r.kiss24_asset_id, r.is_kpi, r.is_critical, r.snow_active, r.service_forecast_id
             FROM raw_assets r
             LEFT JOIN countries c ON r.country_id = c.id
             LEFT JOIN services_lanes s ON r.service_forecast_id = s.id
@@ -369,52 +385,90 @@ def update_raw_asset(raw_id: str, asset: RawAssetCreate, background_tasks: Backg
     if not old_state:
         raise HTTPException(status_code=404, detail="Asset not found")
 
-    # Unpack old state and handle NULLs gracefully
-    old_name, old_internet, old_duplicate_allowed, old_c, old_i, old_a, old_country, old_service, old_category, old_type, old_snow_number, old_team_note, old_kiss24_asset_id, old_is_kpi, old_is_critical, old_snow_active = old_state
-    old_country = old_country or "None"
-    old_service = old_service or "None"
-    old_category = old_category or "None"
-    old_type = old_type or "None"
+    # Unpack old state
+    old_name, old_internet, old_duplicate_allowed, old_c, old_i, old_a, old_country, old_service, old_category, old_type, old_snow_number, old_team_note, old_kiss24_asset_id, old_is_kpi, old_is_critical, old_snow_active, old_service_id = old_state
 
-    # 2. Fetch the NEW state names based on the submitted UUIDs
-    new_country, new_service, new_category, new_type = "None", "None", "None", "None"
+    # 2. Verify lane access (Blocks maintainers from editing assets outside their lane)
+    verify_lane_access(current_user, str(old_service_id))
 
-    c_id = str(asset.country_id) if asset.country_id else None
-    s_id = str(asset.service_forecast_id) if asset.service_forecast_id else None
-    cat_id = str(asset.category_id) if asset.category_id else None
-    at_id = str(asset.asset_type_id) if asset.asset_type_id else None
+    changes = []
 
-    if c_id:
-        cursor.execute("SELECT name FROM countries WHERE id = %s", (c_id,))
-        res = cursor.fetchone()
-        if res: new_country = res[0]
-    if s_id:
-        cursor.execute("SELECT name FROM services_lanes WHERE id = %s", (s_id,))
-        res = cursor.fetchone()
-        if res: new_service = res[0]
-    if cat_id:
-        cursor.execute("SELECT name FROM service_categories WHERE id = %s", (cat_id,))
-        res = cursor.fetchone()
-        if res: new_category = res[0]
-    if at_id:
-        cursor.execute("SELECT name FROM asset_types WHERE id = %s", (at_id,))
-        res = cursor.fetchone()
-        if res: new_type = res[0]
+    # 3A. STRICT MAINTAINER UPDATE (Only touches 2 fields)
+    if current_user.get('role') == 'maintainer':
+        cursor.execute("""
+            UPDATE raw_assets 
+            SET team_note=%s, kiss24_asset_id=%s, update_date=CURRENT_TIMESTAMP
+            WHERE id=%s
+        """, (asset.team_note, asset.kiss24_asset_id, raw_id))
 
-    # 3. Perform the Database Update
-    cursor.execute("""
-        UPDATE raw_assets 
-        SET name=%s, description=%s, business_critical=%s, 
-            confidentiality_rating=%s, integrity_rating=%s, availability_rating=%s, 
-            country_id=%s, service_forecast_id=%s, category_id=%s, asset_type_id=%s, facing_internet=%s, duplicate_allowed=%s,
-            snow_number=%s, team_note=%s, kiss24_asset_id=%s, is_kpi=%s, is_critical=%s, snow_active=%s,  update_date=CURRENT_TIMESTAMP
-        WHERE id=%s
-    """, (
-        asset.name, asset.description, asset.business_critical,
-        asset.confidentiality_rating, asset.integrity_rating, asset.availability_rating,
-        c_id, s_id, cat_id, at_id, asset.facing_internet, asset.duplicate_allowed, asset.snow_number, asset.team_note, asset.kiss24_asset_id,
-        asset.is_kpi, asset.is_critical, asset.snow_active, raw_id
-    ))
+        if old_team_note != asset.team_note: changes.append(f"Team Note was updated")
+        if old_kiss24_asset_id != asset.kiss24_asset_id: changes.append(f"Kiss 24 asset uuid was updated")
+
+    # 3B. FULL ADMIN UPDATE (Touches all fields)
+    else:
+        new_country, new_service, new_category, new_type = "None", "None", "None", "None"
+        old_country, old_service, old_category, old_type = old_country or "None", old_service or "None", old_category or "None", old_type or "None"
+
+        c_id = str(asset.country_id) if asset.country_id else None
+        s_id = str(asset.service_forecast_id) if asset.service_forecast_id else None
+        cat_id = str(asset.category_id) if asset.category_id else None
+        at_id = str(asset.asset_type_id) if asset.asset_type_id else None
+
+        if c_id:
+            cursor.execute("SELECT name FROM countries WHERE id = %s", (c_id,))
+            res = cursor.fetchone()
+            if res: new_country = res[0]
+        if s_id:
+            cursor.execute("SELECT name FROM services_lanes WHERE id = %s", (s_id,))
+            res = cursor.fetchone()
+            if res: new_service = res[0]
+        if cat_id:
+            cursor.execute("SELECT name FROM service_categories WHERE id = %s", (cat_id,))
+            res = cursor.fetchone()
+            if res: new_category = res[0]
+        if at_id:
+            cursor.execute("SELECT name FROM asset_types WHERE id = %s", (at_id,))
+            res = cursor.fetchone()
+            if res: new_type = res[0]
+
+        cursor.execute("""
+            UPDATE raw_assets 
+            SET name=%s, description=%s, business_critical=%s, 
+                confidentiality_rating=%s, integrity_rating=%s, availability_rating=%s, 
+                country_id=%s, service_forecast_id=%s, category_id=%s, asset_type_id=%s, facing_internet=%s, duplicate_allowed=%s,
+                snow_number=%s, team_note=%s, kiss24_asset_id=%s, is_kpi=%s, is_critical=%s, snow_active=%s, update_date=CURRENT_TIMESTAMP
+            WHERE id=%s
+        """, (
+            asset.name, asset.description, asset.business_critical,
+            asset.confidentiality_rating, asset.integrity_rating, asset.availability_rating,
+            c_id, s_id, cat_id, at_id, asset.facing_internet, asset.duplicate_allowed, asset.snow_number,
+            asset.team_note, asset.kiss24_asset_id,
+            asset.is_kpi, asset.is_critical, asset.snow_active, raw_id
+        ))
+
+        if old_name != asset.name: changes.append(f"Name: '{old_name}' ➔ '{asset.name}'")
+        if old_type != new_type: changes.append(f"Type: '{old_type}' ➔ '{new_type}'")
+        if old_country != new_country: changes.append(f"Country: '{old_country}' ➔ '{new_country}'")
+        if old_service != new_service: changes.append(f"Service: '{old_service}' ➔ '{new_service}'")
+        if old_category != new_category: changes.append(f"Category: '{old_category}' ➔ '{new_category}'")
+        if old_internet != asset.facing_internet: changes.append(
+            f"Internet Facing: {old_internet} ➔ {asset.facing_internet}")
+        if old_duplicate_allowed != asset.duplicate_allowed: changes.append(
+            f"Allow Duplicates: {old_duplicate_allowed} ➔ {asset.duplicate_allowed}")
+        if old_c != asset.confidentiality_rating: changes.append(f"C-Rating: {old_c} ➔ {asset.confidentiality_rating}")
+        if old_i != asset.integrity_rating: changes.append(f"I-Rating: {old_i} ➔ {asset.integrity_rating}")
+        if old_a != asset.availability_rating: changes.append(f"A-Rating: {old_a} ➔ {asset.availability_rating}")
+        if old_snow_number != asset.snow_number: changes.append(f"SNOW ID: '{old_snow_number}' ➔ '{asset.snow_number}'")
+        if old_team_note != asset.team_note: changes.append(f"Team Note was updated")
+        if old_kiss24_asset_id != asset.kiss24_asset_id: changes.append(f"Kiss 24 asset uuid was updated")
+        if old_is_kpi != asset.is_kpi: changes.append(f"Asset in KPI: {old_is_kpi} ➔ {asset.is_kpi}")
+        if old_is_critical != asset.is_critical: changes.append(
+            f"Critical Asset: {old_is_critical} ➔ {asset.is_critical}")
+        if old_snow_active != asset.snow_active: changes.append(f"Snow Active: {old_snow_active} ➔ {asset.snow_active}")
+
+    # 4. Standardized Update Log
+    details_str = " | ".join(changes) if changes else "Description Updated."
+    insert_asset_history(cursor, raw_id, str(current_user["id"]), "UPDATED", details_str)
 
     log_audit_event(
         user_id=str(current_user["id"]),
@@ -424,36 +478,6 @@ def update_raw_asset(raw_id: str, asset: RawAssetCreate, background_tasks: Backg
         resource_id=str(raw_id),
         details=f"Asset {asset.name} has been updated. ID: {raw_id} ",
     )
-
-    # 4. Supercharged Diff Engine
-    changes = []
-    if old_name != asset.name: changes.append(f"Name: '{old_name}' ➔ '{asset.name}'")
-    if old_type != new_type: changes.append(f"Type: '{old_type}' ➔ '{new_type}'")
-    if old_country != new_country: changes.append(f"Country: '{old_country}' ➔ '{new_country}'")
-    if old_service != new_service: changes.append(f"Service: '{old_service}' ➔ '{new_service}'")
-    if old_category != new_category: changes.append(f"Category: '{old_category}' ➔ '{new_category}'")
-    if old_internet != asset.facing_internet: changes.append(
-        f"Internet Facing: {old_internet} ➔ {asset.facing_internet}")
-    if old_duplicate_allowed != asset.duplicate_allowed: changes.append(
-        f"Allow Duplicates: {old_duplicate_allowed} ➔ {asset.duplicate_allowed}")
-    if old_c != asset.confidentiality_rating: changes.append(f"C-Rating: {old_c} ➔ {asset.confidentiality_rating}")
-    if old_i != asset.integrity_rating: changes.append(f"I-Rating: {old_i} ➔ {asset.integrity_rating}")
-    if old_a != asset.availability_rating: changes.append(f"A-Rating: {old_a} ➔ {asset.availability_rating}")
-
-    if old_snow_number != asset.snow_number: changes.append(f"SNOW ID: '{old_snow_number}' ➔ '{asset.snow_number}'")
-    if old_team_note != asset.team_note: changes.append(f"Team Note was updated")
-    if old_kiss24_asset_id != asset.kiss24_asset_id: changes.append(f"Kiss 24 asset uuid was updated")
-    if old_is_kpi != asset.is_kpi: changes.append(
-        f"Asset in KPI: {old_is_kpi} ➔ {asset.is_kpi}")
-    if old_is_critical != asset.is_critical: changes.append(
-        f"Critical Asset: {old_is_critical} ➔ {asset.is_critical}")
-    if old_snow_active != asset.snow_active: changes.append(
-        f"Snow Active: {old_snow_active} ➔ {asset.snow_active}")
-
-    details_str = " | ".join(changes) if changes else "Description Updated."
-
-    # 5. Standardized Update Log
-    insert_asset_history(cursor, raw_id, str(current_user["id"]), "UPDATED", details_str)
 
     cursor.connection.commit()
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
@@ -953,7 +977,21 @@ def get_active_asset_pool(year: Optional[int] = None, current_user: dict = Depen
     if not year:
         year = datetime.now().year
 
-    cursor.execute('''
+    where_clauses = []
+    params = [year, year, year, year]
+
+    # 1. Restrict maintainers to their assigned service lane
+    if current_user.get('role') == 'maintainer':
+        lane_id = current_user.get('service_lane_id')
+        if lane_id:
+            where_clauses.append("r.service_forecast_id = %s")
+            params.append(str(lane_id))
+        else:
+            where_clauses.append("r.service_forecast_id = '00000000-0000-0000-0000-000000000000'")
+
+    where_str = "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
+
+    cursor.execute(f'''
         SELECT a.id, 
             a.raw_asset_id, 
             r.name, 
@@ -1004,8 +1042,9 @@ def get_active_asset_pool(year: Optional[int] = None, current_user: dict = Depen
         LEFT JOIN services_lanes s ON r.service_forecast_id = s.id
         LEFT JOIN service_categories cat ON r.category_id = cat.id
         LEFT JOIN asset_types at ON r.asset_type_id = at.id
+        {where_str}
         ORDER BY r.name ASC
-    ''', (year, year, year, year))
+    ''', tuple(params))
 
     columns = [col[0] for col in cursor.description]
     return [dict(zip(columns, row)) for row in cursor.fetchall()]
