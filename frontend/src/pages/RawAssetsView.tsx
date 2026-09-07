@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import axios from "axios";
 import AddRawAssetModal from "../components/Modals/AddRawAssetModal";
 import ConfirmModal from "../components/Modals/ConfirmModal";
+import { useAppContext } from "../context/AppContext";
 import { Search, Plus, Filter, ChevronUp, ChevronDown, ChevronsUpDown, Globe, Database, MoveRight } from "lucide-react";
 import toast, { Toaster } from 'react-hot-toast';
 
@@ -19,8 +20,11 @@ interface RawAsset {
 }
 
 export default function RawAssetsView() {
+  const { currentUser } = useAppContext();
   const [assets, setAssets] = useState<RawAsset[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const isReadOnly = currentUser?.role === 'read_only';
 
   // Data Params
   const [page, setPage] = useState(1);
@@ -220,7 +224,9 @@ export default function RawAssetsView() {
               )}
             </div>
           )}
-          <button onClick={() => setShowAddModal(true)} className="w-full sm:w-auto flex justify-center items-center gap-2 px-4 py-2.5 md:py-2 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition-colors font-medium text-sm"><Plus className="h-4 w-4" /> Add Asset</button>
+          {!isReadOnly && (
+            <button onClick={() => setShowAddModal(true)} className="w-full sm:w-auto flex justify-center items-center gap-2 px-4 py-2.5 md:py-2 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition-colors font-medium text-sm"><Plus className="h-4 w-4" /> Add Asset</button>
+          )}
         </div>
 
         {/* Filter Popover - Stackable Grid */}
@@ -273,19 +279,25 @@ export default function RawAssetsView() {
             <table className="hidden md:table w-full text-left text-sm">
               <thead className="bg-slate-50 dark:bg-zinc-800/50 border-b border-slate-200 dark:border-zinc-700">
                 <tr>
-                  <th className="p-4 w-12"><input type="checkbox" className="h-4 w-4 rounded text-emerald-500 border-slate-300" onChange={(e) => { if(e.target.checked) { setSelectedAssets(assets.map(a => a.id)); } else { setSelectedAssets([]); } }} checked={selectedAssets.length === assets.length && assets.length > 0} /></th>
+                  {!isReadOnly && (
+                    <th className="p-4 w-12"><input type="checkbox" className="h-4 w-4 rounded text-emerald-500 border-slate-300" onChange={(e) => { if(e.target.checked) { setSelectedAssets(assets.map(a => a.id)); } else { setSelectedAssets([]); } }} checked={selectedAssets.length === assets.length && assets.length > 0} /></th>
+                  )}
                   <th className="p-4 font-semibold text-slate-500 uppercase cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort("name")}><div className="flex items-center gap-2">Asset Details <SortIcon column="name" /></div></th>
                   <th className="p-4 font-semibold text-slate-500 uppercase cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort("country")}><div className="flex items-center gap-2">Loc. <SortIcon column="country" /></div></th>
                   <th className="p-4 font-semibold text-slate-500 uppercase">Criticality</th>
                   <th className="p-4 font-semibold text-slate-500 uppercase cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort("service")}><div className="flex items-center gap-2">Forecast Lane <SortIcon column="service" /></div></th>
                   <th className="p-4 font-semibold text-slate-500 uppercase cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort("status")}><div className="flex items-center gap-2"><SortIcon column="status" /> Status</div></th>
-                  <th className="p-4 font-semibold text-slate-500 uppercase text-right">Actions</th>
+                  {!isReadOnly && (
+                    <th className="p-4 font-semibold text-slate-500 uppercase text-right">Actions</th>
+                  )}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200 dark:divide-zinc-700">
                 {assets.map((asset) => (
                   <tr key={asset.id} className={`hover:bg-slate-50 dark:hover:bg-zinc-800/30 transition-colors ${selectedAssets.includes(asset.id) ? 'bg-emerald-50 dark:bg-emerald-900/20' : ''}`}>
-                    <td className="p-4"><input type="checkbox" checked={selectedAssets.includes(asset.id)} onChange={() => toggleAssetSelection(asset.id)} className="h-4 w-4 text-emerald-500 rounded border-slate-300" /></td>
+                    {!isReadOnly && (
+                      <td className="p-4"><input type="checkbox" checked={selectedAssets.includes(asset.id)} onChange={() => toggleAssetSelection(asset.id)} className="h-4 w-4 text-emerald-500 rounded border-slate-300" /></td>
+                    )}
                     <td className="p-4 max-w-[200px]">
                       <div className="flex items-center gap-2">
                         <Link to={`/assets/raw/${asset.id}`} state={{ from: '/assets/raw', label: 'Raw Assets' }} className="font-bold text-blue-600 dark:text-blue-400 hover:underline truncate">{asset.name}</Link>
@@ -308,18 +320,20 @@ export default function RawAssetsView() {
                     <td className="p-4 whitespace-nowrap">
                       {asset.is_promoted ? <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-400">In Pool</span> : <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-bold bg-slate-100 dark:bg-zinc-800 text-slate-500 dark:text-zinc-400">Raw</span>}
                     </td>
-                    <td className="p-4 text-right">
-                      {!asset.is_promoted && (
-                        <button
-                          onClick={() => handlePromoteSingle(asset.id)}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-emerald-200 dark:border-emerald-900/50 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 transition-colors text-sm font-bold shadow-sm"
-                          title="Promote to Active Pool"
-                        >
-                          <MoveRight className="h-3.5 w-3.5" />
-                          Promote
-                        </button>
-                      )}
-                    </td>
+                    {!isReadOnly && (
+                      <td className="p-4 text-right">
+                        {!asset.is_promoted && (
+                          <button
+                            onClick={() => handlePromoteSingle(asset.id)}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-emerald-200 dark:border-emerald-900/50 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 transition-colors text-sm font-bold shadow-sm"
+                            title="Promote to Active Pool"
+                          >
+                            <MoveRight className="h-3.5 w-3.5" />
+                            Promote
+                          </button>
+                        )}
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -334,12 +348,14 @@ export default function RawAssetsView() {
 
                     {/* Top Row: Checkbox & Title */}
                     <div className="flex items-start gap-3 w-full">
-                      <input
-                        type="checkbox"
-                        checked={isSelected}
-                        onChange={() => toggleAssetSelection(asset.id)}
-                        className="mt-1 h-4 w-4 text-emerald-500 rounded border-slate-300 flex-shrink-0"
-                      />
+                      {!isReadOnly && (
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => toggleAssetSelection(asset.id)}
+                          className="mt-1 h-4 w-4 text-emerald-500 rounded border-slate-300 flex-shrink-0"
+                        />
+                      )}
                       <div className="flex flex-col flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <Link
@@ -382,7 +398,8 @@ export default function RawAssetsView() {
                     </div>
 
                     {/* Bottom Row: Actions */}
-                    {!asset.is_promoted && (
+                    {!asset.is_promoted && !isReadOnly && (
+
                       <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-zinc-800 mt-2 pl-7">
                         <button
                           onClick={() => handlePromoteSingle(asset.id)}

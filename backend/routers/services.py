@@ -5,7 +5,8 @@ from routers.auth import (
     require_admin,
     require_write_access,
     require_maintainer_or_admin,
-    verify_lane_access
+    verify_lane_access,
+    require_admin_or_read_only
 )
 from schema import ServiceLaneBase, PlaceholderResponse, PlaceholderCreate, ServiceLaneTemplatesUpdate
 from websockets_manager import manager
@@ -174,7 +175,7 @@ def delete_service(service_id: str, background_tasks: BackgroundTasks,
 
 
 @router.get("/{service_id}/goals")
-def get_service_goals(service_id: str, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+def get_service_goals(service_id: str, current_user: dict = Depends(require_admin_or_read_only), cursor=Depends(get_db_cursor)):
     """
     Fetches the complete ledger of yearly goals for a single Service Lane.
     """

@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, UUID4
 from typing import Optional
 from database import get_db_cursor
-from routers.auth import get_current_user, require_admin
+from routers.auth import get_current_user, require_admin, require_admin_or_read_only
 from schema import CountryBase
 import uuid
 from datetime import datetime
@@ -109,7 +109,7 @@ def delete_country(country_id: str, current_user: dict = Depends(require_admin),
 
 
 @router.get("/analytics", summary="[Admin Only]")
-def get_country_analytics(year: Optional[int] = None, current_user: dict = Depends(require_admin),
+def get_country_analytics(year: Optional[int] = None, current_user: dict = Depends(require_admin_or_read_only),
                           cursor=Depends(get_db_cursor)):
     """
     Admin Only Endpoint to Get Country Analytics
@@ -154,7 +154,7 @@ def get_country_analytics(year: Optional[int] = None, current_user: dict = Depen
 
 
 @router.get("/available-years", summary="[Admin Only]")
-def get_available_years(current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+def get_available_years(current_user: dict = Depends(require_admin_or_read_only), cursor=Depends(get_db_cursor)):
     """
     Admin Only Endpoint to Get Available Years
     """
@@ -173,7 +173,7 @@ def get_available_years(current_user: dict = Depends(require_admin), cursor=Depe
 @router.get("/dashboard", summary="[Admin Only]")
 def get_dashboard_analytics(year: Optional[int] = None, country_id: Optional[str] = None,
                             region_id: Optional[str] = None, service_lane_id: Optional[str] = None,
-                            current_user: dict = Depends(require_admin),
+                            current_user: dict = Depends(require_admin_or_read_only),
                             cursor=Depends(get_db_cursor)):
     """
     Admin Only Endpoint to Get Dashboard Analytics

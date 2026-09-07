@@ -2,16 +2,20 @@ import React, { useState, useEffect, useMemo } from "react";
 import axios from "axios";
 import toast from "react-hot-toast";
 import ConfirmModal from "../../components/Modals/ConfirmModal";
+import { useAppContext } from "../../context/AppContext";
 import {
   Users, Search, Filter, Trash2, Edit2, Shield, Code, MapPin,
   Mail, ChevronLeft, ChevronRight, Plus, Server, X
 } from "lucide-react";
 
 export default function ContactsSettings() {
+  const { currentUser } = useAppContext();
   const [contacts, setContacts] = useState<any[]>([]);
   const [countries, setCountries] = useState<any[]>([]);
   const [poolAssets, setPoolAssets] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const isReadOnly = currentUser?.role === 'read_only';
 
   // Filters & Pagination
   const [searchTerm, setSearchTerm] = useState("");
@@ -190,13 +194,14 @@ export default function ContactsSettings() {
               {countries.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </div>
-
-          <button
-            onClick={openCreatePanel}
-            className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl text-sm font-bold flex justify-center items-center gap-2 shadow-sm transition-colors cursor-pointer"
-          >
-            <Plus size={16} /> Add Contact
-          </button>
+          {!isReadOnly && (
+            <button
+              onClick={openCreatePanel}
+              className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl text-sm font-bold flex justify-center items-center gap-2 shadow-sm transition-colors cursor-pointer"
+            >
+              <Plus size={16} /> Add Contact
+            </button>
+          )}
         </div>
       </div>
 
@@ -208,7 +213,9 @@ export default function ContactsSettings() {
             <tr>
               <th className="p-4 font-bold text-slate-600 dark:text-zinc-400 w-1/3">Contact Details</th>
               <th className="p-4 font-bold text-slate-600 dark:text-zinc-400 w-1/3">Assignments</th>
-              <th className="p-4 font-bold text-slate-600 dark:text-zinc-400 text-right">Actions</th>
+              {!isReadOnly && (
+                <th className="p-4 font-bold text-slate-600 dark:text-zinc-400 text-right">Actions</th>
+              )}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 dark:divide-zinc-800">
@@ -251,16 +258,18 @@ export default function ContactsSettings() {
                       )}
                     </div>
                   </td>
-                  <td className="p-4 text-right">
-                    <div className="flex justify-end gap-2">
-                      <button onClick={() => openEditPanel(c)} className="text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 p-2 rounded-xl transition-colors cursor-pointer">
-                        <Edit2 size={16} />
-                      </button>
-                      <button onClick={() => setDeleteModal({isOpen: true, id: c.id, email: c.email})} className="text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 p-2 rounded-xl transition-colors cursor-pointer">
-                        <Trash2 size={16} />
-                      </button>
-                    </div>
-                  </td>
+                  {!isReadOnly && (
+                    <td className="p-4 text-right">
+                      <div className="flex justify-end gap-2">
+                        <button onClick={() => openEditPanel(c)} className="text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 p-2 rounded-xl transition-colors cursor-pointer">
+                          <Edit2 size={16} />
+                        </button>
+                        <button onClick={() => setDeleteModal({isOpen: true, id: c.id, email: c.email})} className="text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 p-2 rounded-xl transition-colors cursor-pointer">
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    </td>
+                  )}
                 </tr>
               )
             })}
@@ -301,15 +310,16 @@ export default function ContactsSettings() {
                     </div>
                   </div>
                 )}
-
-                <div className="flex justify-end gap-2 mt-1">
-                  <button onClick={() => openEditPanel(c)} className="text-slate-600 dark:text-zinc-300 bg-slate-100 dark:bg-zinc-800 p-2 rounded-xl flex-1 flex justify-center items-center font-bold text-xs gap-1">
-                    <Edit2 size={14} /> Edit
-                  </button>
-                  <button onClick={() => setDeleteModal({isOpen: true, id: c.id, email: c.email})} className="text-red-600 bg-red-50 dark:bg-red-900/20 p-2 rounded-xl flex-1 flex justify-center items-center font-bold text-xs gap-1">
-                    <Trash2 size={14} /> Delete
-                  </button>
-                </div>
+                {!isReadOnly && (
+                  <div className="flex justify-end gap-2 mt-1">
+                    <button onClick={() => openEditPanel(c)} className="text-slate-600 dark:text-zinc-300 bg-slate-100 dark:bg-zinc-800 p-2 rounded-xl flex-1 flex justify-center items-center font-bold text-xs gap-1">
+                      <Edit2 size={14} /> Edit
+                    </button>
+                    <button onClick={() => setDeleteModal({isOpen: true, id: c.id, email: c.email})} className="text-red-600 bg-red-50 dark:bg-red-900/20 p-2 rounded-xl flex-1 flex justify-center items-center font-bold text-xs gap-1">
+                      <Trash2 size={14} /> Delete
+                    </button>
+                  </div>
+                )}
               </div>
              )
           })}

@@ -16,7 +16,8 @@ from routers.auth import (
     require_admin,
     require_write_access,
     require_maintainer_or_admin,
-    verify_lane_access
+    verify_lane_access,
+    require_admin_or_read_only
 )
 from websockets_manager import manager
 from schema import (
@@ -730,25 +731,25 @@ def get_test_details(test_id: str, current_user: dict = Depends(get_current_user
 
     # 3. Inject the `where_str` using an f-string (f''') and pass the tuple(params)
     cursor.execute(f'''
-                SELECT t.id, t.name, t.service_lane_id, t.credits_per_week, 
-                       t.duration_weeks, t.stages::text as status, t.start_week, t.start_year, 
-                       t.is_tentative, t.kiss24, t.drive_folder_id, t.drive_folder_url,
-                       s.name as service_lane_name, s.auto_provision_workspace,
-                       ct.kiss24_uuid as country_kiss24_uuid,
-                       EXISTS(SELECT 1 FROM secret_notes WHERE test_id = t.id) as has_secret,
-                       COALESCE((SELECT string_agg(DISTINCT u.name, ', ') FROM assignments a JOIN users u ON a.user_id = u.id WHERE a.test_id = t.id), 'Unassigned') as assigned_pentesters,
-                       ra.category_id,
-                       c.name as category_name
-                FROM tests t
-                LEFT JOIN services_lanes s ON t.service_lane_id = s.id
-                LEFT JOIN test_assets ta ON t.id = ta.test_id
-                LEFT JOIN assets a ON ta.asset_id = a.id
-                LEFT JOIN raw_assets ra ON a.raw_asset_id = ra.id
-                LEFT JOIN service_categories c ON ra.category_id = c.id
-                LEFT JOIN countries ct ON ra.country_id = ct.id
-                {where_str}
-                LIMIT 1
-            ''', tuple(params))
+        SELECT t.id, t.name, t.service_lane_id, t.credits_per_week, 
+               t.duration_weeks, t.stages::text as status, t.start_week, t.start_year, 
+               t.is_tentative, t.kiss24, t.drive_folder_id, t.drive_folder_url,
+               s.name as service_lane_name, s.auto_provision_workspace,
+               ct.kiss24_uuid as country_kiss24_uuid,
+               EXISTS(SELECT 1 FROM secret_notes WHERE test_id = t.id) as has_secret,
+               COALESCE((SELECT string_agg(DISTINCT u.name, ', ') FROM assignments a JOIN users u ON a.user_id = u.id WHERE a.test_id = t.id), 'Unassigned') as assigned_pentesters,
+               ra.category_id,
+               c.name as category_name
+        FROM tests t
+        LEFT JOIN services_lanes s ON t.service_lane_id = s.id
+        LEFT JOIN test_assets ta ON t.id = ta.test_id
+        LEFT JOIN assets a ON ta.asset_id = a.id
+        LEFT JOIN raw_assets ra ON a.raw_asset_id = ra.id
+        LEFT JOIN service_categories c ON ra.category_id = c.id
+        LEFT JOIN countries ct ON ra.country_id = ct.id
+        {where_str}
+        LIMIT 1
+    ''', tuple(params))
 
     test_row = cursor.fetchone()
     if not test_row:
@@ -1721,7 +1722,7 @@ def get_test_analysis(test_id: str, current_user: dict = Depends(get_current_use
     Check if an analysis exists and retrieve it.
     """
 
-    role_allowed = ['admin', 'pentester']
+    role_allowed = ['admin', 'pentester', 'read_only']
 
     if current_user.get('role') not in role_allowed:
         raise HTTPException(status_code=403, detail=f"{current_user.get('role')} users cannot trigger generation.")

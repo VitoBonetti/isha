@@ -204,18 +204,22 @@ export default function TopNav() {
       <div className="hidden md:flex items-center gap-2 text-sm font-medium">
         <Link to="/planner" className={navClass("/planner")}>Planner</Link>
         <Link to="/tests" className={navClass("/tests")}>Tests</Link>
-        {currentUser?.role !== 'maintainer' && (
+        {['admin', 'pentester', 'read_only'].includes(currentUser?.role) && (
           <>
             <Link to="/calendar" className={navClass("/calendar")}>Holidays</Link>
+          </>
+        )}
+        {['admin', 'pentester'].includes(currentUser?.role) && (
+          <>
             <Link to="/validating" className={navClass("/validating")}>Validation</Link>
           </>
         )}
-        {currentUser?.role === 'maintainer' && (
+        {['maintainer'].includes(currentUser?.role) && (
           <>
             <Link to="/assets/pool" className={navClass("/assets/pool")}>Assets Pool</Link>
           </>
         )}
-        {currentUser?.role === 'admin' && (
+        {['admin', 'read_only'].includes(currentUser?.role) && (
           <>
             <Link to="/assets" className={navClass("/assets")}>Assets</Link>
             <Link to="/settings" className={navClass("/settings")}>System</Link>
@@ -331,17 +335,22 @@ export default function TopNav() {
                   <div className="h-px bg-slate-100 dark:bg-zinc-800 my-1"></div>
                 </>
               )}
-
-              <button onClick={() => { setIsUserOpen(false); setIsApiModalOpen(true); }} className="w-full flex items-center px-4 py-2 text-sm text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors">
-                <KeySquare className="mr-2 h-4 w-4" /> Developer API
-              </button>
-              <button onClick={() => { setIsUserOpen(false); setIsKiss24KeyModalOpen(true); }} className="w-full flex items-center px-4 py-2 text-sm text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors">
-                <Key className="mr-2 h-4 w-4" /> KISS24 API Key
-              </button>
-              {currentUser?.role !== 'maintainer' && (
-                <button onClick={() => { setIsUserOpen(false); setIsE2EEModalOpen(true); }} className="w-full flex items-center px-4 py-2 text-sm text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors">
-                 <Lock className="mr-2 h-4 w-4" /> Setup Secure Vault Keys
-                </button>
+              {currentUser?.role !== 'read_only' && (
+                <>
+                  <button onClick={() => { setIsUserOpen(false); setIsApiModalOpen(true); }} className="w-full flex items-center px-4 py-2 text-sm text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors">
+                    <KeySquare className="mr-2 h-4 w-4" /> Developer API
+                  </button>
+                  <button onClick={() => { setIsUserOpen(false); setIsKiss24KeyModalOpen(true); }} className="w-full flex items-center px-4 py-2 text-sm text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors">
+                    <Key className="mr-2 h-4 w-4" /> KISS24 API Key
+                  </button>
+                </>
+              )}
+              {['admin', 'pentester'].includes(currentUser?.role) && (
+                <>
+                  <button onClick={() => { setIsUserOpen(false); setIsE2EEModalOpen(true); }} className="w-full flex items-center px-4 py-2 text-sm text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors">
+                   <Lock className="mr-2 h-4 w-4" /> Setup Secure Vault Keys
+                  </button>
+                </>
               )}
               <div className="h-px bg-slate-100 dark:bg-zinc-800 my-1"></div>
               <button onClick={handleLogout} className="w-full flex items-center px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors">
@@ -360,18 +369,24 @@ export default function TopNav() {
         >
           <Link to="/planner" className={mobileNavClass("/planner")}>Planner</Link>
           <Link to="/tests" className={mobileNavClass("/tests")}>Tests</Link>
-          {currentUser?.role !== 'maintainer' && (
+          {['admin', 'pentester', 'read_only'].includes(currentUser?.role) && (
             <>
               <Link to="/calendar" className={mobileNavClass("/calendar")}>Holidays</Link>
+            </>
+          )}
+          {['admin', 'pentester'].includes(currentUser?.role) && (
+            <>
               <Link to="/validating" className={mobileNavClass("/validating")}>Validation</Link>
             </>
           )}
 
-          {currentUser?.role === 'maintainer' && (
-            <Link to="/assets/pool" className={mobileNavClass("/assets/pool")} onClick={() => setIsMobileMenuOpen(false)}>Assets Pool</Link>
+          {['maintainer'].includes(currentUser?.role) && (
+            <>
+              <Link to="/assets/pool" className={mobileNavClass("/assets/pool")} onClick={() => setIsMobileMenuOpen(false)}>Assets Pool</Link>
+            </>
           )}
 
-          {currentUser?.role === 'admin' && (
+          {['admin', 'read_only'].includes(currentUser?.role) && (
             <>
               {/* Mobile Admin & Settings Links */}
               <div className="h-px bg-slate-200 dark:bg-zinc-800 my-2"></div>

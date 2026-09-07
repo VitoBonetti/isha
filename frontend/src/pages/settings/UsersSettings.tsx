@@ -4,6 +4,7 @@ import toast from 'react-hot-toast';
 import { useSettings } from '../../hooks/useSettings';
 import type { UserFormState} from "../../types/board";
 import ConfirmModal from '../../components/Modals/ConfirmModal';
+import { useAppContext } from "../../context/AppContext";
 import {
   Users, Plus, Edit2, Trash2, X, ChevronsUpDown, ChevronUp, ChevronDown
 } from 'lucide-react';
@@ -25,8 +26,11 @@ const defaultUserForm: UserFormState = {
 };
 
 export default function UsersSettings() {
+  const { currentUser } = useAppContext();
   const { users, locations, handleSave, handleDelete, isLoading } = useSettings();
   const [services, setServices] = useState<any[]>([]);
+
+  const isReadOnly = currentUser?.role === 'read_only';
 
   // Panel & Edit State
   const [isPanelOpen, setIsPanelOpen] = useState(false);
@@ -174,12 +178,14 @@ export default function UsersSettings() {
             Manage access roles, capacities, and active operational intervals.
           </p>
         </div>
-        <button
-          onClick={openCreatePanel}
-          className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl text-sm font-bold flex justify-center items-center gap-2 shadow-sm transition-colors cursor-pointer"
-        >
-          <Plus size={16} /> Add User
-        </button>
+        {!isReadOnly && (
+          <button
+            onClick={openCreatePanel}
+            className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl text-sm font-bold flex justify-center items-center gap-2 shadow-sm transition-colors cursor-pointer"
+          >
+            <Plus size={16} /> Add User
+          </button>
+        )}
       </div>
 
       {/* SUB-TABS */}
@@ -213,7 +219,9 @@ export default function UsersSettings() {
               <th className="p-4 font-bold text-slate-600 dark:text-zinc-400 cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800/50 transition-colors" onClick={() => handleSort('capacity')}>
                 Capacity <SortIcon column="capacity" />
               </th>
-              <th className="p-4 font-bold text-slate-600 dark:text-zinc-400 text-right">Actions</th>
+              {!isReadOnly && (
+                <th className="p-4 font-bold text-slate-600 dark:text-zinc-400 text-right">Actions</th>
+              )}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 dark:divide-zinc-800">
@@ -250,24 +258,26 @@ export default function UsersSettings() {
                 <td className="p-4 font-medium text-slate-700 dark:text-zinc-300">
                   {u.base_capacity} cr/wk
                 </td>
-                <td className="p-4 text-right">
-                  <div className="flex justify-end gap-2">
-                    <button
-                      onClick={() => openEditPanel(u)}
-                      className="text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 p-2 rounded-xl transition-colors cursor-pointer"
-                      title="Edit User"
-                    >
-                      <Edit2 size={16} />
-                    </button>
-                    <button
-                      onClick={() => setDeleteModal({ isOpen: true, id: u.id, name: u.name })}
-                      className="text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 p-2 rounded-xl transition-colors cursor-pointer"
-                      title="Delete User"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </div>
-                </td>
+                  {!isReadOnly && (
+                    <td className="p-4 text-right">
+                      <div className="flex justify-end gap-2">
+                        <button
+                          onClick={() => openEditPanel(u)}
+                          className="text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 p-2 rounded-xl transition-colors cursor-pointer"
+                          title="Edit User"
+                        >
+                          <Edit2 size={16} />
+                        </button>
+                        <button
+                          onClick={() => setDeleteModal({ isOpen: true, id: u.id, name: u.name })}
+                          className="text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 p-2 rounded-xl transition-colors cursor-pointer"
+                          title="Delete User"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    </td>
+                  )}
               </tr>
             ))}
           </tbody>
@@ -299,20 +309,22 @@ export default function UsersSettings() {
                 </div>
                 <span className="font-bold text-xs text-slate-700 dark:text-zinc-300">{u.base_capacity} cr/wk</span>
               </div>
-              <div className="flex justify-end gap-2 mt-1">
-                <button
-                  onClick={() => openEditPanel(u)}
-                  className="text-slate-600 dark:text-zinc-300 bg-slate-100 dark:bg-zinc-800 p-2 rounded-xl flex-1 flex justify-center items-center font-bold text-xs gap-1"
-                >
-                  <Edit2 size={14} /> Edit
-                </button>
-                <button
-                  onClick={() => setDeleteModal({ isOpen: true, id: u.id, name: u.name })}
-                  className="text-red-600 bg-red-50 dark:bg-red-900/20 p-2 rounded-xl flex-1 flex justify-center items-center font-bold text-xs gap-1"
-                >
-                  <Trash2 size={14} /> Delete
-                </button>
-              </div>
+              {!isReadOnly && (
+                <div className="flex justify-end gap-2 mt-1">
+                  <button
+                    onClick={() => openEditPanel(u)}
+                    className="text-slate-600 dark:text-zinc-300 bg-slate-100 dark:bg-zinc-800 p-2 rounded-xl flex-1 flex justify-center items-center font-bold text-xs gap-1"
+                  >
+                    <Edit2 size={14} /> Edit
+                  </button>
+                  <button
+                    onClick={() => setDeleteModal({ isOpen: true, id: u.id, name: u.name })}
+                    className="text-red-600 bg-red-50 dark:bg-red-900/20 p-2 rounded-xl flex-1 flex justify-center items-center font-bold text-xs gap-1"
+                  >
+                    <Trash2 size={14} /> Delete
+                  </button>
+                </div>
+              )}
             </div>
           ))}
         </div>

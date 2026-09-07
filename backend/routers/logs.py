@@ -2,14 +2,14 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 import io
 import csv
-from routers.auth import require_admin
+from routers.auth import require_admin, require_admin_or_read_only
 from audit_logger import log_audit_event, get_bq_client, TABLE_REF
 
 router = APIRouter(prefix="/api/system/logs", tags=["Logs"])
 
 
 @router.get("/", summary="[Admin Only]")
-def get_recent_logs(current_user: dict = Depends(require_admin)):
+def get_recent_logs(current_user: dict = Depends(require_admin_or_read_only)):
     """
     Admin Only endpoint to Queries BigQuery for the 100 most recent logs for the UI terminal.
     """

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import toast, { Toaster } from 'react-hot-toast';
 import ConfirmModal from '../../components/Modals/ConfirmModal';
+import { useAppContext } from "../../context/AppContext";
 import {
   Settings2, Plus, Edit2, Trash2, X, Play, ListFilter, ChevronDown, ChevronRight, CheckCircle2, Filter
 } from 'lucide-react';
@@ -76,10 +77,13 @@ const OPERATORS = [
 const defaultForm = { year: new Date().getFullYear(), criticality_threshold: 8, kpi_rules: [] };
 
 export default function AssetCriteriaSettings() {
+  const { currentUser } = useAppContext();
   const [criteria, setCriteria] = useState<any[]>([]);
   const [schemaFields, setSchemaFields] = useState<any[]>([]);
   const [relationCache, setRelationCache] = useState<Record<string, any[]>>({});
   const [isLoading, setIsLoading] = useState(true);
+
+  const isReadOnly = currentUser?.role === 'read_only';
 
   // Panel & Table State
   const [isPanelOpen, setIsPanelOpen] = useState(false);
@@ -242,9 +246,11 @@ export default function AssetCriteriaSettings() {
           </h1>
           <p className="text-sm text-slate-500 dark:text-zinc-400 mt-0.5">Manage rules for KPI and Criticality flags.</p>
         </div>
-        <button onClick={() => openPanel()} className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl text-sm font-bold flex justify-center items-center gap-2 shadow-sm transition-colors cursor-pointer">
-          <Plus size={16} /> New Criteria
-        </button>
+        {!isReadOnly && (
+          <button onClick={() => openPanel()} className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl text-sm font-bold flex justify-center items-center gap-2 shadow-sm transition-colors cursor-pointer">
+            <Plus size={16} /> New Criteria
+          </button>
+        )}
       </div>
 
       <div className="border border-slate-200 dark:border-zinc-800 rounded-2xl overflow-hidden shadow-sm flex flex-col bg-white dark:bg-zinc-900">
@@ -256,7 +262,9 @@ export default function AssetCriteriaSettings() {
               <th className="p-4 font-bold text-slate-600 dark:text-zinc-400">Criticality Threshold</th>
               <th className="p-4 font-bold text-slate-600 dark:text-zinc-400">KPI Rules</th>
               <th className="p-4 font-bold text-slate-600 dark:text-zinc-400">Last Updated</th>
-              <th className="p-4 font-bold text-slate-600 dark:text-zinc-400 text-right">Actions</th>
+              {!isReadOnly && (
+                <th className="p-4 font-bold text-slate-600 dark:text-zinc-400 text-right">Actions</th>
+              )}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 dark:divide-zinc-800">
@@ -281,19 +289,21 @@ export default function AssetCriteriaSettings() {
                         <span className="italic text-slate-400">Never</span>
                       )}
                     </td>
-                    <td className="p-4 text-right">
-                      <div className="flex justify-end gap-2">
-                        <button
-                          onClick={(e) => { e.stopPropagation(); setActionModal({ isOpen: true, year: c.year, type: 'evaluate' }) }}
-                          className={`p-2 rounded-xl transition-colors cursor-pointer ${isEvaluated ? 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100 dark:bg-emerald-900/20 dark:hover:bg-emerald-900/40' : 'text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30'}`}
-                          title="Evaluate Assets"
-                        >
-                          <Play size={16} className={isEvaluated ? "fill-current" : ""} />
-                        </button>
-                        <button onClick={(e) => { e.stopPropagation(); openPanel(c) }} className="text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 p-2 rounded-xl transition-colors cursor-pointer" title="Edit Criteria"><Edit2 size={16} /></button>
-                        <button onClick={(e) => { e.stopPropagation(); setActionModal({ isOpen: true, year: c.year, type: 'delete' }) }} className="text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 p-2 rounded-xl transition-colors cursor-pointer" title="Delete Criteria"><Trash2 size={16} /></button>
-                      </div>
-                    </td>
+                    {!isReadOnly && (
+                      <td className="p-4 text-right">
+                        <div className="flex justify-end gap-2">
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setActionModal({ isOpen: true, year: c.year, type: 'evaluate' }) }}
+                            className={`p-2 rounded-xl transition-colors cursor-pointer ${isEvaluated ? 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100 dark:bg-emerald-900/20 dark:hover:bg-emerald-900/40' : 'text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30'}`}
+                            title="Evaluate Assets"
+                          >
+                            <Play size={16} className={isEvaluated ? "fill-current" : ""} />
+                          </button>
+                          <button onClick={(e) => { e.stopPropagation(); openPanel(c) }} className="text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 p-2 rounded-xl transition-colors cursor-pointer" title="Edit Criteria"><Edit2 size={16} /></button>
+                          <button onClick={(e) => { e.stopPropagation(); setActionModal({ isOpen: true, year: c.year, type: 'delete' }) }} className="text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 p-2 rounded-xl transition-colors cursor-pointer" title="Delete Criteria"><Trash2 size={16} /></button>
+                        </div>
+                      </td>
+                    )}
                   </tr>
 
                   {expandedYears.has(c.year) && (

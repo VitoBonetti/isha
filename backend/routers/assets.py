@@ -12,7 +12,8 @@ from routers.auth import (
     require_admin,
     require_write_access,
     require_maintainer_or_admin,
-    verify_lane_access
+    verify_lane_access,
+    require_admin_or_read_only
 )
 from schema import RawAssetCreate, AssetBase, PromoteAssetRequest, BulkAssetRequest, AssetTypeBase, BulkServiceUpdateRequest, SnowSyncRequest
 from starlette import status
@@ -156,7 +157,7 @@ def get_raw_assets(
         business_critical: Optional[int] = None, status: Optional[str] = None,
         is_kpi: Optional[bool] = None, is_critical: Optional[bool] = None,
         sort_by: Optional[str] = "name", sort_dir: Optional[str] = "asc",
-        current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)
+        current_user: dict = Depends(require_admin_or_read_only), cursor=Depends(get_db_cursor)
 ):
     """
     Get all raw assets available in the database.

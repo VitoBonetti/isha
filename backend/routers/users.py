@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from fastapi import APIRouter, Depends, BackgroundTasks, status, HTTPException
 from database import get_db_cursor
-from routers.auth import get_current_user, require_admin
+from routers.auth import get_current_user, require_admin, require_admin_or_read_only
 from schema import UserCreate, UserBase, Kiss24KeyUpdate, PublicKeyUpdate
 from websockets_manager import manager
 from audit_logger import log_audit_event
@@ -29,7 +29,7 @@ def get_system_time(current_user: dict = Depends(get_current_user)):
 
 
 @router.get("/", summary="[Admin Only]")
-def get_all_users(current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+def get_all_users(current_user: dict = Depends(require_admin_or_read_only), cursor=Depends(get_db_cursor)):
     """
     Admin Only Endpoint to get all users
     """

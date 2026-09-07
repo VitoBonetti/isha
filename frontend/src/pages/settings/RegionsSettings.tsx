@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useSettings } from '../../hooks/useSettings';
 import ConfirmModal from '../../components/Modals/ConfirmModal';
+import { useAppContext } from "../../context/AppContext";
 import {
   Globe, Plus, Edit2, Trash2, X, ChevronsUpDown, ChevronUp, ChevronDown
 } from 'lucide-react';
@@ -19,12 +20,15 @@ const Toggle = ({ checked, onChange, label, disabled = false }: { checked: boole
 const defaultRegionForm = { name: '', is_active: true };
 
 export default function RegionsSettings() {
+  const { currentUser } = useAppContext();
   const { regions, handleSave, handleDelete, isLoading } = useSettings();
 
   // Panel & Edit State
   const [isPanelOpen, setIsPanelOpen] = useState(false);
   const [editRegionId, setEditRegionId] = useState<string | null>(null);
   const [regionForm, setRegionForm] = useState(defaultRegionForm);
+
+  const isReadOnly = currentUser?.role === 'read_only';
 
   // Modals & Pagination
   const [deleteModal, setDeleteModal] = useState<{ isOpen: boolean; id: string; name: string } | null>(null);
@@ -110,12 +114,14 @@ export default function RegionsSettings() {
             Manage broad operational boundaries.
           </p>
         </div>
-        <button
-          onClick={openCreatePanel}
-          className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl text-sm font-bold flex justify-center items-center gap-2 shadow-sm transition-colors cursor-pointer"
-        >
-          <Plus size={16} /> Add Region
-        </button>
+        {!isReadOnly && (
+          <button
+            onClick={openCreatePanel}
+            className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl text-sm font-bold flex justify-center items-center gap-2 shadow-sm transition-colors cursor-pointer"
+          >
+            <Plus size={16} /> Add Region
+          </button>
+        )}
       </div>
 
       {/* SUB-TABS */}
@@ -144,23 +150,27 @@ export default function RegionsSettings() {
               <th className="p-4 font-bold text-slate-600 dark:text-zinc-400 cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800/50 transition-colors" onClick={() => handleSort('name')}>
                 Region Name <SortIcon column="name" />
               </th>
-              <th className="p-4 font-bold text-slate-600 dark:text-zinc-400 text-right">Actions</th>
+              {!isReadOnly && (
+                <th className="p-4 font-bold text-slate-600 dark:text-zinc-400 text-right">Actions</th>
+              )}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 dark:divide-zinc-800">
             {paginatedRegions.map(r => (
               <tr key={r.id} className="hover:bg-slate-50/50 dark:hover:bg-zinc-800/30 transition-colors">
                 <td className="p-4 font-bold text-slate-900 dark:text-zinc-100">{r.name}</td>
-                <td className="p-4 text-right">
-                  <div className="flex justify-end gap-2">
-                    <button onClick={() => openEditPanel(r)} className="text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 p-2 rounded-xl transition-colors cursor-pointer">
-                      <Edit2 size={16} />
-                    </button>
-                    <button onClick={() => setDeleteModal({ isOpen: true, id: r.id, name: r.name })} className="text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 p-2 rounded-xl transition-colors cursor-pointer">
-                      <Trash2 size={16} />
-                    </button>
-                  </div>
-                </td>
+                {!isReadOnly && (
+                  <td className="p-4 text-right">
+                    <div className="flex justify-end gap-2">
+                      <button onClick={() => openEditPanel(r)} className="text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 p-2 rounded-xl transition-colors cursor-pointer">
+                        <Edit2 size={16} />
+                      </button>
+                      <button onClick={() => setDeleteModal({ isOpen: true, id: r.id, name: r.name })} className="text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 p-2 rounded-xl transition-colors cursor-pointer">
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
@@ -171,10 +181,12 @@ export default function RegionsSettings() {
           {paginatedRegions.map(r => (
             <div key={r.id} className="p-4 flex justify-between items-center gap-4">
               <span className="font-bold text-base text-slate-900 dark:text-zinc-100 truncate flex-1">{r.name}</span>
-              <div className="flex gap-2 shrink-0">
-                <button onClick={() => openEditPanel(r)} className="text-slate-600 dark:text-zinc-300 bg-slate-100 dark:bg-zinc-800 p-2.5 rounded-xl"><Edit2 size={14} /></button>
-                <button onClick={() => setDeleteModal({ isOpen: true, id: r.id, name: r.name })} className="text-red-600 bg-red-50 dark:bg-red-900/20 p-2.5 rounded-xl"><Trash2 size={14} /></button>
-              </div>
+              {!isReadOnly && (
+                <div className="flex gap-2 shrink-0">
+                  <button onClick={() => openEditPanel(r)} className="text-slate-600 dark:text-zinc-300 bg-slate-100 dark:bg-zinc-800 p-2.5 rounded-xl"><Edit2 size={14} /></button>
+                  <button onClick={() => setDeleteModal({ isOpen: true, id: r.id, name: r.name })} className="text-red-600 bg-red-50 dark:bg-red-900/20 p-2.5 rounded-xl"><Trash2 size={14} /></button>
+                </div>
+              )}
             </div>
           ))}
         </div>

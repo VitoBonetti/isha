@@ -4,14 +4,15 @@ from typing import List
 from collections import defaultdict
 from fastapi import APIRouter, Depends, HTTPException
 from database import get_db_cursor
-from routers.auth import require_admin
+from routers.auth import require_admin, require_admin_or_read_only
 from schema import AssetCriteriaBase, AssetCriteriaResponse, EvaluateCriteriaRequest
 from audit_logger import log_audit_event
 
 router = APIRouter(prefix="/api/asset-criteria", tags=["Asset Criteria Engine"])
 
+
 @router.get("/fields", summary="Get valid asset criteria fields and their relation endpoints")
-def get_valid_fields(current_user: dict = Depends(require_admin)):
+def get_valid_fields(current_user: dict = Depends(require_admin_or_read_only)):
     """Returns the schema dictionary so the frontend can dynamically build the UI."""
     return [
         {"name": "business_critical", "label": "Business Critical (1-10)", "type": "number"},
@@ -80,7 +81,7 @@ def evaluate_kpi_rule(asset_value, operator: str, rule_value):
 
 
 @router.get("/", summary="List all asset criteria configurations")
-def get_all_criteria(current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+def get_all_criteria(current_user: dict = Depends(require_admin_or_read_only), cursor=Depends(get_db_cursor)):
     cursor.execute("SELECT id, year, criticality_threshold, kpi_rules, updated_at, is_evaluated FROM asset_criteria ORDER BY year DESC")
     columns = [col[0] for col in cursor.description]
     return [dict(zip(columns, row)) for row in cursor.fetchall()]
@@ -222,7 +223,7 @@ def evaluate_assets(year: int, req: EvaluateCriteriaRequest, current_user: dict 
 
 
 @router.get('/dashboard-data', summary='Dashboard data. only temp endpoint')
-def dashboard_data(current_user: dict = Depends(require_admin),
+def dashboard_data(current_user: dict = Depends(require_admin_or_read_only),
                     cursor=Depends(get_db_cursor)):
     cursor.execute("""
     SELECT COUNT(*) FROM tests t

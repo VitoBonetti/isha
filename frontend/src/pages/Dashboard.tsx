@@ -38,7 +38,7 @@ export default function Dashboard() {
         { title: 'Planner', desc: 'Manage and schedule active pentest assignments across the team.', icon: <CalendarDays size={24} />, view: 'planner', color: 'text-blue-500', allowedRoles: ['admin', 'pentester', 'read_only', 'maintainer'] },
         { title: 'Holidays', desc: 'Visual timeline of personal time off and national holidays.', icon: <Palmtree size={24} />, view: 'calendar', color: 'text-purple-500', allowedRoles: ['admin', 'pentester', 'read_only'] },
         { title: 'Tests', desc: 'Manage generated tests and lifecycle milestones.', icon: <ShieldAlert size={24} />, view: 'tests', color: 'text-indigo-500', allowedRoles: ['admin', 'pentester', 'read_only', 'maintainer'] },
-        { title: 'Validation', desc: 'Live reconciliation of Keep Secure 24 vulnerabilities pending retest.', icon: <CheckSquare size={24} />, view: 'validating', color: 'text-rose-500', allowedRoles: ['admin', 'pentester', 'read_only'] }
+        { title: 'Validation', desc: 'Live reconciliation of Keep Secure 24 vulnerabilities pending retest.', icon: <CheckSquare size={24} />, view: 'validating', color: 'text-rose-500', allowedRoles: ['admin', 'pentester'] }
       ]
     },
     {

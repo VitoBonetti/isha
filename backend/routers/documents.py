@@ -12,6 +12,7 @@ def get_all_documents(
         limit: int = Query(20, ge=1, le=100),
         search: Optional[str] = None,
         service_lane_id: Optional[str] = None,
+        doc_type: Optional[str] = None,
         sort_by: str = Query("synced_at"),
         sort_dir: str = Query("desc"),
         current_user: dict = Depends(require_admin),
@@ -21,8 +22,8 @@ def get_all_documents(
 
     base_query = """
         FROM test_documents td
-        JOIN tests t ON td.test_id = t.id
-        JOIN services_lanes sl ON t.service_lane_id = sl.id
+        LEFT JOIN tests t ON td.test_id = t.id
+        LEFT JOIN services_lanes sl ON t.service_lane_id = sl.id
         LEFT JOIN test_assets ta ON t.id = ta.test_id
         LEFT JOIN assets a ON ta.asset_id = a.id
         LEFT JOIN countries c ON a.country_id = c.id
@@ -35,9 +36,22 @@ def get_all_documents(
         where_clauses.append("(td.file_name ILIKE %s OR t.name ILIKE %s)")
         params.extend([f"%{search}%", f"%{search}%"])
 
-    if service_lane_id:
+    # Service Lane & Knowledge Base Scope Filter
+    if service_lane_id == "kb_only":
+        where_clauses.append("td.test_id IS NULL")
+    elif service_lane_id == "all_incl_kb":
+        pass  # Include everything
+    elif service_lane_id and service_lane_id != "exclude_kb":
         where_clauses.append("t.service_lane_id = %s")
         params.append(service_lane_id)
+    else:
+        # Default behavior: Exclude Knowledge Base documents on initial load
+        where_clauses.append("td.test_id IS NOT NULL")
+
+    # Document Type Filter
+    if doc_type:
+        where_clauses.append("td.doc_type = %s")
+        params.append(doc_type)
 
     where_str = ""
     if where_clauses:
@@ -59,13 +73,14 @@ def get_all_documents(
     cursor.execute(count_query, params)
     total_count = cursor.fetchone()[0]
 
-    # Get paginated data (String_Agg combines multiple countries into one string!)
+    # Get paginated data
     data_query = f"""
         SELECT 
             td.id as doc_id,
             td.file_name,
             td.file_url,
             td.mime_type,
+            td.doc_type,
             td.synced_at,
             t.id as test_id,
             t.name as test_name,
@@ -76,7 +91,7 @@ def get_all_documents(
         {base_query}
         {where_str}
         GROUP BY td.id, t.id, sl.id
-        ORDER BY {sort_col} {dir_str}
+        ORDER BY {sort_col} {dir_str} NULLS LAST
         LIMIT %s OFFSET %s
     """
     cursor.execute(data_query, params + [limit, offset])

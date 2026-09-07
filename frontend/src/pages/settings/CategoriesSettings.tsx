@@ -3,6 +3,7 @@ import axios from 'axios';
 import toast from 'react-hot-toast';
 import { useSettings } from '../../hooks/useSettings';
 import ConfirmModal from '../../components/Modals/ConfirmModal';
+import { useAppContext } from "../../context/AppContext";
 import {
   Tags, Plus, Edit2, Trash2, X, ChevronsUpDown, ChevronUp, ChevronDown
 } from 'lucide-react';
@@ -18,10 +19,13 @@ const defaultCatForm = {
 };
 
 export default function CategoriesSettings() {
+  const { currentUser } = useAppContext();
   const { services, handleDelete } = useSettings(); // Use global services for dropdowns
 
   const [categories, setCategories] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+
+  const isReadOnly = currentUser?.role === 'read_only';
 
   // Filters
   const [filterCatYear, setFilterCatYear] = useState<string>(currentYear.toString());
@@ -196,13 +200,14 @@ export default function CategoriesSettings() {
             <option value="All">All Years</option>
             {availableYears.map(y => <option key={y} value={y}>{y}</option>)}
           </select>
-
-          <button
-            onClick={openCreatePanel}
-            className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl text-sm font-bold flex justify-center items-center gap-2 shadow-sm transition-colors cursor-pointer"
-          >
-            <Plus size={16} /> Add Category
-          </button>
+          {!isReadOnly && (
+            <button
+              onClick={openCreatePanel}
+              className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl text-sm font-bold flex justify-center items-center gap-2 shadow-sm transition-colors cursor-pointer"
+            >
+              <Plus size={16} /> Add Category
+            </button>
+          )}
         </div>
       </div>
 
@@ -229,7 +234,9 @@ export default function CategoriesSettings() {
                   <th className="p-4 font-bold text-slate-600 dark:text-zinc-400 cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800/50 transition-colors" onClick={() => handleSort('service_lane')}>
                     Service Lane <SortIcon column="service_lane" />
                   </th>
-                  <th className="p-4 font-bold text-slate-600 dark:text-zinc-400 text-right">Actions</th>
+                  {!isReadOnly && (
+                    <th className="p-4 font-bold text-slate-600 dark:text-zinc-400 text-right">Actions</th>
+                  )}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-zinc-800">
@@ -243,22 +250,24 @@ export default function CategoriesSettings() {
                         {c.service_lane_name || 'Unlinked'}
                       </span>
                     </td>
-                    <td className="p-4 text-right">
-                      <div className="flex justify-end gap-2">
-                        <button
-                          onClick={() => openEditPanel(c)}
-                          className="text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 p-2 rounded-xl transition-colors cursor-pointer"
-                        >
-                          <Edit2 size={16} />
-                        </button>
-                        <button
-                          onClick={() => setDeleteModal({ isOpen: true, id: c.id, name: c.name })}
-                          className="text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 p-2 rounded-xl transition-colors cursor-pointer"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
-                    </td>
+                    {!isReadOnly && (
+                      <td className="p-4 text-right">
+                        <div className="flex justify-end gap-2">
+                          <button
+                            onClick={() => openEditPanel(c)}
+                            className="text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 p-2 rounded-xl transition-colors cursor-pointer"
+                          >
+                            <Edit2 size={16} />
+                          </button>
+                          <button
+                            onClick={() => setDeleteModal({ isOpen: true, id: c.id, name: c.name })}
+                            className="text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 p-2 rounded-xl transition-colors cursor-pointer"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -279,20 +288,22 @@ export default function CategoriesSettings() {
                     <span className="px-2.5 py-0.5 rounded-full bg-slate-100 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 text-slate-700 dark:text-zinc-300 text-[10px] font-bold shadow-sm max-w-[60%] truncate">
                       {c.service_lane_name || 'Unlinked'}
                     </span>
-                    <div className="flex gap-2 shrink-0">
-                      <button
-                        onClick={() => openEditPanel(c)}
-                        className="text-slate-500 bg-slate-100 dark:bg-zinc-800 p-2.5 rounded-lg flex-1 flex justify-center items-center"
-                      >
-                        <Edit2 size={14} />
-                      </button>
-                      <button
-                        onClick={() => setDeleteModal({ isOpen: true, id: c.id, name: c.name })}
-                        className="text-red-500 bg-red-50 dark:bg-red-900/20 p-2.5 rounded-lg flex-1 flex justify-center items-center"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
+                    {!isReadOnly && (
+                      <div className="flex gap-2 shrink-0">
+                        <button
+                          onClick={() => openEditPanel(c)}
+                          className="text-slate-500 bg-slate-100 dark:bg-zinc-800 p-2.5 rounded-lg flex-1 flex justify-center items-center"
+                        >
+                          <Edit2 size={14} />
+                        </button>
+                        <button
+                          onClick={() => setDeleteModal({ isOpen: true, id: c.id, name: c.name })}
+                          className="text-red-500 bg-red-50 dark:bg-red-900/20 p-2.5 rounded-lg flex-1 flex justify-center items-center"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}

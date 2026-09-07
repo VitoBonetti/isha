@@ -63,6 +63,8 @@ function AppContent() {
         {/* Pentesters, Admins, & Read-Only (Maintainer Blocked) */}
         <Route element={<RoleGuard allowedRoles={['admin', 'pentester', 'read_only']} />}>
           <Route path="/calendar" element={<CalendarView />} />
+        </Route>
+        <Route element={<RoleGuard allowedRoles={['admin', 'pentester']} />}>
           <Route path="/validating" element={<ValidatingVulnsView />} />
         </Route>
 
@@ -76,25 +78,28 @@ function AppContent() {
             <Route path="pool" element={<AssetsView />} />
           </Route>
 
-          {/* Admin & Maintainer */}
-          <Route element={<RoleGuard allowedRoles={['admin', 'maintainer']} />}>
+          {/* Admin & Maintainer & Read-Only  */}
+          <Route element={<RoleGuard allowedRoles={['admin', 'maintainer', 'read_only']} />}>
             <Route path="raw/:id" element={<AssetDetailView />} />
           </Route>
 
-          {/* Admin Only Assets */}
-          <Route element={<RoleGuard allowedRoles={['admin']} />}>
+          {/* Admin & Read-Only  Raw and Analytics */}
+          <Route element={<RoleGuard allowedRoles={['admin', 'read_only']} />}>
             <Route path="raw" element={<RawAssetsView />} />
             <Route path="analytics" element={<CountriesView />} />
             <Route path="insights" element={<InsightsView />} />
             <Route path="documents" element={<DocumentsView />} />
+          </Route>
+          {/* Admin Only  Rag */}
+          <Route element={<RoleGuard allowedRoles={['admin']} />}>
             <Route path="rag" element={<RagChatPage />} />
             <Route path="rag/share/:sharedSessionId" element={<RagChatPage />} />
           </Route>
         </Route>
 
         {/* Modular Control Panel */}
-        <Route element={<RoleGuard allowedRoles={['admin']} />}>
-          <Route path="/settings" element={<ControlPanelLayout />}>
+        <Route path="/settings" element={<ControlPanelLayout />}>
+          <Route element={<RoleGuard allowedRoles={['admin', 'read_only']} />}>
             <Route index element={<ControlPanelHome />} />
             <Route path="users" element={<UsersSettings />} />
             <Route path="locations" element={<LocationsSettings />} />
@@ -105,11 +110,13 @@ function AppContent() {
             <Route path="regions" element={<RegionsSettings />} />
             <Route path="countries" element={<CountriesSettings />} />
             <Route path="contacts" element={<ContactsSettings />} />
+            <Route path="logs" element={<SystemLogsSettings />} />
+          </Route>
+          <Route element={<RoleGuard allowedRoles={['admin']} />}>
             <Route path="kiss24" element={<Kiss24SyncSettings />} />
             <Route path="servicenow" element={<ServiceNowSyncSettings />} />
             <Route path="reconciliation" element={<AssetReconciliationView />} />
             <Route path="api-keys" element={<ApiKeysSettings />} />
-            <Route path="logs" element={<SystemLogsSettings />} />
             <Route path="danger" element={<DangerZoneSettings />} />
           </Route>
         </Route>

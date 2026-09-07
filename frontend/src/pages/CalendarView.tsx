@@ -24,6 +24,8 @@ const getUserColor = (userId: string, pentestersArray: any[]) => {
 export default function CalendarView() {
   const { currentUser } = useAppContext();
 
+  const isReadOnly = currentUser?.role === 'read_only';
+
   const [currentDate, setCurrentDate] = useState(new Date());
   const [modalOpen, setModalOpen] = useState(false);
   const [activeHoliday, setActiveHoliday] = useState<any>(null);
@@ -205,7 +207,9 @@ export default function CalendarView() {
                           <div
                             key={dayIdx}
                             onClick={() => {
-                              if (!day) return;
+                              // If they are read_only, block clicking on empty cells entirely
+                              if (!day || isReadOnly) return;
+
                               const dStr = toDateStr(day);
                               const defaultUserId = currentUser?.role === 'admin' ? '' : (currentUser?.id || '');
 
@@ -218,7 +222,7 @@ export default function CalendarView() {
                               });
                               setModalOpen(true);
                             }}
-                            className={`border-r border-slate-200 dark:border-zinc-800 last:border-r-0 p-3 h-full cursor-pointer transition-colors ${!day ? 'bg-slate-50/50 dark:bg-zinc-950/50' : 'hover:bg-slate-50 dark:hover:bg-zinc-800/30'}`}
+                            className={`border-r border-slate-200 dark:border-zinc-800 last:border-r-0 p-3 h-full transition-colors ${!day ? 'bg-slate-50/50 dark:bg-zinc-950/50' : isReadOnly ? 'cursor-default' : 'hover:bg-slate-50 dark:hover:bg-zinc-800/30 cursor-pointer'}`}
                           >
                             {day && (
                               <span className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-sm font-bold ${isToday ? 'bg-blue-600 text-white shadow-md' : 'text-slate-600 dark:text-zinc-400'}`}>
@@ -269,7 +273,6 @@ export default function CalendarView() {
                           bgClass = 'bg-orange-100 dark:bg-orange-500/20'; borderClass = 'border-orange-500'; textClass = 'text-orange-800 dark:text-orange-400';
                           label = `🤒 ${user?.name || 'Unknown User'} (Sick)`;
                         } else if (eType === 'working_from_abroad') {
-                          // NEW THEME: WFA Display
                           bgClass = 'bg-teal-100 dark:bg-teal-500/20'; borderClass = 'border-teal-500'; textClass = 'text-teal-800 dark:text-teal-400';
                           const locName = locations.find(l => l.id === evt.location_id)?.name || 'Other';
                           label = `✈️ ${user?.name || 'Unknown User'} (WFA: ${locName})`;
@@ -280,7 +283,8 @@ export default function CalendarView() {
 
                         const isAdmin = currentUser?.role === 'admin';
                         const isOwner = String(user?.id) === String(currentUser?.id);
-                        const canEdit = isAdmin || (['personal_time_off', 'sick_day', 'working_from_abroad'].includes(eType) && isOwner);
+                        // Add !isReadOnly to ensure read-only users can never edit, even if they somehow own an event
+                        const canEdit = !isReadOnly && (isAdmin || (['personal_time_off', 'sick_day', 'working_from_abroad'].includes(eType) && isOwner));
 
                         return (
                           <div

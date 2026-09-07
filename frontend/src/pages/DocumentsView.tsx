@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import axios from "axios";
 import toast, { Toaster } from 'react-hot-toast';
-import { Search, Filter, ChevronsUpDown, ChevronUp, ChevronDown, FileText, ExternalLink, Files, Clock } from "lucide-react";
+import { Search, ChevronsUpDown, ChevronUp, ChevronDown, FileText, ExternalLink, Files, Clock } from "lucide-react";
 
 export default function DocumentsView() {
   const [documents, setDocuments] = useState<any[]>([]);
@@ -14,6 +14,7 @@ export default function DocumentsView() {
   const [searchTerm, setSearchTerm] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [filterService, setFilterService] = useState("");
+  const [filterDocType, setFilterDocType] = useState("");
   const [totalPages, setTotalPages] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
 
@@ -26,13 +27,18 @@ export default function DocumentsView() {
   }, []);
 
   useEffect(() => {
+    const timer = setTimeout(() => { setSearchTerm(searchTerm); setPage(1); }, 500);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+
+  useEffect(() => {
     const timer = setTimeout(() => { setDebouncedSearch(searchTerm); setPage(1); }, 500);
     return () => clearTimeout(timer);
   }, [searchTerm]);
 
   useEffect(() => {
     fetchDocuments();
-  }, [page, debouncedSearch, filterService, sortBy, sortDir]);
+  }, [page, debouncedSearch, filterService, filterDocType, sortBy, sortDir]);
 
   const fetchDocuments = async () => {
     try {
@@ -40,6 +46,7 @@ export default function DocumentsView() {
       const params: any = { page, limit: 20, sort_by: sortBy, sort_dir: sortDir };
       if (debouncedSearch) params.search = debouncedSearch;
       if (filterService) params.service_lane_id = filterService;
+      if (filterDocType) params.doc_type = filterDocType;
 
       const res = await axios.get("/api/documents/", { params });
       setDocuments(res.data.items);
@@ -63,7 +70,7 @@ export default function DocumentsView() {
   };
 
   const formatDate = (dateString: string) => {
-    if (!dateString) return "N/A";
+    if (!dateString) return "--";
     return new Date(dateString).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
   };
 
@@ -83,19 +90,48 @@ export default function DocumentsView() {
         )}
       </div>
       <p className="text-slate-500 dark:text-zinc-400 mb-6 md:mb-8 text-sm md:text-base">
-        Global index of all synchronized Google Drive files across tests.
+        Global index of all synchronized Google Drive files across tests and Knowledge Base.
       </p>
 
       {/* Toolbar */}
       <div className="flex flex-col sm:flex-row gap-4 items-stretch sm:items-center justify-between bg-white dark:bg-zinc-900 p-4 rounded-xl border border-slate-200 dark:border-zinc-800 shadow-sm relative">
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 flex-1">
+          {/* Search Bar */}
           <div className="relative w-full sm:max-w-md">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-            <input type="text" placeholder="Search file or test name..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2.5 md:py-2 rounded-lg border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 focus:ring-2 focus:ring-blue-500 outline-none text-sm" />
+            <input
+              type="text"
+              placeholder="Search file or test name..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-10 pr-4 py-2.5 md:py-2 rounded-lg border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+            />
           </div>
-          <select className="w-full sm:w-auto p-2.5 md:p-2 border border-slate-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-sm outline-none" value={filterService} onChange={e => {setFilterService(e.target.value); setPage(1);}}>
-            <option value="">All Services</option>
+
+          {/* Scope / Service Filter */}
+          <select
+            className="w-full sm:w-auto p-2.5 md:p-2 border border-slate-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-sm outline-none"
+            value={filterService}
+            onChange={e => { setFilterService(e.target.value); setPage(1); }}
+          >
+            <option value="">All Services (Excl. Knowledge Base)</option>
+            <option value="all_incl_kb">All Documents (Incl. Knowledge Base)</option>
+            <option value="kb_only">Knowledge Base Only</option>
             {services.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+
+          {/* Document Type Filter */}
+          <select
+            className="w-full sm:w-auto p-2.5 md:p-2 border border-slate-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-sm outline-none"
+            value={filterDocType}
+            onChange={e => { setFilterDocType(e.target.value); setPage(1); }}
+          >
+            <option value="">All Document Types</option>
+            <option value="MANUAL_UPLOAD">Manual Upload</option>
+            <option value="FULL_TEST_REPORT">Full Test Report</option>
+            <option value="PRESENTATION">Presentation</option>
+            <option value="VULN_REPORT">Vuln Report</option>
+            <option value="LLM_ANALYSIS">LLM Analysis</option>
           </select>
         </div>
       </div>
@@ -103,18 +139,31 @@ export default function DocumentsView() {
       {/* Data Table */}
       <div className="mt-6 bg-white dark:bg-zinc-900 rounded-xl border border-slate-200 dark:border-zinc-800 shadow-sm overflow-hidden w-full">
         {loading ? (
-          <div className="p-12 text-center"><div className="animate-spin h-8 w-8 border-4 border-blue-500 border-t-transparent rounded-full mx-auto"></div><p className="mt-4 text-slate-500 text-sm">Loading documents...</p></div>
+          <div className="p-12 text-center">
+            <div className="animate-spin h-8 w-8 border-4 border-blue-500 border-t-transparent rounded-full mx-auto"></div>
+            <p className="mt-4 text-slate-500 text-sm">Loading documents...</p>
+          </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm whitespace-nowrap min-w-[800px]">
               <thead className="bg-slate-50 dark:bg-zinc-800/50 border-b border-slate-200 dark:border-zinc-700">
                 <tr>
-                  <th className="p-4 font-semibold text-slate-500 uppercase cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort("file_name")}><div className="flex items-center gap-2">File Name <SortIcon column="file_name" /></div></th>
-                  <th className="p-4 font-semibold text-slate-500 uppercase cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort("test_name")}><div className="flex items-center gap-2">Linked Test <SortIcon column="test_name" /></div></th>
+                  <th className="p-4 font-semibold text-slate-500 uppercase cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort("file_name")}>
+                    <div className="flex items-center gap-2">File Name <SortIcon column="file_name" /></div>
+                  </th>
+                  <th className="p-4 font-semibold text-slate-500 uppercase cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort("test_name")}>
+                    <div className="flex items-center gap-2">Linked Test <SortIcon column="test_name" /></div>
+                  </th>
                   <th className="p-4 font-semibold text-slate-500 uppercase">Location</th>
-                  <th className="p-4 font-semibold text-slate-500 uppercase cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort("service")}><div className="flex items-center gap-2">Service Lane <SortIcon column="service" /></div></th>
-                  <th className="p-4 font-semibold text-slate-500 uppercase cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort("scheduled")}><div className="flex items-center gap-2">Scheduled <SortIcon column="scheduled" /></div></th>
-                  <th className="p-4 font-semibold text-slate-500 uppercase cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort("synced_at")}><div className="flex items-center gap-2"><Clock size={14}/> Synced <SortIcon column="synced_at" /></div></th>
+                  <th className="p-4 font-semibold text-slate-500 uppercase cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort("service")}>
+                    <div className="flex items-center gap-2">Service Lane <SortIcon column="service" /></div>
+                  </th>
+                  <th className="p-4 font-semibold text-slate-500 uppercase cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort("scheduled")}>
+                    <div className="flex items-center gap-2">Scheduled <SortIcon column="scheduled" /></div>
+                  </th>
+                  <th className="p-4 font-semibold text-slate-500 uppercase cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" onClick={() => handleSort("synced_at")}>
+                    <div className="flex items-center gap-2"><Clock size={14}/> Synced <SortIcon column="synced_at" /></div>
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200 dark:divide-zinc-700">
@@ -128,24 +177,38 @@ export default function DocumentsView() {
                       </a>
                     </td>
                     <td className="p-4 max-w-[200px]">
-                      <Link to={`/tests/${doc.test_id}`} className="text-slate-700 dark:text-zinc-300 font-medium hover:text-blue-600 dark:hover:text-blue-400 hover:underline truncate block">
-                        {doc.test_name}
-                      </Link>
+                      {doc.test_id ? (
+                        <Link to={`/tests/${doc.test_id}`} className="text-slate-700 dark:text-zinc-300 font-medium hover:text-blue-600 dark:hover:text-blue-400 hover:underline truncate block">
+                          {doc.test_name}
+                        </Link>
+                      ) : (
+                        <span className="text-slate-400 font-mono">--</span>
+                      )}
                     </td>
-                    <td className="p-4"><span className="font-mono text-xs font-bold text-slate-500">{doc.countries || '--'}</span></td>
-                    <td className="p-4"><span className="text-sm font-medium">{doc.service_name}</span></td>
+                    <td className="p-4">
+                      <span className="font-mono text-xs font-bold text-slate-500">{doc.countries || '--'}</span>
+                    </td>
+                    <td className="p-4">
+                      <span className="text-sm font-medium">{doc.service_name || '--'}</span>
+                    </td>
                     <td className="p-4">
                       {doc.start_week && doc.start_year ? (
                         <span className="inline-flex px-2 py-0.5 rounded text-xs font-bold bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400">
                           Wk {doc.start_week}, {doc.start_year}
                         </span>
-                      ) : '-'}
+                      ) : (
+                        <span className="text-slate-400 font-mono">--</span>
+                      )}
                     </td>
                     <td className="p-4 text-slate-500 text-xs">{formatDate(doc.synced_at)}</td>
                   </tr>
                 ))}
                 {documents.length === 0 && (
-                  <tr><td colSpan={6} className="p-8 text-center text-slate-500 font-medium">No documents found matching your criteria.</td></tr>
+                  <tr>
+                    <td colSpan={6} className="p-8 text-center text-slate-500 font-medium">
+                      No documents found matching your criteria.
+                    </td>
+                  </tr>
                 )}
               </tbody>
             </table>

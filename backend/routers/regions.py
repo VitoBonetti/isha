@@ -18,7 +18,7 @@ def get_regions(current_user: dict = Depends(get_current_user), cursor=Depends(g
     """
     Endpoint to get all regions
     """
-    role_allowed = ['admin', 'read-only']
+    role_allowed = ['admin', 'read_only', 'pentester']
 
     if current_user.get('role') not in role_allowed:
         raise HTTPException(status_code=403, detail=f"{current_user.get('role')} cannot access region data.")

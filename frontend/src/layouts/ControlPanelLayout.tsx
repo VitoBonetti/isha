@@ -1,30 +1,51 @@
 import React from 'react';
 import { Outlet, NavLink } from 'react-router-dom';
 import TopNav from '../components/TopNav';
+import { useAppContext } from '../context/AppContext';
 import {
   Users, MapPin, LayoutTemplate, Activity, Tags, Globe, Flag, KeySquare,
   Server, BookUser, ShieldCheck, CloudSync, AlertTriangle, LayoutDashboard, GitMerge, Filter
 } from 'lucide-react';;
 
 export default function ControlPanelLayout() {
-  const navItems = [
-    { path: "/settings", label: "Dashboard", icon: LayoutDashboard, exact: true },
-    { path: "/settings/users", label: "Users", icon: Users },
-    { path: "/settings/locations", label: "Locations", icon: MapPin },
-    { path: "/settings/asset-types", label: "Asset Types", icon: LayoutTemplate },
-    { path: "/settings/asset-criteria", label: "KPI Criteria", icon: Filter },
-    { path: "/settings/services", label: "Services", icon: Activity },
-    { path: "/settings/categories", label: "Categories", icon: Tags },
-    { path: "/settings/regions", label: "Regions", icon: Globe },
-    { path: "/settings/countries", label: "Countries", icon: Flag },
-    { path: "/settings/contacts", label: "Contacts", icon: BookUser },
-    { path: "/settings/kiss24", label: "Kiss 24 Sync", icon: ShieldCheck },
-    { path: "/settings/servicenow", label: "ServiceNow Sync", icon: CloudSync },
-    { path: "/settings/reconciliation", label: "Asset Reconciliation", icon: GitMerge },
-    { path: "/settings/api-keys", label: "API Keys", icon: KeySquare },
-    { path: "/settings/logs", label: "System Logs", icon: Server },
-    { path: "/settings/danger", label: "Danger Zone", icon: AlertTriangle, isDanger: true },
-  ];
+  const { currentUser } = useAppContext();
+
+  let navItems: any[] = [];
+
+  if (currentUser?.role === 'read_only') {
+    navItems = [
+      { path: "/settings", label: "Dashboard", icon: LayoutDashboard, exact: true },
+      { path: "/settings/users", label: "Users", icon: Users },
+      { path: "/settings/locations", label: "Locations", icon: MapPin },
+      { path: "/settings/asset-types", label: "Asset Types", icon: LayoutTemplate },
+      { path: "/settings/asset-criteria", label: "KPI Criteria", icon: Filter },
+      { path: "/settings/services", label: "Services", icon: Activity },
+      { path: "/settings/categories", label: "Categories", icon: Tags },
+      { path: "/settings/regions", label: "Regions", icon: Globe },
+      { path: "/settings/countries", label: "Countries", icon: Flag },
+      { path: "/settings/contacts", label: "Contacts", icon: BookUser },
+      { path: "/settings/logs", label: "System Logs", icon: Server },
+    ];
+  } else {
+    navItems = [
+      { path: "/settings", label: "Dashboard", icon: LayoutDashboard, exact: true },
+      { path: "/settings/users", label: "Users", icon: Users },
+      { path: "/settings/locations", label: "Locations", icon: MapPin },
+      { path: "/settings/asset-types", label: "Asset Types", icon: LayoutTemplate },
+      { path: "/settings/asset-criteria", label: "KPI Criteria", icon: Filter },
+      { path: "/settings/services", label: "Services", icon: Activity },
+      { path: "/settings/categories", label: "Categories", icon: Tags },
+      { path: "/settings/regions", label: "Regions", icon: Globe },
+      { path: "/settings/countries", label: "Countries", icon: Flag },
+      { path: "/settings/contacts", label: "Contacts", icon: BookUser },
+      { path: "/settings/kiss24", label: "Kiss 24 Sync", icon: ShieldCheck },
+      { path: "/settings/servicenow", label: "ServiceNow Sync", icon: CloudSync },
+      { path: "/settings/reconciliation", label: "Asset Reconciliation", icon: GitMerge },
+      { path: "/settings/api-keys", label: "API Keys", icon: KeySquare },
+      { path: "/settings/logs", label: "System Logs", icon: Server },
+      { path: "/settings/danger", label: "Danger Zone", icon: AlertTriangle, isDanger: true },
+    ];
+  }
 
   const getNavLinkClass = (isActive: boolean, isDanger?: boolean) => {
     const baseClass = "flex items-center gap-3 px-4 py-2.5 rounded-xl font-medium text-sm whitespace-nowrap transition-colors";

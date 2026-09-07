@@ -29,10 +29,8 @@ export default function AssetsLayout() {
     if (currentUser?.role === 'admin') {
       navItems.push({ path: "/assets/documents", label: "Documents", icon: Files });
       navItems.push({ path: "/assets/rag", label: "Luigi Intelligence", icon: Bot });
+      navItems.push({ path: "/settings/reconciliation", label: "Asset Sync", icon: GitMerge, isExternal: true });
     }
-
-    // External link back to the Settings Control Panel
-    navItems.push({ path: "/settings/reconciliation", label: "Asset Sync", icon: GitMerge, isExternal: true });
   }
 
   const getNavLinkClass = (isActive: boolean) => {

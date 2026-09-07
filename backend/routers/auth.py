@@ -154,23 +154,19 @@ def require_write_access(current_user: dict = Depends(get_current_user)):
 
 def verify_lane_access(current_user: dict, target_lane_id: str):
     """
-    Helper function to call INSIDE endpoints (e.g., PUT /tests/{id})
-    to ensure Maintainers only edit their own lane's resources.
+    Ensures Maintainers only access their own lane's resources.
+    Does NOT block other roles (Admin, Pentester, Read-Only) — role-level
+    security is handled by FastAPI Depends() at the route level.
     """
-    if current_user.get('role') == 'admin':
-        return True
-
     if current_user.get('role') == 'maintainer':
-        if str(current_user.get('service_lane_id')) == str(target_lane_id):
-            return True
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Maintainers can only modify resources assigned to their specific Service Lane."
-        )
+        if str(current_user.get('service_lane_id')) != str(target_lane_id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Maintainers can only access resources assigned to their specific Service Lane."
+            )
 
-    # If they are a Pentester or Read Only, they shouldn't be using admin endpoints anyway,
-    # but we block them here just in case.
-    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient privileges.")
+    # If they are Admin, Pentester, or Read-Only, the lane concept doesn't restrict them here.
+    return True
 
 
 def require_maintainer_or_admin(current_user: dict = Depends(get_current_user)):
@@ -179,6 +175,19 @@ def require_maintainer_or_admin(current_user: dict = Depends(get_current_user)):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Maintainer or Admin privileges required."
+        )
+    return current_user
+
+
+def require_admin_or_read_only(current_user: dict = Depends(get_current_user)):
+    """
+    Allows Global Admins and Read-Only users.
+    Ideal for GET endpoints where auditors or stakeholders need to see global data without editing it.
+    """
+    if current_user.get('role') not in ['admin', 'read_only']:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin or Read-Only privileges required."
         )
     return current_user
 

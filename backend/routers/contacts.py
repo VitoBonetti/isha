@@ -3,7 +3,7 @@ from pydantic import BaseModel, EmailStr
 from typing import Optional, List
 import uuid
 from database import get_db_cursor
-from routers.auth import require_admin, get_current_user
+from routers.auth import require_admin, get_current_user, require_admin_or_read_only
 from schema import ContactMappingItem, ContactSyncPayload
 from websockets_manager import manager
 from audit_logger import log_audit_event
@@ -30,7 +30,7 @@ def upsert_global_contact(cursor, email: str, full_name: str = None) -> str:
 
 # --- ENDPOINTS ---
 @router.get("/", summary="Get All Global Contacts")
-def get_all_contacts(current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
+def get_all_contacts(current_user: dict = Depends(require_admin_or_read_only), cursor=Depends(get_db_cursor)):
     """
     Endpoint to Get All Global Contacts
     """

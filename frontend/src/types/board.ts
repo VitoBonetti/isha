@@ -100,9 +100,16 @@ export interface ChatSession {
   last_updated: string;
 }
 
+export interface ActiveFilters {
+  docType?: FilterItem | null;
+  asset?: FilterItem | null;
+  test?: FilterItem | null;
+}
+
 export interface ExtendedMessage extends Message {
   log_id?: string;
   feedback?: boolean | null;
+  filters?: ActiveFilters;
 }
 
 export interface UserFormState {

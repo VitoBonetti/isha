@@ -365,13 +365,13 @@ export default function TestDetailsView() {
 
                   {/* WORKSPACE & VAULT BUTTONS */}
                   <div className="flex items-center gap-2 mt-2 xl:mt-0">
-                    {test.auto_provision_workspace && (
+                    {test.auto_provision_workspace && !isReadOnly && (
                       <>
                         {test.drive_folder_url ? (
                           <a href={test.drive_folder_url} target="_blank" rel="noopener noreferrer" className="px-3 py-1.5 text-blue-600 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 border border-blue-200 dark:border-blue-900/50 rounded-lg transition-colors flex items-center gap-2 text-xs font-bold" title="Open Workspace">
                             <FolderOpen size={14} /> <span className="hidden sm:inline">Workspace</span>
                           </a>
-                        ) : !isReadOnly && (
+                        ) : (
                           <button onClick={handleCreateWorkspace} className="px-3 py-1.5 text-slate-500 bg-slate-100 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors flex items-center gap-2 text-xs font-bold">
                             <FolderPlus size={14} /> <span className="hidden sm:inline">Create Workspace</span>
                           </button>
@@ -510,23 +510,25 @@ export default function TestDetailsView() {
           {/* RIGHT COLUMN: Action Menu & Accordions (1/3 width) */}
           <div className="w-full lg:w-1/3 flex flex-col gap-4">
             {/* --- KISS24 INTEGRATION WIDGET --- */}
-            <button
-              onClick={() => setIsKiss24PanelOpen(true)}
-              className="w-full flex items-center justify-between p-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-2xl shadow-md transition-all outline-none group"
-            >
-              <div className="flex items-center gap-3">
-                <div className="p-2.5 bg-white/20 rounded-xl shadow-sm">
-                  <Cable size={20} className="text-white" />
+            {!isReadOnly && (
+              <button
+                onClick={() => setIsKiss24PanelOpen(true)}
+                className="w-full flex items-center justify-between p-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-2xl shadow-md transition-all outline-none group"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 bg-white/20 rounded-xl shadow-sm">
+                    <Cable size={20} className="text-white" />
+                  </div>
+                  <div className="text-left">
+                    <h3 className="font-extrabold text-sm md:text-base tracking-wide">Keep Secure 24</h3>
+                    <p className="text-[10px] md:text-xs text-blue-100 font-medium mt-0.5">Manage Vulns & Sync Platform</p>
+                  </div>
                 </div>
-                <div className="text-left">
-                  <h3 className="font-extrabold text-sm md:text-base tracking-wide">Keep Secure 24</h3>
-                  <p className="text-[10px] md:text-xs text-blue-100 font-medium mt-0.5">Manage Vulns & Sync Platform</p>
+                <div className="p-2 bg-white/10 rounded-full group-hover:bg-white/20 transition-colors">
+                  <ChevronRight size={18} className="text-white" />
                 </div>
-              </div>
-              <div className="p-2 bg-white/10 rounded-full group-hover:bg-white/20 transition-colors">
-                <ChevronRight size={18} className="text-white" />
-              </div>
-            </button>
+              </button>
+            )}
             {/* ------------------------------------------ */}
             {/* ACTION MENU (Report Generators) */}
             {test.auto_provision_workspace && !isReadOnly && (
@@ -647,6 +649,7 @@ export default function TestDetailsView() {
                           checked={milestones[step] || false}
                           onChange={() => handleToggleMilestone(step)}
                           className="mt-0.5 w-4 h-4 rounded text-emerald-500 border-slate-300 dark:border-zinc-700 bg-slate-50 dark:bg-zinc-950 focus:ring-emerald-500 transition-colors cursor-pointer"
+                          disabled={isReadOnly}
                         />
                         <span className={`text-sm font-bold transition-colors ${milestones[step] ? 'text-slate-400 dark:text-zinc-500 line-through' : 'text-slate-800 dark:text-zinc-200 group-hover:text-blue-600 dark:group-hover:text-blue-400'}`}>
                           {step}

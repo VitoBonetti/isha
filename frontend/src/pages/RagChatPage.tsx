@@ -12,7 +12,7 @@ import {
 import toast, { Toaster } from "react-hot-toast";
 import { useAppContext } from "../context/AppContext";
 import greenStainIcon from '../assets/greenstain-icon.png';
-import type { Citation, Message, FilterItem, ChatSession, ExtendedMessage  } from "../types/board";
+import type { Citation, Message, FilterItem, ChatSession, ExtendedMessage, ActiveFilters } from "../types/board";
 import ConfirmModal from '../components/Modals/ConfirmModal';
 
 // Syntax Highlighter
@@ -60,7 +60,6 @@ export default function RagChatPage() {
   };
 
   const handleShareChat = () => {
-    // Generate the share link using the current window origin
     const shareUrl = `${window.location.origin}/assets/rag/share/${sessionId}`;
     navigator.clipboard.writeText(shareUrl);
     toast.success("Share link copied to clipboard!");
@@ -83,7 +82,7 @@ export default function RagChatPage() {
   }>({ isOpen: false, title: '', message: '', onConfirm: () => {} });
 
   // --- Chat State ---
-  const initialWelcomeMessage: Message = {
+  const initialWelcomeMessage: ExtendedMessage = {
     role: 'assistant',
     content: 'Hello! I am your Luigi Intelligence assistant. Use `/` for doc types, `@` for assets, and `$` for tests to narrow your search!',
     citations: [],
@@ -103,16 +102,16 @@ export default function RagChatPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [isUserScrolling, setIsUserScrolling] = useState(false);
 
-  // --- Autocomplete State ---
+  // --- Autocomplete State (Objects for Badges) ---
   const [availableFilters, setAvailableFilters] = useState<FilterItem[]>([]);
   const [activeTrigger, setActiveTrigger] = useState<string | null>(null);
   const [menuQuery, setMenuQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [totalSources, setTotalSources] = useState<number>(0);
 
-  const [selectedDocType, setSelectedDocType] = useState<string | null>(null);
-  const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
-  const [selectedTestId, setSelectedTestId] = useState<string | null>(null);
+  const [activeDocType, setActiveDocType] = useState<FilterItem | null>(null);
+  const [activeAsset, setActiveAsset] = useState<FilterItem | null>(null);
+  const [activeTest, setActiveTest] = useState<FilterItem | null>(null);
 
   useEffect(() => {
     fetch('/api/rag/filters').then(res => res.json()).then(data => setAvailableFilters(data)).catch(err => console.error("Failed to load filters", err));
@@ -120,12 +119,11 @@ export default function RagChatPage() {
     loadSessions();
 
     const handleResize = () => {
-    // Auto-close on small screens when shrinking, but do NOT auto-open on desktop
-    if (window.innerWidth < 768 && isSidebarOpen) setIsSidebarOpen(false);
-  };
-  window.addEventListener('resize', handleResize);
-  return () => window.removeEventListener('resize', handleResize);
-}, [isSidebarOpen]);
+      if (window.innerWidth < 768 && isSidebarOpen) setIsSidebarOpen(false);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [isSidebarOpen]);
 
   const loadSessions = () => {
     fetch('/api/rag/sessions')
@@ -269,12 +267,16 @@ export default function RagChatPage() {
   };
 
   const applyFilterSelection = (item: FilterItem) => {
-    const newVal = input.replace(/(?:^|\s)([@$/])[a-zA-Z0-9_-]*$/, ` $1${item.name} `).trimStart();
+    // Strip the trigger and typed query from the text input
+    const newVal = input.replace(/(?:^|\s)([@$/])[a-zA-Z0-9_-]*$/, ' ').trimStart();
     setInput(newVal);
     setActiveTrigger(null);
-    if (item.type === 'doc_type') setSelectedDocType(item.id);
-    if (item.type === 'asset') setSelectedAssetId(item.id);
-    if (item.type === 'test') setSelectedTestId(item.id);
+
+    // Store the full item object for badge rendering
+    if (item.type === 'doc_type') setActiveDocType(item);
+    if (item.type === 'asset') setActiveAsset(item);
+    if (item.type === 'test') setActiveTest(item);
+
     textareaRef.current?.focus();
   };
 
@@ -286,23 +288,11 @@ export default function RagChatPage() {
       if (e.key === 'Escape') { setActiveTrigger(null); return; }
     }
 
-    if (e.key === 'Backspace' && !activeTrigger) {
-      const cursorPosition = textareaRef.current?.selectionStart;
-      if (cursorPosition) {
-        const textBeforeCursor = input.substring(0, cursorPosition);
-        const tagMatch = textBeforeCursor.match(/(^|\s)([@$/][^\s]+)\s?$/);
-        if (tagMatch) {
-          e.preventDefault();
-          const fullMatch = tagMatch[0];
-          const tagToDelete = tagMatch[2];
-          const newInput = input.substring(0, cursorPosition - fullMatch.length + (tagMatch[1] ? 1 : 0)) + input.substring(cursorPosition);
-          setInput(newInput);
-          if (tagToDelete.startsWith('/')) setSelectedDocType(null);
-          if (tagToDelete.startsWith('@')) setSelectedAssetId(null);
-          if (tagToDelete.startsWith('$')) setSelectedTestId(null);
-          return;
-        }
-      }
+    // Allow user to delete a badge via backspace if the input is empty
+    if (e.key === 'Backspace' && !activeTrigger && input === '') {
+      if (activeTest) { setActiveTest(null); e.preventDefault(); }
+      else if (activeAsset) { setActiveAsset(null); e.preventDefault(); }
+      else if (activeDocType) { setActiveDocType(null); e.preventDefault(); }
     }
 
     if (e.key === 'Enter' && !e.shiftKey && !activeTrigger) {
@@ -315,9 +305,9 @@ export default function RagChatPage() {
   const handleClearChat = () => {
     setSessionId(uuidv4());
     setMessages([initialWelcomeMessage]);
-    setSelectedDocType(null);
-    setSelectedAssetId(null);
-    setSelectedTestId(null);
+    setActiveDocType(null);
+    setActiveAsset(null);
+    setActiveTest(null);
     setEditingIndex(null);
     setIsReadOnly(false);
     if (sharedSessionId) {
@@ -366,21 +356,9 @@ export default function RagChatPage() {
     }, 0);
   };
 
-  const executeChatStream = async (queryText: string, baseMessages: Message[]) => {
+  const executeChatStream = async (queryText: string, baseMessages: ExtendedMessage[]) => {
     setIsLoading(true);
     setIsUserScrolling(false);
-
-    let finalDocType = selectedDocType;
-    let finalAssetId = selectedAssetId;
-    let finalTestId = selectedTestId;
-
-    const usedDocType = availableFilters.find(f => f.id === selectedDocType);
-    if (usedDocType && !queryText.includes(`/${usedDocType.name}`)) finalDocType = null;
-    const usedAsset = availableFilters.find(f => f.id === selectedAssetId);
-    if (usedAsset && !queryText.includes(`@${usedAsset.name}`)) finalAssetId = null;
-    const usedTest = availableFilters.find(f => f.id === selectedTestId);
-    if (usedTest && !queryText.includes(`$${usedTest.name}`)) finalTestId = null;
-
     setMessages(baseMessages);
     abortControllerRef.current = new AbortController();
 
@@ -391,9 +369,9 @@ export default function RagChatPage() {
         body: JSON.stringify({
           query: queryText,
           session_id: sessionId,
-          doc_type: finalDocType,
-          asset_id: finalAssetId,
-          test_id: finalTestId
+          doc_type: activeDocType?.id || null,
+          asset_id: activeAsset?.id || null,
+          test_id: activeTest?.id || null
         }),
         signal: abortControllerRef.current.signal,
       });
@@ -443,7 +421,7 @@ export default function RagChatPage() {
               setMessages((prev) => {
                 const updated = [...prev];
                 updated[updated.length - 1].citations = data.citations;
-                if (data.log_id) updated[updated.length - 1].log_id = data.log_id; // Capture ID
+                if (data.log_id) updated[updated.length - 1].log_id = data.log_id;
                 return updated;
               });
             }
@@ -479,14 +457,22 @@ export default function RagChatPage() {
     const payloadQuery = (overrideInput || input).trim();
     if (!payloadQuery || isLoading) return;
 
+    // Capture current filters for the chat history bubble
+    const currentFilters: ActiveFilters = {
+      docType: activeDocType,
+      asset: activeAsset,
+      test: activeTest
+    };
+
     setInput('');
     setActiveTrigger(null);
 
-    const newMessages: Message[] = [
+    const newMessages: ExtendedMessage[] = [
       ...messages,
       {
         role: 'user',
         content: payloadQuery,
+        filters: currentFilters,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       },
     ];
@@ -518,9 +504,14 @@ export default function RagChatPage() {
     const newText = editInput.trim();
     setEditingIndex(null);
     const truncated = messages.slice(0, index);
-    const updatedUserMsg: Message = {
+
+    // Attempt to salvage previous filters if editing
+    const oldFilters = messages[index]?.filters;
+
+    const updatedUserMsg: ExtendedMessage = {
       role: 'user',
       content: newText,
+      filters: oldFilters,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     };
     await executeChatStream(newText, [...truncated, updatedUserMsg]);
@@ -677,7 +668,6 @@ export default function RagChatPage() {
               </div>
             </div>
           </div>
-          {/* ADD THIS NEW BLOCK: Share & Read-Only Badges */}
           <div className="flex items-center gap-2">
             {messages.length > 1 && !isReadOnly && (
               <button
@@ -765,140 +755,158 @@ export default function RagChatPage() {
                       </div>
                     </div>
                   ) : (
-                    <div className="text-sm leading-relaxed break-words">
-                      <ReactMarkdown
-                        urlTransform={(url) => url}
-                        remarkPlugins={[remarkGfm]}
-                        components={{
-                          p: ({ node, ...props }) => <p className="mb-3 last:mb-0" {...props} />,
-                          strong: ({ node, ...props }) => <strong className="font-semibold text-slate-950 dark:text-white" {...props} />,
-                          ul: ({ node, ...props }) => <ul className="list-disc pl-5 mb-3 space-y-1" {...props} />,
-                          ol: ({ node, ...props }) => <ol className="list-decimal pl-5 mb-3 space-y-1" {...props} />,
-                          li: ({ node, ...props }) => <li className="text-slate-800 dark:text-zinc-300" {...props} />,
-                          table: ({ node, ...props }) => (
-                            <div className="overflow-x-auto hover:overflow-visible mb-4 border border-slate-200 dark:border-zinc-700 rounded-lg">
-                              <table className="min-w-full divide-y divide-slate-200 dark:divide-zinc-700 text-sm" {...props} />
-                            </div>
-                          ),
-                          thead: ({ node, ...props }) => <thead className="bg-slate-100 dark:bg-zinc-800" {...props} />,
-                          th: ({ node, ...props }) => (
-                            <th className="px-4 py-2.5 text-left font-semibold text-slate-900 dark:text-zinc-100 border-b border-slate-200 dark:border-zinc-700" {...props} />
-                          ),
-                          td: ({ node, ...props }) => (
-                            <td className="px-4 py-2 border-t border-slate-200 dark:border-zinc-700/50" {...props} />
-                          ),
-
-                          code(props) {
-                            const {children, className, node, ...rest} = props;
-                            const match = /language-(\w+)/.exec(className || '');
-                            const isInline = !match && !String(children).includes('\n');
-
-                            if (isInline) {
-                              return (
-                                <code className="bg-slate-200 dark:bg-zinc-800 text-pink-600 dark:text-pink-400 px-1.5 py-0.5 rounded text-[11px] font-mono whitespace-pre-wrap" {...rest}>
-                                  {children}
-                                </code>
-                              );
-                            }
-
-                            const codeString = String(children).replace(/\n$/, '');
-                            const blockId = `${index}-${match?.[1] || 'code'}`;
-
-                            return (
-                              <div className="relative group my-4 rounded-lg overflow-hidden border border-slate-700">
-                                <div className="flex items-center justify-between px-4 py-1.5 bg-[#1e1e1e] border-b border-slate-700/50 select-none">
-                                  <span className="text-[10px] text-slate-400 font-mono lowercase">{match?.[1] || 'text'}</span>
-                                  <button
-                                    onClick={() => handleCopy(codeString, blockId)}
-                                    className="flex items-center gap-1.5 text-[10px] text-slate-400 hover:text-emerald-400 transition-colors"
-                                  >
-                                    {copiedId === blockId ? (
-                                      <><Check size={12} /><span>Copied</span></>
-                                    ) : (
-                                      <><Copy size={12} /><span>Copy</span></>
-                                    )}
-                                  </button>
-                                </div>
-                                <SyntaxHighlighter
-                                  {...rest}
-                                  children={codeString}
-                                  style={vscDarkPlus}
-                                  language={match?.[1] || 'text'}
-                                  PreTag="div"
-                                  customStyle={{ margin: 0, borderRadius: 0, fontSize: '0.75rem' }}
-                                />
+                    <div className="flex flex-col">
+                      {/* Filter Badges in User Chat Bubble */}
+                      {isUser && msg.filters && (msg.filters.docType || msg.filters.asset || msg.filters.test) && (
+                        <div className="flex flex-wrap gap-1.5 mb-2 border-b border-slate-200 dark:border-zinc-700 pb-2">
+                          {msg.filters.docType && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400">
+                              <FileText size={10} /> {msg.filters.docType.name}
+                            </span>
+                          )}
+                          {msg.filters.asset && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-400">
+                              <Database size={10} /> {msg.filters.asset.name}
+                            </span>
+                          )}
+                          {msg.filters.test && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400">
+                              <Box size={10} /> {msg.filters.test.name}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                      <div className="text-sm leading-relaxed break-words">
+                        <ReactMarkdown
+                          urlTransform={(url) => url}
+                          remarkPlugins={[remarkGfm]}
+                          components={{
+                            p: ({ node, ...props }) => <p className="mb-3 last:mb-0" {...props} />,
+                            strong: ({ node, ...props }) => <strong className="font-semibold text-slate-950 dark:text-white" {...props} />,
+                            ul: ({ node, ...props }) => <ul className="list-disc pl-5 mb-3 space-y-1" {...props} />,
+                            ol: ({ node, ...props }) => <ol className="list-decimal pl-5 mb-3 space-y-1" {...props} />,
+                            li: ({ node, ...props }) => <li className="text-slate-800 dark:text-zinc-300" {...props} />,
+                            table: ({ node, ...props }) => (
+                              <div className="overflow-x-auto hover:overflow-visible mb-4 border border-slate-200 dark:border-zinc-700 rounded-lg">
+                                <table className="min-w-full divide-y divide-slate-200 dark:divide-zinc-700 text-sm" {...props} />
                               </div>
-                            );
-                          },
+                            ),
+                            thead: ({ node, ...props }) => <thead className="bg-slate-100 dark:bg-zinc-800" {...props} />,
+                            th: ({ node, ...props }) => (
+                              <th className="px-4 py-2.5 text-left font-semibold text-slate-900 dark:text-zinc-100 border-b border-slate-200 dark:border-zinc-700" {...props} />
+                            ),
+                            td: ({ node, ...props }) => (
+                              <td className="px-4 py-2 border-t border-slate-200 dark:border-zinc-700/50" {...props} />
+                            ),
+                            code(props) {
+                              const {children, className, node, ...rest} = props;
+                              const match = /language-(\w+)/.exec(className || '');
+                              const isInline = !match && !String(children).includes('\n');
 
-                          a: ({ node, href, children, ...props }) => {
-                            if (href?.startsWith('#cite-')) {
-                              const citeIdStr = href.replace('#cite-', '').trim();
-                              const citationData = msg.citations?.find(c => String(c.id) === citeIdStr);
-                              const isCurrentlyStreaming = isLoading && index === messages.length - 1;
+                              if (isInline) {
+                                return (
+                                  <code className="bg-slate-200 dark:bg-zinc-800 text-pink-600 dark:text-pink-400 px-1.5 py-0.5 rounded text-[11px] font-mono whitespace-pre-wrap" {...rest}>
+                                    {children}
+                                  </code>
+                                );
+                              }
+
+                              const codeString = String(children).replace(/\n$/, '');
+                              const blockId = `${index}-${match?.[1] || 'code'}`;
 
                               return (
-                                <span
-                                  className="relative inline-block hover-group mx-0.5 font-sans align-baseline hover:z-50"
-                                  onMouseEnter={(e) => {
-                                    const tooltip = e.currentTarget.querySelector('.citation-tooltip');
-                                    if (tooltip) tooltip.classList.remove('invisible', 'opacity-0');
-                                  }}
-                                  onMouseLeave={(e) => {
-                                    const tooltip = e.currentTarget.querySelector('.citation-tooltip');
-                                    if (tooltip) tooltip.classList.add('invisible', 'opacity-0');
-                                  }}
-                                >
-                                  <a
-                                    href={citationData?.url || undefined}
-                                    target={citationData?.url ? "_blank" : undefined}
-                                    rel="noopener noreferrer"
-                                    onClick={(e) => {
-                                      if (!citationData?.url) {
-                                        e.preventDefault();
-                                        if (!isCurrentlyStreaming) toast("Source link unavailable in chat history", { icon: "🗄️" });
-                                      }
-                                    }}
-                                    className={twMerge(
-                                      "inline-flex items-center justify-center px-1.5 py-0.5 text-[10px] font-bold border rounded cursor-pointer transition-colors no-underline shadow-sm",
-                                      citationData
-                                        ? "text-emerald-700 dark:text-emerald-400 bg-emerald-100 dark:bg-emerald-500/20 border-emerald-500/30 hover:bg-emerald-200 dark:hover:bg-emerald-500/40"
-                                        : "text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-zinc-800 border-slate-300 dark:border-zinc-700 hover:bg-slate-200 dark:hover:bg-zinc-700"
-                                    )}
-                                  >
-                                    {children}
-                                  </a>
+                                <div className="relative group my-4 rounded-lg overflow-hidden border border-slate-700">
+                                  <div className="flex items-center justify-between px-4 py-1.5 bg-[#1e1e1e] border-b border-slate-700/50 select-none">
+                                    <span className="text-[10px] text-slate-400 font-mono lowercase">{match?.[1] || 'text'}</span>
+                                    <button
+                                      onClick={() => handleCopy(codeString, blockId)}
+                                      className="flex items-center gap-1.5 text-[10px] text-slate-400 hover:text-emerald-400 transition-colors"
+                                    >
+                                      {copiedId === blockId ? (
+                                        <><Check size={12} /><span>Copied</span></>
+                                      ) : (
+                                        <><Copy size={12} /><span>Copy</span></>
+                                      )}
+                                    </button>
+                                  </div>
+                                  <SyntaxHighlighter
+                                    {...rest}
+                                    children={codeString}
+                                    style={vscDarkPlus}
+                                    language={match?.[1] || 'text'}
+                                    PreTag="div"
+                                    customStyle={{ margin: 0, borderRadius: 0, fontSize: '0.75rem' }}
+                                  />
+                                </div>
+                              );
+                            },
+                            a: ({ node, href, children, ...props }) => {
+                              if (href?.startsWith('#cite-')) {
+                                const citeIdStr = href.replace('#cite-', '').trim();
+                                const citationData = msg.citations?.find(c => String(c.id) === citeIdStr);
 
-                                  {citationData ? (
-                                    <span className="citation-tooltip absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-max max-w-[240px] sm:max-w-xs p-2.5 bg-slate-900 dark:bg-zinc-100 text-slate-100 dark:text-zinc-900 text-xs rounded-xl shadow-xl opacity-0 invisible transition-all duration-200 z-[100] pointer-events-none flex flex-col text-left font-normal normal-case">
-                                      <span className="font-bold flex items-center gap-1.5 text-xs text-emerald-400 dark:text-emerald-600">
-                                        <LinkIcon size={12} className="shrink-0" />
-                                        <span className="truncate">{citationData.file_name}</span>
+                                return (
+                                  <span
+                                    className="relative inline-block hover-group mx-0.5 font-sans align-baseline hover:z-50"
+                                    onMouseEnter={(e) => {
+                                      const tooltip = e.currentTarget.querySelector('.citation-tooltip');
+                                      if (tooltip) tooltip.classList.remove('invisible', 'opacity-0');
+                                    }}
+                                    onMouseLeave={(e) => {
+                                      const tooltip = e.currentTarget.querySelector('.citation-tooltip');
+                                      if (tooltip) tooltip.classList.add('invisible', 'opacity-0');
+                                    }}
+                                  >
+                                    <a
+                                      href={citationData?.url || undefined}
+                                      target={citationData?.url ? "_blank" : undefined}
+                                      rel="noopener noreferrer"
+                                      onClick={(e) => {
+                                        if (!citationData?.url) {
+                                          e.preventDefault();
+                                          if (!isCurrentlyStreaming) toast("Source link unavailable in chat history", { icon: "🗄️" });
+                                        }
+                                      }}
+                                      className={twMerge(
+                                        "inline-flex items-center justify-center px-1.5 py-0.5 text-[10px] font-bold border rounded cursor-pointer transition-colors no-underline shadow-sm",
+                                        citationData
+                                          ? "text-emerald-700 dark:text-emerald-400 bg-emerald-100 dark:bg-emerald-500/20 border-emerald-500/30 hover:bg-emerald-200 dark:hover:bg-emerald-500/40"
+                                          : "text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-zinc-800 border-slate-300 dark:border-zinc-700 hover:bg-slate-200 dark:hover:bg-zinc-700"
+                                      )}
+                                    >
+                                      {children}
+                                    </a>
+
+                                    {citationData ? (
+                                      <span className="citation-tooltip absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-max max-w-[240px] sm:max-w-xs p-2.5 bg-slate-900 dark:bg-zinc-100 text-slate-100 dark:text-zinc-900 text-xs rounded-xl shadow-xl opacity-0 invisible transition-all duration-200 z-[100] pointer-events-none flex flex-col text-left font-normal normal-case">
+                                        <span className="font-bold flex items-center gap-1.5 text-xs text-emerald-400 dark:text-emerald-600">
+                                          <LinkIcon size={12} className="shrink-0" />
+                                          <span className="truncate">{citationData.file_name}</span>
+                                        </span>
+                                        <span className="mt-1 text-[10px] text-slate-400 dark:text-slate-500 font-semibold text-right block">
+                                          Click to open document ↗
+                                        </span>
+                                        <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-slate-900 dark:bg-zinc-100 rotate-45 block"></span>
                                       </span>
-                                      <span className="mt-1 text-[10px] text-slate-400 dark:text-slate-500 font-semibold text-right block">
-                                        Click to open document ↗
+                                    ) : (
+                                      <span className="citation-tooltip absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-max px-2.5 py-1.5 bg-slate-900 dark:bg-zinc-100 text-slate-100 dark:text-zinc-900 text-[10px] rounded-lg shadow-xl opacity-0 invisible transition-all z-[100] pointer-events-none">
+                                        {isCurrentlyStreaming ? "Processing source..." : `Source [${citeIdStr}] (Archived)`}
                                       </span>
-                                      {/* The centered triangle pointer */}
-                                      <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-slate-900 dark:bg-zinc-100 rotate-45 block"></span>
-                                    </span>
-                                  ) : (
-                                    <span className="citation-tooltip absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-max px-2.5 py-1.5 bg-slate-900 dark:bg-zinc-100 text-slate-100 dark:text-zinc-900 text-[10px] rounded-lg shadow-xl opacity-0 invisible transition-all z-[100] pointer-events-none">
-                                      {isCurrentlyStreaming ? "Processing source..." : `Source [${citeIdStr}] (Archived)`}
-                                    </span>
-                                  )}
-                                </span>
+                                    )}
+                                  </span>
+                                );
+                              }
+                              return (
+                                <a className="text-blue-600 dark:text-blue-400 hover:underline font-medium break-all" href={href} target="_blank" rel="noopener noreferrer" {...props}>
+                                  {children}
+                                </a>
                               );
                             }
-                            return (
-                              <a className="text-blue-600 dark:text-blue-400 hover:underline font-medium break-all" href={href} target="_blank" rel="noopener noreferrer" {...props}>
-                                {children}
-                              </a>
-                            );
-                          }
-                        }}
-                      >
-                        {msg.content}
-                      </ReactMarkdown>
+                          }}
+                        >
+                          {msg.content}
+                        </ReactMarkdown>
+                      </div>
                     </div>
                   )}
 
@@ -1095,6 +1103,39 @@ export default function RagChatPage() {
                     </li>
                   ))}
                 </ul>
+              </div>
+            )}
+
+            {/* Render Active Filter Badges above the input */}
+            {(activeDocType || activeAsset || activeTest) && (
+              <div className="flex flex-wrap gap-2 mb-2 px-1">
+                {activeDocType && (
+                  <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/20">
+                    <FileText size={12} />
+                    <span>{activeDocType.name}</span>
+                    <button type="button" onClick={() => setActiveDocType(null)} className="hover:text-emerald-900 dark:hover:text-emerald-200 ml-1">
+                      <X size={12} />
+                    </button>
+                  </div>
+                )}
+                {activeAsset && (
+                  <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-500/10 dark:text-blue-400 dark:border-blue-500/20">
+                    <Database size={12} />
+                    <span>{activeAsset.name}</span>
+                    <button type="button" onClick={() => setActiveAsset(null)} className="hover:text-blue-900 dark:hover:text-blue-200 ml-1">
+                      <X size={12} />
+                    </button>
+                  </div>
+                )}
+                {activeTest && (
+                  <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-500/10 dark:text-amber-400 dark:border-amber-500/20">
+                    <Box size={12} />
+                    <span>{activeTest.name}</span>
+                    <button type="button" onClick={() => setActiveTest(null)} className="hover:text-amber-900 dark:hover:text-amber-200 ml-1">
+                      <X size={12} />
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 

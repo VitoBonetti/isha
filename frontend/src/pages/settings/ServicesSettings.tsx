@@ -3,6 +3,7 @@ import axios from 'axios';
 import toast from 'react-hot-toast';
 import ConfirmModal from '../../components/Modals/ConfirmModal';
 import TemplateEditorModal from '../../components/Modals/TemplateEditorModal';
+import { useAppContext } from "../../context/AppContext";
 import {
   Activity, Plus, Edit2, Trash2, X, Mail, CheckCircle
 } from 'lucide-react';
@@ -28,6 +29,7 @@ const defaultServiceForm = {
 };
 
 export default function ServicesSettings() {
+  const { currentUser } = useAppContext();
   const [localServices, setLocalServices] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const currentYear = new Date().getFullYear();
@@ -36,6 +38,8 @@ export default function ServicesSettings() {
   const [isPanelOpen, setIsPanelOpen] = useState(false);
   const [editServiceId, setEditServiceId] = useState<string | null>(null);
   const [serviceForm, setServiceForm] = useState(defaultServiceForm);
+
+  const isReadOnly = currentUser?.role === 'read_only';
 
   // Modals
   const [deleteModal, setDeleteModal] = useState<{ isOpen: boolean; id: string; name: string } | null>(null);
@@ -196,12 +200,14 @@ export default function ServicesSettings() {
             Define distinct testing lanes, default credits, and email automations.
           </p>
         </div>
-        <button
-          onClick={openCreatePanel}
-          className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl text-sm font-bold flex justify-center items-center gap-2 shadow-sm transition-colors cursor-pointer"
-        >
-          <Plus size={16} /> Add Service
-        </button>
+        {!isReadOnly && (
+          <button
+            onClick={openCreatePanel}
+            className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl text-sm font-bold flex justify-center items-center gap-2 shadow-sm transition-colors cursor-pointer"
+          >
+            <Plus size={16} /> Add Service
+          </button>
+        )}
       </div>
 
       {/* CARDS CONTAINER */}
@@ -236,39 +242,43 @@ export default function ServicesSettings() {
             </div>
 
             {/* MIDDLE SECTION: Email Templates */}
-            <div className="flex-1 flex flex-col gap-2 min-w-[200px] xl:border-l border-slate-200 dark:border-zinc-800 xl:pl-4 pt-3 xl:pt-0 border-t xl:border-t-0">
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Email Automations</span>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  onClick={() => setTemplateModal({ isOpen: true, serviceId: item.id, serviceName: item.name, type: 'intro', initialTemplate: item.intro_email_template })}
-                  className={`text-xs font-bold flex items-center gap-1.5 px-3 py-2 rounded-xl border transition-colors ${item.intro_email_template ? 'bg-white dark:bg-zinc-900 border-slate-200 dark:border-zinc-700 text-slate-700 dark:text-zinc-300 hover:border-blue-500' : 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-900/50 text-blue-600 dark:text-blue-400 hover:bg-blue-100'}`}
-                >
-                  <Mail size={14} /> {item.intro_email_template ? 'Edit Intro Email' : 'Add Intro Email'}
-                </button>
-                <button
-                  onClick={() => setTemplateModal({ isOpen: true, serviceId: item.id, serviceName: item.name, type: 'final', initialTemplate: item.final_email_template })}
-                  className={`text-xs font-bold flex items-center gap-1.5 px-3 py-2 rounded-xl border transition-colors ${item.final_email_template ? 'bg-white dark:bg-zinc-900 border-slate-200 dark:border-zinc-700 text-slate-700 dark:text-zinc-300 hover:border-emerald-500' : 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-900/50 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-100'}`}
-                >
-                  <CheckCircle size={14} /> {item.final_email_template ? 'Edit Final Email' : 'Add Final Email'}
-                </button>
+            {!isReadOnly && (
+              <div className="flex-1 flex flex-col gap-2 min-w-[200px] xl:border-l border-slate-200 dark:border-zinc-800 xl:pl-4 pt-3 xl:pt-0 border-t xl:border-t-0">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Email Automations</span>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={() => setTemplateModal({ isOpen: true, serviceId: item.id, serviceName: item.name, type: 'intro', initialTemplate: item.intro_email_template })}
+                    className={`text-xs font-bold flex items-center gap-1.5 px-3 py-2 rounded-xl border transition-colors ${item.intro_email_template ? 'bg-white dark:bg-zinc-900 border-slate-200 dark:border-zinc-700 text-slate-700 dark:text-zinc-300 hover:border-blue-500' : 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-900/50 text-blue-600 dark:text-blue-400 hover:bg-blue-100'}`}
+                  >
+                    <Mail size={14} /> {item.intro_email_template ? 'Edit Intro Email' : 'Add Intro Email'}
+                  </button>
+                  <button
+                    onClick={() => setTemplateModal({ isOpen: true, serviceId: item.id, serviceName: item.name, type: 'final', initialTemplate: item.final_email_template })}
+                    className={`text-xs font-bold flex items-center gap-1.5 px-3 py-2 rounded-xl border transition-colors ${item.final_email_template ? 'bg-white dark:bg-zinc-900 border-slate-200 dark:border-zinc-700 text-slate-700 dark:text-zinc-300 hover:border-emerald-500' : 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-900/50 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-100'}`}
+                  >
+                    <CheckCircle size={14} /> {item.final_email_template ? 'Edit Final Email' : 'Add Final Email'}
+                  </button>
+                </div>
               </div>
-            </div>
+            )}
 
             {/* RIGHT SECTION: Actions */}
-            <div className="flex xl:flex-col justify-end w-full xl:w-auto gap-2 shrink-0 border-t border-slate-100 dark:border-zinc-800/50 xl:border-t-0 pt-3 xl:pt-0 mt-1 xl:mt-0">
-              <button
-                onClick={() => openEditPanel(item)}
-                className="flex-1 xl:flex-none flex justify-center items-center text-slate-500 bg-slate-100 dark:bg-zinc-800 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 p-2.5 rounded-xl transition-colors cursor-pointer"
-              >
-                <Edit2 size={16} />
-              </button>
-              <button
-                onClick={() => setDeleteModal({ isOpen: true, id: item.id, name: item.name })}
-                className="flex-1 xl:flex-none flex justify-center items-center text-red-500 bg-red-50 dark:bg-red-900/20 hover:text-red-600 hover:bg-red-100 dark:hover:bg-red-900/40 p-2.5 rounded-xl transition-colors cursor-pointer"
-              >
-                <Trash2 size={16} />
-              </button>
-            </div>
+            {!isReadOnly && (
+              <div className="flex xl:flex-col justify-end w-full xl:w-auto gap-2 shrink-0 border-t border-slate-100 dark:border-zinc-800/50 xl:border-t-0 pt-3 xl:pt-0 mt-1 xl:mt-0">
+                <button
+                  onClick={() => openEditPanel(item)}
+                  className="flex-1 xl:flex-none flex justify-center items-center text-slate-500 bg-slate-100 dark:bg-zinc-800 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 p-2.5 rounded-xl transition-colors cursor-pointer"
+                >
+                  <Edit2 size={16} />
+                </button>
+                <button
+                  onClick={() => setDeleteModal({ isOpen: true, id: item.id, name: item.name })}
+                  className="flex-1 xl:flex-none flex justify-center items-center text-red-500 bg-red-50 dark:bg-red-900/20 hover:text-red-600 hover:bg-red-100 dark:hover:bg-red-900/40 p-2.5 rounded-xl transition-colors cursor-pointer"
+                >
+                  <Trash2 size={16} />
+                </button>
+              </div>
+            )}
 
           </div>
         ))}

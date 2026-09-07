@@ -4,11 +4,15 @@ import toast from 'react-hot-toast';
 import ConfirmModal from '../../components/Modals/ConfirmModal';
 import { Terminal, Download, Trash2 } from 'lucide-react';
 import { useSettings } from '../../hooks/useSettings';
+import { useAppContext } from "../../context/AppContext";
 
 export default function SystemLogsSettings() {
+  const { currentUser } = useAppContext();
   const { handleDelete } = useSettings();
   const [bqLogs, setBqLogs] = useState<any[]>([]);
   const [deleteModal, setDeleteModal] = useState<{ isOpen: boolean; endpoint: string; id: string; name: string } | null>(null);
+
+  const isReadOnly = currentUser?.role === 'read_only';
 
   const fetchLogs = () => {
     axios.get('/api/system/logs/')
@@ -49,15 +53,16 @@ export default function SystemLogsSettings() {
             Monitor background workers, webhooks, and administrative actions.
           </p>
         </div>
-
-        <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
-          <a href="/api/system/logs/download/csv" target="_blank" rel="noopener noreferrer" className="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 hover:bg-slate-50 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300 px-4 py-2.5 sm:py-2 rounded-xl flex justify-center items-center gap-2 text-sm font-bold shadow-sm transition-colors">
-            <Download size={16} /> Download Logs
-          </a>
-          <button onClick={() => confirmDelete('/api/system/logs/clear', '', 'All Audit Logs')} className="text-red-600 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/40 px-4 py-2.5 sm:py-2 rounded-xl flex justify-center items-center gap-2 text-sm font-bold shadow-sm transition-colors">
-            <Trash2 size={16} /> Delete all Logs
-          </button>
-        </div>
+        {!isReadOnly && (
+          <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
+            <a href="/api/system/logs/download/csv" target="_blank" rel="noopener noreferrer" className="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 hover:bg-slate-50 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300 px-4 py-2.5 sm:py-2 rounded-xl flex justify-center items-center gap-2 text-sm font-bold shadow-sm transition-colors">
+              <Download size={16} /> Download Logs
+            </a>
+            <button onClick={() => confirmDelete('/api/system/logs/clear', '', 'All Audit Logs')} className="text-red-600 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/40 px-4 py-2.5 sm:py-2 rounded-xl flex justify-center items-center gap-2 text-sm font-bold shadow-sm transition-colors">
+              <Trash2 size={16} /> Delete all Logs
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Fully Scrollable Terminal Container (Expanded Height) */}
