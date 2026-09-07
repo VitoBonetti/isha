@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Key, Trash2, Plus, AlertCircle, Copy, BookOpen } from 'lucide-react';
+import { X, Key, Trash2, Plus, AlertCircle, Copy, BookOpen, Clock } from 'lucide-react';
 import axios from 'axios';
 import toast from 'react-hot-toast';
 
@@ -44,6 +44,10 @@ export default function ApiKeysModal({ isOpen, onClose }: { isOpen: boolean, onC
     if (generatedKey) navigator.clipboard.writeText(generatedKey);
     toast.success("Copied to clipboard!");
   };
+
+  // Helper functions for expiration logic
+  const isExpired = (dateStr: string) => dateStr && new Date(dateStr) < new Date();
+  const formatDate = (dateStr: string) => dateStr ? new Date(dateStr).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : 'Never';
 
   if (!isOpen) return null;
 
@@ -112,32 +116,63 @@ export default function ApiKeysModal({ isOpen, onClose }: { isOpen: boolean, onC
               <tr>
                 <th className="p-3 font-semibold text-slate-500">Name</th>
                 <th className="p-3 font-semibold text-slate-500">Prefix</th>
+                <th className="p-3 font-semibold text-slate-500">Expires</th>
                 <th className="p-3 font-semibold text-slate-500 text-right">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-zinc-800">
-              {keys.map(k => (
-                <tr key={k.id} className="hover:bg-slate-50 dark:hover:bg-zinc-800/30 transition-colors">
-                  <td className="p-3 font-bold text-slate-900 dark:text-zinc-100">{k.key_name}</td>
-                  <td className="p-3 font-mono text-slate-500 dark:text-zinc-400 text-xs">{k.prefix}••••••••</td>
-                  <td className="p-3 text-right"><button onClick={() => handleRevoke(k.id)} className="text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 p-1.5 rounded transition-colors"><Trash2 size={16}/></button></td>
-                </tr>
-              ))}
-              {keys.length === 0 && <tr><td colSpan={3} className="p-8 text-center text-slate-500">No API keys generated yet.</td></tr>}
+              {keys.map(k => {
+                const expired = isExpired(k.expires_at);
+                return (
+                  <tr key={k.id} className={`transition-colors ${expired ? 'bg-slate-50 dark:bg-zinc-950/50 opacity-60' : 'hover:bg-slate-50 dark:hover:bg-zinc-800/30'}`}>
+                    <td className={`p-3 font-bold ${expired ? 'text-slate-500 line-through decoration-slate-400' : 'text-slate-900 dark:text-zinc-100'}`}>
+                      {k.key_name}
+                    </td>
+                    <td className="p-3 font-mono text-slate-500 dark:text-zinc-400 text-xs">{k.prefix}••••••••</td>
+                    <td className="p-3">
+                      {expired ? (
+                        <span className="text-[10px] font-bold bg-red-100 text-red-700 dark:bg-red-500/10 dark:text-red-400 px-2 py-0.5 rounded uppercase tracking-wider">Expired</span>
+                      ) : (
+                        <span className="text-xs text-slate-500 dark:text-zinc-400 flex items-center gap-1">
+                          <Clock size={12}/> {formatDate(k.expires_at)}
+                        </span>
+                      )}
+                    </td>
+                    <td className="p-3 text-right">
+                      <button onClick={() => handleRevoke(k.id)} className="text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 p-1.5 rounded transition-colors" title="Revoke Key">
+                        <Trash2 size={16}/>
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+              {keys.length === 0 && <tr><td colSpan={4} className="p-8 text-center text-slate-500">No API keys generated yet.</td></tr>}
             </tbody>
           </table>
 
           {/* MOBILE CARDS */}
           <div className="flex sm:hidden flex-col divide-y divide-slate-100 dark:divide-zinc-800">
-             {keys.map(k => (
-                <div key={k.id} className="p-4 flex flex-col gap-3">
-                   <div className="flex justify-between items-start gap-4">
-                      <div className="font-bold text-slate-900 dark:text-zinc-100 truncate text-sm">{k.key_name}</div>
-                      <button onClick={() => handleRevoke(k.id)} className="text-red-500 bg-red-50 dark:bg-red-900/30 p-2 rounded-lg shrink-0"><Trash2 size={16}/></button>
-                   </div>
-                   <div className="font-mono text-slate-500 dark:text-zinc-400 text-xs bg-slate-100 dark:bg-zinc-800 px-2 py-1 rounded-lg w-fit">{k.prefix}••••••••</div>
-                </div>
-             ))}
+             {keys.map(k => {
+               const expired = isExpired(k.expires_at);
+               return (
+                  <div key={k.id} className={`p-4 flex flex-col gap-3 ${expired ? 'opacity-60 bg-slate-50 dark:bg-zinc-950/50' : ''}`}>
+                     <div className="flex justify-between items-start gap-4">
+                        <div className={`font-bold truncate text-sm ${expired ? 'text-slate-500 line-through' : 'text-slate-900 dark:text-zinc-100'}`}>
+                          {k.key_name}
+                        </div>
+                        <button onClick={() => handleRevoke(k.id)} className="text-red-500 bg-red-50 dark:bg-red-900/30 p-2 rounded-lg shrink-0"><Trash2 size={16}/></button>
+                     </div>
+                     <div className="flex justify-between items-center">
+                        <div className="font-mono text-slate-500 dark:text-zinc-400 text-xs bg-slate-100 dark:bg-zinc-800 px-2 py-1 rounded-lg w-fit">{k.prefix}••••••••</div>
+                        {expired ? (
+                          <span className="text-[10px] font-bold bg-red-100 text-red-700 dark:bg-red-500/10 dark:text-red-400 px-2 py-0.5 rounded uppercase tracking-wider">Expired</span>
+                        ) : (
+                          <span className="text-xs text-slate-500 dark:text-zinc-400">{formatDate(k.expires_at)}</span>
+                        )}
+                     </div>
+                  </div>
+               );
+             })}
              {keys.length === 0 && <div className="p-8 text-center text-sm text-slate-500">No API keys generated yet.</div>}
           </div>
         </div>

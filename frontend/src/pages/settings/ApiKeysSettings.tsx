@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import toast from 'react-hot-toast';
 import ConfirmModal from '../../components/Modals/ConfirmModal';
-import { KeySquare, Trash2, ChevronsUpDown, ChevronUp, ChevronDown} from 'lucide-react';
+import { KeySquare, Trash2, ChevronsUpDown, ChevronUp, ChevronDown, Clock } from 'lucide-react';
 
 export default function ApiKeysSettings() {
   const [globalApiKeys, setGlobalApiKeys] = useState<any[]>([]);
@@ -62,6 +62,9 @@ export default function ApiKeysSettings() {
 
   const paginatedApiKeys = sortedApiKeys.slice((apiKeyPage - 1) * ITEMS_PER_PAGE, apiKeyPage * ITEMS_PER_PAGE);
 
+  const isExpired = (dateStr: string) => dateStr && new Date(dateStr) < new Date();
+  const formatDate = (dateStr: string) => dateStr ? new Date(dateStr).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : 'Never';
+
   if (isLoading) return <div className="p-8 text-center text-slate-500">Loading API keys...</div>;
 
   return (
@@ -82,7 +85,7 @@ export default function ApiKeysSettings() {
             <KeySquare size={22} className="text-blue-500" /> Global API Keys
           </h1>
           <p className="text-sm text-slate-500 dark:text-zinc-400 mt-0.5">
-            Monitor and revoke active API keys across the entire platform.
+            Monitor, inspect expirations, and revoke active API keys across the entire platform.
           </p>
         </div>
       </div>
@@ -101,59 +104,84 @@ export default function ApiKeysSettings() {
               <th className="p-4 font-bold text-slate-600 dark:text-zinc-400 cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800/50 transition-colors" onClick={() => handleSort('prefix')}>
                 Prefix <SortIcon column="prefix" />
               </th>
+              <th className="p-4 font-bold text-slate-600 dark:text-zinc-400">
+                Expires
+              </th>
               <th className="p-4 font-bold text-slate-600 dark:text-zinc-400 text-right">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 dark:divide-zinc-800">
-            {paginatedApiKeys.map(k => (
-              <tr key={k.id} className="hover:bg-slate-50/50 dark:hover:bg-zinc-800/30 transition-colors">
-                <td className="p-4">
-                  <div className="font-bold text-slate-900 dark:text-zinc-100">{k.owner_name}</div>
-                  <div className="text-xs text-slate-500">{k.owner_email}</div>
-                </td>
-                <td className="p-4 font-medium text-slate-700 dark:text-zinc-300">{k.key_name}</td>
-                <td className="p-4 text-slate-500 dark:text-zinc-400 font-mono text-xs">{k.prefix}••••••••</td>
-                <td className="p-4 text-right">
-                  <button onClick={() => {
-                     setActionModal({
-                       isOpen: true, variant: 'danger', confirmText: "Revoke Key", title: "Revoke API Key",
-                       message: `Are you sure you want to revoke the key "${k.key_name}" owned by ${k.owner_name}? Any scripts using this key will immediately fail.`,
-                       onConfirm: () => handleRevokeGlobalKey(k.id)
-                     });
-                  }} className="text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 p-2 rounded-xl transition-colors" title="Revoke Key">
-                    <Trash2 size={18} />
-                  </button>
-                </td>
-              </tr>
-            ))}
+            {paginatedApiKeys.map(k => {
+              const expired = isExpired(k.expires_at);
+              return (
+                <tr key={k.id} className={`transition-colors ${expired ? 'bg-slate-50 dark:bg-zinc-950/50 opacity-60' : 'hover:bg-slate-50/50 dark:hover:bg-zinc-800/30'}`}>
+                  <td className="p-4">
+                    <div className="font-bold text-slate-900 dark:text-zinc-100">{k.owner_name}</div>
+                    <div className="text-xs text-slate-500">{k.owner_email}</div>
+                  </td>
+                  <td className={`p-4 font-medium ${expired ? 'text-slate-500 line-through decoration-slate-400' : 'text-slate-700 dark:text-zinc-300'}`}>{k.key_name}</td>
+                  <td className="p-4 text-slate-500 dark:text-zinc-400 font-mono text-xs">{k.prefix}••••••••</td>
+                  <td className="p-4">
+                    {expired ? (
+                      <span className="text-[10px] font-bold bg-red-100 text-red-700 dark:bg-red-500/10 dark:text-red-400 px-2 py-0.5 rounded uppercase tracking-wider">Expired</span>
+                    ) : (
+                      <span className="text-xs text-slate-500 dark:text-zinc-400 flex items-center gap-1">
+                        <Clock size={12}/> {formatDate(k.expires_at)}
+                      </span>
+                    )}
+                  </td>
+                  <td className="p-4 text-right">
+                    <button onClick={() => {
+                       setActionModal({
+                         isOpen: true, variant: 'danger', confirmText: "Revoke Key", title: "Revoke API Key",
+                         message: `Are you sure you want to revoke the key "${k.key_name}" owned by ${k.owner_name}? Any scripts using this key will immediately fail.`,
+                         onConfirm: () => handleRevokeGlobalKey(k.id)
+                       });
+                    }} className="text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 p-2 rounded-xl transition-colors" title="Revoke Key">
+                      <Trash2 size={18} />
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
 
         {/* MOBILE CARDS */}
         <div className="flex md:hidden flex-col divide-y divide-slate-100 dark:divide-zinc-800">
-          {paginatedApiKeys.map(k => (
-            <div key={k.id} className="p-4 flex flex-col gap-3">
-              <div className="flex justify-between items-start gap-4">
-                <div className="flex-1 min-w-0">
-                  <div className="font-bold text-base text-slate-900 dark:text-zinc-100 truncate">{k.owner_name}</div>
-                  <div className="text-xs text-slate-500 dark:text-zinc-400 truncate">{k.owner_email}</div>
+          {paginatedApiKeys.map(k => {
+            const expired = isExpired(k.expires_at);
+            return (
+              <div key={k.id} className={`p-4 flex flex-col gap-3 ${expired ? 'opacity-60 bg-slate-50 dark:bg-zinc-950/50' : ''}`}>
+                <div className="flex justify-between items-start gap-4">
+                  <div className="flex-1 min-w-0">
+                    <div className="font-bold text-base text-slate-900 dark:text-zinc-100 truncate">{k.owner_name}</div>
+                    <div className="text-xs text-slate-500 dark:text-zinc-400 truncate">{k.owner_email}</div>
+                  </div>
+                  <button onClick={() => {
+                      setActionModal({
+                        isOpen: true, variant: 'danger', confirmText: "Revoke Key", title: "Revoke API Key",
+                        message: `Are you sure you want to revoke the key "${k.key_name}" owned by ${k.owner_name}? Any scripts using this key will immediately fail.`,
+                        onConfirm: () => handleRevokeGlobalKey(k.id)
+                      });
+                  }} className="text-red-500 bg-red-50 dark:bg-red-900/20 p-2.5 rounded-lg shrink-0">
+                    <Trash2 size={16} />
+                  </button>
                 </div>
-                <button onClick={() => {
-                    setActionModal({
-                      isOpen: true, variant: 'danger', confirmText: "Revoke Key", title: "Revoke API Key",
-                      message: `Are you sure you want to revoke the key "${k.key_name}" owned by ${k.owner_name}? Any scripts using this key will immediately fail.`,
-                      onConfirm: () => handleRevokeGlobalKey(k.id)
-                    });
-                }} className="text-red-500 bg-red-50 dark:bg-red-900/20 p-2.5 rounded-lg shrink-0">
-                  <Trash2 size={16} />
-                </button>
+                <div className="flex justify-between items-center bg-slate-50 dark:bg-zinc-950/50 p-2.5 rounded-xl border border-slate-100 dark:border-zinc-800 mt-1">
+                  <span className={`font-medium text-sm truncate pr-2 ${expired ? 'text-slate-400 line-through' : 'text-slate-700 dark:text-zinc-300'}`}>{k.key_name}</span>
+                  <div className="flex items-center gap-2">
+                    {expired ? (
+                      <span className="text-[10px] font-bold bg-red-100 text-red-700 dark:bg-red-500/10 dark:text-red-400 px-1.5 py-0.5 rounded uppercase tracking-wider">Expired</span>
+                    ) : (
+                      <span className="text-xs text-slate-500 dark:text-zinc-400">{formatDate(k.expires_at)}</span>
+                    )}
+                    <span className="font-mono text-[10px] text-slate-500 dark:text-zinc-400 bg-white dark:bg-zinc-900 px-1.5 py-0.5 rounded border border-slate-200 dark:border-zinc-700 shrink-0">{k.prefix}••••</span>
+                  </div>
+                </div>
               </div>
-              <div className="flex justify-between items-center bg-slate-50 dark:bg-zinc-950/50 p-2.5 rounded-xl border border-slate-100 dark:border-zinc-800 mt-1">
-                <span className="font-medium text-slate-700 dark:text-zinc-300 text-sm truncate pr-2">{k.key_name}</span>
-                <span className="font-mono text-[10px] text-slate-500 dark:text-zinc-400 bg-white dark:bg-zinc-900 px-1.5 py-0.5 rounded border border-slate-200 dark:border-zinc-700 shrink-0">{k.prefix}••••</span>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         {globalApiKeys.length === 0 && <div className="p-12 text-center text-sm text-slate-500 dark:text-zinc-500">No API keys are currently active.</div>}

@@ -14,7 +14,7 @@ from routers import (
     kiss24, danger, documents, rag, kpi_criteria
 )
 from routers.rag import start_nightly_rag_scheduler
-from routers.auth import require_admin, get_google_public_keys
+from routers.auth import require_admin, get_google_public_keys, start_daily_api_key_alert_scheduler
 from database import get_db_connection, run_alembic_migrations
 from websockets_manager import manager
 from audit_logger import log_audit_event, init_audit_log_infrastructure
@@ -29,7 +29,11 @@ async def lifespan(app: FastAPI):
     scheduler_task = asyncio.create_task(start_nightly_rag_scheduler())
     print("⏰ Nightly RAG sync scheduler initialized.")
 
-    # 2. Run Alembic migrations automatically on startup
+    # 2. Start the API Key alert scheduler
+    api_key_alert_task = asyncio.create_task(start_daily_api_key_alert_scheduler())
+    print("⏰ Daily 8:00 AM API Key alert scheduler initialized.")
+
+    # 3. Run Alembic migrations automatically on startup
     try:
         print("Starting up and checking database migrations...")
         run_alembic_migrations()
