@@ -73,18 +73,20 @@ export interface BoardData {
 }
 
 export interface Citation {
-  id: number;
+  id: string | number;
   file_name: string;
   url: string;
-  snippet: string;
+  snippet?: string;
 }
 
 export interface Message {
+  id?: string;
   role: 'user' | 'assistant';
   content: string;
   citations?: Citation[];
-  timestamp: string;
+  timestamp?: string;
   isError?: boolean;
+  isStreaming?: boolean;
 }
 
 export interface FilterItem {
@@ -134,4 +136,13 @@ export interface Feature {
   view: string;
   color: string;
   allowedRoles: string[];
+}
+
+export interface TestRagChatDrawerProps {
+  isOpen: boolean;
+  onClose: () => void;
+  testId: string;
+  testName: string;
+  assetId?: string;
+  assetName?: string;
 }

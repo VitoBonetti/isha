@@ -5,13 +5,19 @@ import TopNav from "../components/TopNav";
 import SecureNoteModal from "../components/Modals/SecureNoteModal";
 import ConfirmModal from "../components/Modals/ConfirmModal";
 import toast, { Toaster } from "react-hot-toast";
-import { ChevronLeft, Save, ChevronDown, CalendarClock, CalendarCheck, ChevronRight, Database, Users, Shield, Code, MapPin, Server, Activity, Calendar, Edit2, FolderOpen, FolderPlus, Lock, LockOpen, Zap, Presentation, FileDown, CheckSquare, History, ListChecks, Mail, CheckCircle, CircleFadingPlus, ExternalLink, Cable } from "lucide-react";
+import {
+  ChevronLeft, Save, ChevronDown, CalendarClock, CalendarCheck, ChevronRight,
+  Database, Users, Shield, Code, MapPin, Server, Activity, Calendar, FolderOpen,
+  FolderPlus, Lock, LockOpen, Presentation, FileDown, CheckSquare, History,
+  ListChecks, Mail, CheckCircle, CircleFadingPlus, Cable, Bot, Sparkles, MessageSquareQuote
+} from "lucide-react";
 import { useAppContext } from "../context/AppContext";
 import RequirementsModal from "../components/Modals/RequirementsModal";
 import IntroEmailModal from "../components/Modals/IntroEmailModal";
 import FinalEmailModal from "../components/Modals/FinalEmailModal";
 import MeetingParticipantsModal from "../components/Modals/MeetingParticipantsModal";
 import Kiss24ControlPanel from "../components/Kiss24ControlPanel";
+import TestRagChatDrawer from "../components/TestRagChatDrawer";
 
 export default function TestDetailsView() {
   const { id } = useParams();
@@ -29,6 +35,9 @@ export default function TestDetailsView() {
   const backLabel = location.state?.label || "Test Registry";
 
   const [loading, setLoading] = useState(true);
+
+  // Drawer & Chat State
+  const [isRagChatOpen, setIsRagChatOpen] = useState(false);
 
   // Accordion States
   const [isTargetsOpen, setIsTargetsOpen] = useState(true);
@@ -86,13 +95,11 @@ export default function TestDetailsView() {
 
   const handleVerifyFindings = async () => {
     try {
-      // Check if it exists
       const res = await axios.get(`/api/tests/${id}/analysis`);
       setAnalysisDate(res.data.timestamp);
-      setAnalysisPromptOpen(true); // Pop the modal to ask Read vs Regenerate
+      setAnalysisPromptOpen(true);
     } catch (error: any) {
       if (error.response?.status === 404) {
-        // Trigger fresh generation
         const toastId = toast.loading("Starting Vulnerability Analysis...");
         try {
           await axios.post(`/api/tests/${id}/analysis`);
@@ -106,7 +113,6 @@ export default function TestDetailsView() {
     }
   };
 
-  // Format Helper for DB Status to Frontend Status
   const dbToFrontendStatus = (dbStatus: string) => {
     const map: Record<string, string> = {
       "NOT_PLANNED": "Not Planned",
@@ -130,7 +136,6 @@ export default function TestDetailsView() {
   };
 
   useEffect(() => {
-    // 1. Core Data Fetching Function
     const fetchCoreData = () => {
       Promise.all([
         axios.get(`/api/tests/${id}`),
@@ -150,10 +155,8 @@ export default function TestDetailsView() {
       }).finally(() => setLoading(false));
     };
 
-    // Initial load
     fetchCoreData();
 
-    // 2. Background Analysis Check
     const checkAnalysis = () => {
       axios.get(`/api/tests/${id}/analysis`)
         .then(() => setHasAnalysis(true))
@@ -161,8 +164,6 @@ export default function TestDetailsView() {
     };
     checkAnalysis();
 
-    // --- LISTEN FOR WEBSOCKET UPDATES ---
-    // TopNav fires this event when ANY background task finishes!
     window.addEventListener('refresh_test_data', fetchCoreData);
     window.addEventListener('refresh_test_data', checkAnalysis);
 
@@ -180,42 +181,31 @@ export default function TestDetailsView() {
 
   const filteredCategories = categories
     .filter(c => {
-       // 1. Must match the selected service lane
        if (String(c.service_lane_id) !== String(test?.service_lane_id)) return false;
-
        const gYear = Number(c.goal_year);
-
-       // 2. Show categories for the Real Current Year OR the Test's Scheduled Year
        const matchesYear =
          gYear === currentYear ||
          gYear === currentYear + 1 ||
          gYear === testYear ||
          gYear === testYear + 1;
-
-       // 3. Always keep the specifically assigned category visible, even if it is old
        const isAssignedCat = test?.category_id && String(c.id) === String(test.category_id);
-
        return matchesYear || isAssignedCat;
     })
     .sort((a, b) => Number(a.goal_year || 0) - Number(b.goal_year || 0));
 
-  // --- ACTIONS ---
   const handleToggleMilestone = async (stepName: string) => {
     const currentState = milestones[stepName] || false;
     const newState = !currentState;
 
-    // Optimistic update
     setMilestones(prev => ({ ...prev, [stepName]: newState }));
 
     try {
       await axios.put(`/api/tests/${id}/milestones`, { step_name: stepName, is_completed: newState });
     } catch (error) {
       toast.error("Failed to update milestone");
-      // Revert on failure
       setMilestones(prev => ({ ...prev, [stepName]: currentState }));
     }
   };
-
 
   const handleUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -282,7 +272,7 @@ export default function TestDetailsView() {
       setDefaultEmails(res.data.emails.join(", "));
       setPendingMeetingType(meetingType);
       setIsParticipantsModalOpen(true);
-     toast.dismiss(toastId);
+      toast.dismiss(toastId);
     } catch (error) {
       toast.dismiss(toastId);
       toast.error("Failed to fetch participants.");
@@ -295,7 +285,7 @@ export default function TestDetailsView() {
     try {
       await axios.post(`/api/luigi/${id}/request-meeting-proposals`, {
         meeting_type: pendingMeetingType,
-        emails: emails // We now send the edited JSON list!
+        emails: emails
       });
       toast.dismiss(toastId);
       toast.success("Luigi is analyzing calendars! You'll be notified shortly.");
@@ -323,7 +313,7 @@ export default function TestDetailsView() {
   };
 
   return (
-    <div className="min-h-screen text-slate-900 dark:text-zinc-100">
+    <div className="min-h-screen text-slate-900 dark:text-zinc-100 relative">
       <TopNav />
       <Toaster position="bottom-right" />
 
@@ -529,12 +519,10 @@ export default function TestDetailsView() {
                 </div>
               </button>
             )}
-            {/* ------------------------------------------ */}
+
             {/* ACTION MENU (Report Generators) */}
             {test.auto_provision_workspace && !isReadOnly && (
               <div className="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-2xl p-4 md:p-5 shadow-sm mb-2">
-
-                {/* 5-Column Grid for Square Buttons */}
                 <div className="grid grid-cols-8 gap-2 md:gap-3">
                   {isManagementRole ? (
                     <button
@@ -581,7 +569,6 @@ export default function TestDetailsView() {
                   >
                     <Presentation size={16} className="shrink-0" />
                   </button>
-                  {/* Placeholders for future buttons */}
                   <button
                     onClick={(e) => { e.stopPropagation(); handleOpenParticipants('Restitution Meeting Planned'); }}
                     title="Schedule Restitution Meeting"
@@ -603,7 +590,6 @@ export default function TestDetailsView() {
                   >
                     <CheckCircle size={16} className="shrink-0" />
                   </button>
-
                 </div>
               </div>
             )}
@@ -614,8 +600,6 @@ export default function TestDetailsView() {
                 {isTargetsOpen ? <ChevronDown size={20} className="text-slate-400 flex-shrink-0" /> : <ChevronRight size={20} className="text-slate-400 flex-shrink-0" />}
                 <CheckSquare size={18} className="text-emerald-500 flex-shrink-0 md:h-5 md:w-5" />
                 <span className="truncate flex-1">Milestones Tracking</span>
-
-                {/* Status Pill on the collapsed header */}
                 <span className="text-[10px] md:text-xs font-black bg-slate-100 dark:bg-zinc-800 text-slate-500 px-2 py-1 rounded-md">
                   {STANDARD_MILESTONES.filter(m => milestones[m]).length} / {STANDARD_MILESTONES.length}
                 </span>
@@ -623,8 +607,6 @@ export default function TestDetailsView() {
 
               {isTargetsOpen && (
                 <div className="mt-2 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-2xl p-4 md:p-6 shadow-sm animate-in fade-in slide-in-from-top-2">
-
-                  {/* Progress Bar */}
                   <div className="mb-5">
                     <div className="flex justify-between text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">
                       <span>Progress</span>
@@ -640,7 +622,6 @@ export default function TestDetailsView() {
                     </div>
                   </div>
 
-                  {/* Checklist */}
                   <div className="space-y-3">
                     {STANDARD_MILESTONES.map((step) => (
                       <label key={step} className="flex items-start gap-3 cursor-pointer group">
@@ -661,7 +642,7 @@ export default function TestDetailsView() {
               )}
             </div>
 
-            {/* ASSET CONTACTS (Aggregated) */}
+            {/* ASSET CONTACTS */}
             <div>
               <button onClick={() => setIsAssetContactsOpen(!isAssetContactsOpen)} className="flex items-center gap-2 md:gap-3 w-full text-left font-bold text-slate-800 dark:text-zinc-200 bg-white dark:bg-zinc-900 p-4 md:p-5 rounded-2xl border border-slate-200 dark:border-zinc-800 shadow-sm hover:border-slate-300 dark:hover:border-zinc-700 transition-colors outline-none">
                 {isAssetContactsOpen ? <ChevronDown size={20} className="text-slate-400 flex-shrink-0" /> : <ChevronRight size={20} className="text-slate-400 flex-shrink-0" />}
@@ -694,7 +675,7 @@ export default function TestDetailsView() {
               )}
             </div>
 
-            {/* COUNTRY CONTACTS (Aggregated) */}
+            {/* COUNTRY CONTACTS */}
             <div>
               <button onClick={() => setIsCountryContactsOpen(!isCountryContactsOpen)} className="flex items-center gap-2 md:gap-3 w-full text-left font-bold text-slate-800 dark:text-zinc-200 bg-white dark:bg-zinc-900 p-4 md:p-5 rounded-2xl border border-slate-200 dark:border-zinc-800 shadow-sm hover:border-slate-300 dark:hover:border-zinc-700 transition-colors outline-none">
                 {isCountryContactsOpen ? <ChevronDown size={20} className="text-slate-400 flex-shrink-0" /> : <ChevronRight size={20} className="text-slate-400 flex-shrink-0" />}
@@ -761,6 +742,22 @@ export default function TestDetailsView() {
           </div>
         </div>
       </div>
+
+      {/* FLOATING ACTION BUTTON (BOTTOM-RIGHT CORNER) */}
+      {isAdmin && (
+        <>
+          <button
+            type="button"
+            onClick={() => setIsRagChatOpen(true)}
+            className="fixed bottom-6 left-6 z-40 flex items-center justify-center w-14 h-14 bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white rounded-full shadow-2xl hover:scale-105 active:scale-95 transition-all duration-200 group border border-indigo-400/30"
+            title="Ask Luigi"
+          >
+            <MessageSquareQuote size={24} className="text-white transition-transform group-hover:scale-110" />
+          </button>
+        </>
+      )}
+
+      {/* MODALS */}
       <ConfirmModal
         isOpen={analysisPromptOpen}
         title="Analysis Already Exists"
@@ -814,6 +811,15 @@ export default function TestDetailsView() {
         onClose={() => setIsKiss24PanelOpen(false)}
         test={test}
         onRefresh={() => window.dispatchEvent(new Event('refresh_test_data'))}
+      />
+
+      <TestRagChatDrawer
+        isOpen={isRagChatOpen}
+        onClose={() => setIsRagChatOpen(false)}
+        testId={test.id}
+        testName={test.name}
+        assetId={test.assets && test.assets.length > 0 ? test.assets[0].asset_id : undefined}
+        assetName={test.assets && test.assets.length > 0 ? test.assets[0].asset_name : undefined}
       />
     </div>
   );
