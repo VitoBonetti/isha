@@ -192,6 +192,19 @@ def require_admin_or_read_only(current_user: dict = Depends(get_current_user)):
     return current_user
 
 
+def require_admin_or_pentester(current_user: dict = Depends(get_current_user)):
+    """
+    Allows Global Admins and Pentesters.
+    Blocks Maintainers (who are lane-scoped) and Read-Only users.
+    """
+    if current_user.get('role') not in ['admin', 'pentester']:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin or Pentester privileges required."
+        )
+    return current_user
+
+
 @router.post("/logout")
 def logout(background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user)):
     """

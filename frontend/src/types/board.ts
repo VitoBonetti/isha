@@ -126,3 +126,12 @@ export interface UserFormState {
   kiss24_uuid: string;
   kiss24_api_key: string;
 }
+
+export interface Feature {
+  title: string;
+  desc: string;
+  icon: React.ReactNode;
+  view: string;
+  color: string;
+  allowedRoles: string[];
+}

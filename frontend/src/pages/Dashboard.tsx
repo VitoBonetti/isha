@@ -2,19 +2,11 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppContext } from '../context/AppContext';
 import TopNav from '../components/TopNav';
+import type { Feature } from "../types/board";
 import {
   CalendarDays, Palmtree, ChartNoAxesCombined, Database,
   Server, ShieldAlert, LineChart, Settings, ChevronRight, Users, CheckSquare
 } from 'lucide-react';
-
-interface Feature {
-  title: string;
-  desc: string;
-  icon: React.ReactNode;
-  view: string;
-  color: string;
-  allowedRoles: string[];
-}
 
 export default function Dashboard() {
   const { currentUser, isLoading } = useAppContext();

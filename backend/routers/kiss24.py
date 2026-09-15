@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.testing.pickleable import User
 from google.cloud import pubsub_v1, storage
 from database import get_db_cursor
-from routers.auth import get_current_user, require_admin, require_write_access, require_maintainer_or_admin, verify_lane_access
+from routers.auth import get_current_user, require_admin, require_write_access, require_maintainer_or_admin, verify_lane_access, require_admin_or_pentester
 from audit_logger import log_audit_event
 from utils.timeaware import aware_utcnow
 from utils.secret_manager import get_secret
@@ -979,33 +979,26 @@ def trigger_luigi_verification_pipeline(vuln_uuid: str, user_api_key: str):
 
 
 @router.post("/validating-vulns/{uuid}/analyze")
-def start_ai_analysis(uuid: str, background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user),
-                      cursor=Depends(get_db_cursor)):
+def start_ai_analysis(
+        uuid: str,
+        background_tasks: BackgroundTasks,
+        current_user: dict = Depends(require_admin_or_pentester),  # <-- SECURED HERE
+        cursor=Depends(get_db_cursor)
+):
     """
     Trigs trigger_luigi_verification_pipeline: Background task to prep the JSON payload and alert Luigi.
+    1. Get the cleaned JSON payload
+    2. Process root vulnerability attachments
+    3. Process comment attachments
+    4. Ship to Pub/Sub
+    5. future.result() forces the background task to wait for Google to confirm the message
     """
 
-    # 1. Fetch the vulnerability to get its parent test's service lane
-    cursor.execute("""
-        SELECT t.service_lane_id 
-        FROM kiss24_validating_vulns v
-        JOIN tests t ON v.test_id = t.id
-        WHERE v.uuid = %s
-    """, (uuid,))
-    row = cursor.fetchone()
-
-    if not row:
-        raise HTTPException(status_code=404, detail="Vulnerability not found.")
-
-    t_lane_id = str(row[0])
-
-    # Security: Block Maintainers from interacting outside their lane
-    check_maintainer_lane_access(current_user, t_lane_id)
-
-    # 2. Proceed with analysis
     user_api_key = get_user_kiss24_key(cursor, str(current_user["id"]))
     background_tasks.add_task(trigger_luigi_verification_pipeline, uuid, user_api_key)
+
     return {"message": "Luigi pipeline started"}
+
 
 # Sync asset with Kiss Secure 24
 # --- Helper: String Normalization for Fuzzy Math ---

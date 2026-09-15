@@ -1864,3 +1864,60 @@ def delete_requirement(req_id: str, current_user: dict = Depends(require_write_a
     cursor.execute("DELETE FROM test_requirements WHERE id = %s", (req_id,))
     cursor.connection.commit()
     return {"message": "Deleted"}
+
+
+@router.put("/requirements/{req_id}/toggle", summary="Edit Requirement test")
+def toggle_requirement(req_id: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+    # 1. Fetch the test_id and service_lane_id BEFORE making any changes
+    cursor.execute("""
+            SELECT t.id, t.service_lane_id 
+            FROM test_requirements tr
+            JOIN tests t ON tr.test_id = t.id
+            WHERE tr.id = %s
+        """, (req_id,))
+
+    row = cursor.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Requirement not found.")
+
+    test_id, service_lane_id = row
+
+    # 2. Verify lane access (Blocks maintainers from editing out-of-lane requirements)
+    verify_lane_access(current_user, str(service_lane_id))
+
+    # 3. Toggle the requirement now that we know they are authorized
+    cursor.execute("""
+            UPDATE test_requirements SET is_completed = NOT is_completed 
+            WHERE id = %s RETURNING is_completed
+        """, (req_id,))
+
+    new_status = cursor.fetchone()[0]
+
+    # 4. Check if ALL requirements for this test are now complete
+    cursor.execute("""
+            SELECT 
+                COUNT(*) as total_reqs,
+                SUM(CASE WHEN is_completed THEN 1 ELSE 0 END) as completed_reqs
+            FROM test_requirements
+            WHERE test_id = %s
+        """, (test_id,))
+
+    total_reqs, completed_reqs = cursor.fetchone()
+
+    # 5. If all are complete, auto-complete the milestone
+    if total_reqs > 0 and total_reqs == completed_reqs:
+        cursor.execute("""
+                    INSERT INTO test_milestones (id, test_id, step_name, is_completed) 
+                    VALUES (gen_random_uuid(), %s, 'Requirements', true)
+                    ON CONFLICT (test_id, step_name) DO UPDATE SET is_completed = true
+                """, (test_id,))
+    else:
+        # If they uncheck a requirement, uncheck the milestone
+        cursor.execute("""
+                    UPDATE test_milestones 
+                    SET is_completed = false 
+                    WHERE test_id = %s AND step_name = 'Requirements'
+                """, (test_id,))
+
+    cursor.connection.commit()
+    return {"is_completed": new_status, "all_completed": total_reqs == completed_reqs}
