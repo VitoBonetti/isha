@@ -1,0 +1,89 @@
+def get_all_documents(cursor, page: int, limit: int, search: str, service_lane_id: str, doc_type: str, sort_by: str, sort_dir: str):
+    offset = (page - 1) * limit
+
+    base_query = """
+        FROM test_documents td
+        LEFT JOIN tests t ON td.test_id = t.id
+        LEFT JOIN services_lanes sl ON t.service_lane_id = sl.id
+        LEFT JOIN test_assets ta ON t.id = ta.test_id
+        LEFT JOIN assets a ON ta.asset_id = a.id
+        LEFT JOIN countries c ON a.country_id = c.id
+    """
+
+    where_clauses = []
+    params = []
+
+    if search:
+        where_clauses.append("(td.file_name ILIKE %s OR t.name ILIKE %s)")
+        params.extend([f"%{search}%", f"%{search}%"])
+
+    # Service Lane & Knowledge Base Scope Filter
+    if service_lane_id == "kb_only":
+        where_clauses.append("td.test_id IS NULL")
+    elif service_lane_id == "all_incl_kb":
+        pass  # Include everything
+    elif service_lane_id and service_lane_id != "exclude_kb":
+        where_clauses.append("t.service_lane_id = %s")
+        params.append(service_lane_id)
+    else:
+        # Default behavior: Exclude Knowledge Base documents on initial load
+        where_clauses.append("td.test_id IS NOT NULL")
+
+    # Document Type Filter
+    if doc_type:
+        where_clauses.append("td.doc_type = %s")
+        params.append(doc_type)
+
+    where_str = ""
+    if where_clauses:
+        where_str = "WHERE " + " AND ".join(where_clauses)
+
+    # Ordering protection mapping
+    valid_sort_cols = {
+        "file_name": "td.file_name",
+        "test_name": "t.name",
+        "service": "sl.name",
+        "synced_at": "td.synced_at",
+        "scheduled": "t.start_year, t.start_week"
+    }
+    sort_col = valid_sort_cols.get(sort_by, "td.synced_at")
+    dir_str = "ASC" if sort_dir.lower() == "asc" else "DESC"
+
+    # Get total count for pagination
+    count_query = f"SELECT COUNT(DISTINCT td.id) {base_query} {where_str}"
+    cursor.execute(count_query, params)
+    total_count = cursor.fetchone()[0]
+
+    # Get paginated data
+    data_query = f"""
+        SELECT 
+            td.id as doc_id,
+            td.file_name,
+            td.file_url,
+            td.mime_type,
+            td.doc_type,
+            td.synced_at,
+            t.id as test_id,
+            t.name as test_name,
+            t.start_week,
+            t.start_year,
+            sl.name as service_name,
+            STRING_AGG(DISTINCT c.code, ', ') as countries
+        {base_query}
+        {where_str}
+        GROUP BY td.id, t.id, sl.id
+        ORDER BY {sort_col} {dir_str} NULLS LAST
+        LIMIT %s OFFSET %s
+    """
+    cursor.execute(data_query, params + [limit, offset])
+    rows = cursor.fetchall()
+
+    columns = [desc[0] for desc in cursor.description]
+    items = [dict(zip(columns, row)) for row in rows]
+
+    return {
+        "items": items,
+        "total_count": total_count,
+        "page": page,
+        "limit": limit
+    }

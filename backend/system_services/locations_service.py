@@ -1,0 +1,73 @@
+import uuid
+from fastapi import HTTPException, status
+from audit_logger import log_audit_event
+
+
+def get_locations(cursor, current_user: dict):
+    if current_user.get('role') == 'mantainer':
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, 
+            detail=f"{current_user.get('role')} cannot access country data."
+        )
+
+    cursor.execute("SELECT id, name, is_active FROM locations ORDER BY name")
+    return [{"id": r[0], "name": r[1], "is_active": r[2]} for r in cursor.fetchall()]
+
+
+def create_location(cursor, loc, current_user: dict):
+    new_location_id = str(uuid.uuid4())
+    try:
+        cursor.execute(
+            "INSERT INTO locations (id, name, is_active) VALUES (%s, %s, %s)", 
+            (new_location_id, loc.name, loc.is_active)
+        )
+        cursor.connection.commit()
+
+        log_audit_event(
+            user_id=str(current_user["id"]),
+            role=current_user["role"],
+            action="LOCATION_CREATED",
+            resource_type="LOCATIONS",
+            resource_id=str(new_location_id),
+            details=f"Location {loc.name} with ID: {new_location_id} was created."
+        )
+
+        return {"id": new_location_id, "message": "Location created."}
+    except Exception as e:
+        cursor.connection.rollback()
+        raise HTTPException(status_code=400, detail=f"Location name already exists. {e}")
+
+
+def update_location(cursor, loc_id: str, loc, current_user: dict):
+    cursor.execute(
+        "UPDATE locations SET name=%s, is_active=%s WHERE id=%s", 
+        (loc.name, loc.is_active, loc_id)
+    )
+    cursor.connection.commit()
+
+    log_audit_event(
+        user_id=str(current_user["id"]),
+        role=current_user["role"],
+        action="LOCATION_UPDATED",
+        resource_type="LOCATIONS",
+        resource_id=str(loc_id),
+        details=f"Location with ID: {loc_id} was updated."
+    )
+
+    return {"message": "Location updated."}
+
+
+def delete_location(cursor, loc_id: str, current_user: dict):
+    cursor.execute("DELETE FROM locations WHERE id = %s", (loc_id,))
+    cursor.connection.commit()
+
+    log_audit_event(
+        user_id=str(current_user["id"]),
+        role=current_user["role"],
+        action="LOCATION_DELETED",
+        resource_type="LOCATIONS",
+        resource_id=str(loc_id),
+        details=f"Location with ID: {loc_id} was deleted."
+    )
+
+    return {"message": "Location deleted."}

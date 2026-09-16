@@ -22,6 +22,10 @@ class SnowSyncRequest(BaseModel):
     pass
 
 # --- LOCATIONS & COUNTRIES ---
+class RegionBase(BaseModel):
+    name: str
+    is_active: bool = True
+
 class LocationBase(BaseModel):
     name: str
     is_active: bool = True

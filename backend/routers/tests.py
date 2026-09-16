@@ -1,1923 +1,298 @@
-from typing import List
-import uuid
-import os
-import json
-import asyncio
-import requests
-import traceback
-from datetime import datetime, timedelta, timezone
-from pydantic import UUID4
-from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
-import google.auth.transport.requests
-import google.oauth2.id_token
-from database import get_db_cursor, db_cursor_context
-from routers.auth import (
-    get_current_user,
-    require_admin,
-    require_write_access,
-    require_maintainer_or_admin,
-    verify_lane_access,
-    require_admin_or_read_only
-)
+from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException
+from database import get_db_cursor
+from routers.auth import get_current_user, require_admin, require_write_access, require_maintainer_or_admin, require_admin_or_read_only
 from websockets_manager import manager
-from schema import (
-    TestCreate,
-    TestBase,
-    AssignmentBase,
-    TestSchedule,
-    BulkTestCreate,
-    AssignmentCreate,
-    SecureNotePayload,
-    TestAnalysisResponse,
-    RequirementCreate,
-    MilestoneUpdate
-)
-from audit_logger import log_audit_event
-from utils.drive_manager import (
-    DriveManager,
-    background_archive_workspace,
-    background_provision_workspace,
-    background_relocate_workspace
-)
-from utils.secret_manager import get_secret
-from utils.vuln_analysis import build_payload, run_cloud_run_analysis
-from utils.security_cipher import get_cipher
-from routers.rag import process_test_documents_background
-from presentations.presentation import generate_presentation
-from reports import osrgt_v3, pdf_gen
-from utils.kiss24_service import validate_kiss24_findings, get_vuln_fields_map, fetch_all_kiss24, get_report_type_id
-
+from schema import TestCreate, TestBase, TestSchedule, BulkTestCreate, AssignmentCreate, RequirementCreate, MilestoneUpdate
+from system_services import test_service
 
 router = APIRouter(prefix="/api/tests", tags=["Tests & Assignments"])
 
-# --- HELPER: ENUM MAPPING ---
-FRONTEND_TO_DB_STAGES = {
-    "Not Planned": "NOT_PLANNED",
-    "Scheduled": "SCHEDULED",
-    "In Progress": "IN_PROGRESS",
-    "Stopped": "STOPPED",
-    "Deleted": "DELETED",
-    "Completed": "COMPLETED",
-    "Archived": "ARCHIVED"
-}
 
-KISS24_BASE_URL = str(os.environ.get("KISS_24_ENDPOINT"))
-BASE_URL = str(os.environ.get("FRONTEND_URL"))
-
-
-####################################
-# ---        HELPERS          ---  #
-####################################
-# history logger
-def log_test_history(cursor, test_id: str, user_id: str, action: str, details: str = None):
-    """Logs an event to the test_history AND cascades it to the asset_history of all attached assets."""
-
-    # log to Test History
-    new_test_hist_id = str(uuid.uuid4())
-    cursor.execute('''
-        INSERT INTO test_history (id, test_id, user_id, action, details, timestamp)
-        VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
-    ''', (new_test_hist_id, test_id, str(user_id) if user_id else None, action, details))
-
-    # inserte to Asset History
-    cursor.execute('''
-        SELECT a.raw_asset_id, t.name 
-        FROM test_assets ta
-        JOIN assets a ON ta.asset_id = a.id
-        JOIN tests t ON ta.test_id = t.id
-        WHERE ta.test_id = %s
-    ''', (test_id,))
-    assets_data = cursor.fetchall()
-
-    for raw_asset_id, test_name in assets_data:
-        new_asset_hist_id = str(uuid.uuid4())
-        # prefix the detail so the asset history makes sense contextually
-        asset_details = f"[Test: {test_name}] {details}" if details else f"[Test: {test_name}] Status updated to {action}."
-        cursor.execute('''
-            INSERT INTO asset_history (id, raw_asset_id, user_id, action, details, timestamp)
-            VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
-        ''', (new_asset_hist_id, str(raw_asset_id), str(user_id) if user_id else None, action, asset_details))
-
-
-# report generations
-async def process_presentation_background(test_id: str, kiss24_id: str, user_id: str, user_email: str, user_role: str, test_name: str,
-                                          drive_folder_id: str, service_name: str, snow_number: str,
-                                          start_week: int, start_year: int, duration_weeks: float):
-    """Background task that generates the presentation locally via a thread."""
-    try:
-        # Pass the database values to the generator
-        data = await asyncio.to_thread(
-            generate_presentation,
-            kiss24_id,
-            drive_folder_id,
-            service_name,
-            snow_number,
-            start_week,
-            start_year,
-            duration_weeks
-        )
-
-        drive_link = data.get("driveLink", "No link returned")
-        file_id = data.get("fileId")
-        file_name = data.get("fileName")
-        warnings_dict = data.get("warnings", {})
-
-        if file_id and file_name:
-            with db_cursor_context() as cursor:
-                if cursor:
-                    cursor.execute("""
-                        INSERT INTO test_documents (id, test_id, drive_file_id, file_name, mime_type, file_url, doc_type, last_modified, synced_at)
-                        VALUES (gen_random_uuid(), %s, %s, %s, 'application/vnd.openxmlformats-officedocument.presentationml.presentation', %s, 'PRESENTATION', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                        ON CONFLICT (drive_file_id) DO UPDATE SET 
-                            last_modified = CURRENT_TIMESTAMP, 
-                            synced_at = CURRENT_TIMESTAMP
-                    """, (test_id, file_id, file_name, drive_link))
-                    cursor.execute("""
-                        INSERT INTO test_milestones (id, test_id, step_name, is_completed) 
-                        VALUES (gen_random_uuid(), %s, 'Generate Presentation', true)
-                        ON CONFLICT (test_id, step_name) DO UPDATE SET is_completed = true
-                    """, (test_id,))
-                    cursor.connection.commit()
-
-            try:
-                await asyncio.to_thread(process_test_documents_background, test_id, user_id, user_role)
-            except Exception as rag_err:
-                print(f"RAG ingestion warning (Presentation): {rag_err}")
-
-        # Format the unhealthy warnings into a readable list
-        issues = []
-        if isinstance(warnings_dict, dict):
-            for key, info in warnings_dict.items():
-                if isinstance(info, dict) and not info.get("healthy"):
-                    issues.append(f"{key.capitalize()}: {info.get('reason')}")
-
-        if issues:
-            issues_text = "\n\n[!] Warnings:\n- " + "\n- ".join(issues)
-        else:
-            issues_text = "\n\n[+] Health Check: 100% Healthy (No warnings)"
-
-        message = f"Presentation for '{test_name}' is ready!\nLink: {drive_link}{issues_text}"
-        notif_type = "SUCCESS"
-
-        await manager.broadcast(json.dumps({
-            "action": "PRESENTATION_READY",
-            "email": user_email,
-            "message": f"Presentation for {test_name} generated successfully!"
-        }))
-
-    except Exception as e:
-        print(f"Error generating presentation: {e}")
-        message = f"Generation failed for '{test_name}'. Error: {str(e)}"
-        notif_type = "ERROR"
-        await manager.broadcast(json.dumps({
-            "action": "PRESENTATION_FAILED",
-            "email": user_email,
-            "message": message
-        }))
-
-    # Save the result as a notification for the user
-    with db_cursor_context() as cursor:
-        if cursor:
-            cursor.execute(
-                "INSERT INTO notifications (id, user_id, message, type, created_at) VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)",
-                (str(uuid.uuid4()), user_id, message, notif_type)
-            )
-
-    await manager.broadcast('{"action": "REFRESH_BOARD"}')
-
-
-async def process_report_background(test_id: str, kiss24_id: str, user_id: str, user_email: str, user_role: str,
-                                    test_name: str, drive_folder_id: str, display_order: int,
-                                    start_week: int, start_year: int, duration_weeks: float):
-    """Background task that generates the HTML & PDF reports, uploads them, and handles logging."""
-    try:
-        try:
-            test_start = datetime.fromisocalendar(start_year, start_week, 1)
-            dur_weeks = max(1, int(duration_weeks or 1))
-            test_end = test_start + timedelta(days=(dur_weeks - 1) * 7 + 4)
-            start_date_str = test_start.strftime("%d-%m-%Y")
-            end_date_str = test_end.strftime("%d-%m-%Y")
-        except Exception:
-            start_date_str = end_date_str = None
-
-        # CRITICAL FIX: Ensure the API key is stripped of whitespace/newlines
-        raw_api_key = get_secret(os.environ.get("KISS_24_API_KEY_NAME"))
-        api_key = raw_api_key.strip() if raw_api_key else ""
-
-        report_type = get_report_type_id(display_order)
-
-        # 1. RUN VALIDATION BEFORE GENERATING REPORT
-        vulns = await asyncio.to_thread(fetch_all_kiss24, 'vulnerabilities', api_key, {"tests": [kiss24_id]})
-        vuln_uuids = [v['uuid'] for v in vulns]
-        vuln_fields_map = await asyncio.to_thread(get_vuln_fields_map, vuln_uuids, api_key)
-
-        invalid_findings = await asyncio.to_thread(validate_kiss24_findings, vulns, vuln_fields_map, report_type,
-                                                   api_key)
-
-        if invalid_findings:
-            err_msg = f"Report generation aborted for '{test_name}'. Validation failed:\n"
-            for f in invalid_findings:
-                err_msg += f"\n- Vuln {f['vuln_uuid']}:\n  " + "\n  ".join(f['reasons'])
-            raise ValueError(err_msg)
-
-        # 2. PROCEED WITH GENERATION
-        report_args = {
-            "pentest": kiss24_id,
-            "type": report_type,
-            "api_key": api_key,
-            "action": "generate",
-            "minify": False,
-            "environment": "sec24prd",
-            "loglevel": "info",
-            "devoteam": False,
-            "start": start_date_str,
-            "end": end_date_str,
-            "custom_fields": vuln_fields_map
-        }
-
-        html_content, html_filename = await asyncio.to_thread(osrgt_v3.generate_html_report, report_args)
-        pdf_content, pdf_filename = await asyncio.to_thread(pdf_gen.convert_html_to_pdf, html_content, html_filename)
-
-        drive_manager = DriveManager()
-        html_result = await asyncio.to_thread(drive_manager.upload_file, drive_folder_id, html_filename,
-                                              html_content.encode('utf-8'), 'text/html')
-        pdf_result = await asyncio.to_thread(drive_manager.upload_file, drive_folder_id, pdf_filename, pdf_content,
-                                             'application/pdf')
-
-        with db_cursor_context() as cursor:
-            if cursor:
-                cursor.execute("""
-                    INSERT INTO test_documents (id, test_id, drive_file_id, file_name, mime_type, file_url, doc_type, last_modified, synced_at)
-                    VALUES (gen_random_uuid(), %s, %s, %s, 'application/pdf', %s, 'FULL_TEST_REPORT', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                    ON CONFLICT (drive_file_id) DO UPDATE SET 
-                        last_modified = CURRENT_TIMESTAMP, 
-                        synced_at = CURRENT_TIMESTAMP
-                """, (test_id, pdf_result["id"], pdf_filename, pdf_result["link"]))
-                cursor.execute("""
-                    INSERT INTO test_milestones (id, test_id, step_name, is_completed) 
-                    VALUES (gen_random_uuid(), %s, 'Generate Report PDF', true)
-                    ON CONFLICT (test_id, step_name) DO UPDATE SET is_completed = true
-                """, (test_id,))
-                cursor.connection.commit()
-
-        try:
-            await asyncio.to_thread(process_test_documents_background, test_id, user_id, user_role)
-        except Exception as rag_err:
-            print(f"RAG ingestion warning (Main Report): {rag_err}")
-
-        # --- SUCCESS HANDLING ---
-        message = f"Report for '{test_name}' is ready!\nPDF Link: {pdf_result['link']}"
-        await manager.broadcast(json.dumps({"action": "REPORT_READY", "email": user_email, "message": message}))
-
-        with db_cursor_context() as cursor:
-            if cursor:
-                cursor.execute(
-                    "INSERT INTO notifications (id, user_id, message, type, created_at) VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)",
-                    (str(uuid.uuid4()), user_id, message, "SUCCESS")
-                )
-                cursor.connection.commit()
-
-        await asyncio.to_thread(
-            log_audit_event,
-            user_id=user_id,
-            role=user_role,
-            action="REPORT_GENERATION_SUCCESS",
-            resource_type="REPORTING",
-            resource_id=test_id,
-            details=f"Successfully generated and uploaded PDF report for '{test_name}'."
-        )
-
-    except Exception as e:
-        error_details = str(e)
-
-        # Catch the full python stack trace so we can debug exactly which line failed in BigQuery
-        full_traceback = traceback.format_exc()
-        print(f"Error generating report: {error_details}\n{full_traceback}")
-
-        # Format a clean message for the User
-        if isinstance(e, ValueError) and (
-                "Validation failed" in error_details or "API Error" in error_details or "Invalid JSON" in error_details):
-            user_message = error_details
-        else:
-            user_message = f"Report generation failed for '{test_name}'. Please contact an administrator or check the logs."
-
-        await manager.broadcast(json.dumps({"action": "REPORT_FAILED", "email": user_email, "message": user_message}))
-
-        with db_cursor_context() as cursor:
-            if cursor:
-                cursor.execute(
-                    "INSERT INTO notifications (id, user_id, message, type, created_at) VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)",
-                    (str(uuid.uuid4()), user_id, user_message, "ERROR")
-                )
-
-        # Log the raw technical crash to BigQuery
-        await asyncio.to_thread(
-            log_audit_event,
-            user_id=user_id,
-            role=user_role,
-            action="REPORT_GENERATION_CRASH",
-            resource_type="REPORTING",
-            resource_id=test_id,
-            details=f"Crash during report generation for '{test_name}': {error_details}\nTraceback: {full_traceback}"
-        )
-
-    await manager.broadcast('{"action": "REFRESH_BOARD"}')
-
-
-async def process_vuln_report_background(test_id: str, kiss24_id: str, user_id: str, user_email: str, user_role: str,
-                                         test_name: str, drive_folder_id: str, display_order: int, vuln_uuids: list):
-    """Background task to generate, upload, and fully log individual vulnerability PDFs."""
-    try:
-        raw_api_key = get_secret(os.environ.get("KISS_24_API_KEY_NAME"))
-        api_key = raw_api_key.strip() if raw_api_key else ""
-        report_type = get_report_type_id(display_order)
-
-        report_args = {
-            "pentest": kiss24_id,
-            "vuln": vuln_uuids,
-            "type": report_type,
-            "api_key": api_key,
-            "action": "generate",
-            "minify": False,
-            "environment": "sec24prd",
-            "loglevel": "info",
-            "devoteam": False,
-        }
-
-        # Generate the HTML reports (Returns a list of tuples)
-        reports_data = await asyncio.to_thread(osrgt_v3.generate_html_report, report_args)
-        drive_manager = DriveManager()
-
-        uploaded_count = 0
-        generated_links = []
-
-        with db_cursor_context() as cursor:
-            for html_content, html_filename in reports_data:
-                # Convert to PDF
-                pdf_content, pdf_filename = await asyncio.to_thread(pdf_gen.convert_html_to_pdf, html_content,
-                                                                    html_filename)
-
-                # Upload to Google Drive
-                pdf_result = await asyncio.to_thread(drive_manager.upload_file, drive_folder_id, pdf_filename,
-                                                     pdf_content, 'application/pdf')
-
-                if cursor:
-                    # 1. Save to test_documents for the workspace view
-                    cursor.execute("""
-                        INSERT INTO test_documents (id, test_id, drive_file_id, file_name, mime_type, file_url, doc_type, last_modified, synced_at)
-                        VALUES (gen_random_uuid(), %s, %s, %s, 'application/pdf', %s, 'VULN_REPORT', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                        ON CONFLICT (drive_file_id) DO UPDATE SET 
-                             last_modified = CURRENT_TIMESTAMP, 
-                             synced_at = CURRENT_TIMESTAMP
-                    """, (test_id, pdf_result["id"], pdf_filename, pdf_result["link"]))
-
-                uploaded_count += 1
-                generated_links.append((pdf_filename, pdf_result["link"]))
-
-            if cursor:
-                cursor.connection.commit()
-
-        try:
-            await asyncio.to_thread(process_test_documents_background, test_id, user_id, user_role)
-        except Exception as rag_err:
-            print(f"RAG ingestion warning (Vuln Reports): {rag_err}")
-
-        # 2. Build the detailed message with links
-        message = f"Successfully generated {uploaded_count} vulnerability report(s) for '{test_name}':\n"
-        for name, link in generated_links:
-            message += f"• {name}\n  Link: {link}\n"
-
-        # 3. Save to notifications table so the Bell icon retains it
-        with db_cursor_context() as cursor:
-            if cursor:
-                cursor.execute(
-                    "INSERT INTO notifications (id, user_id, message, type, created_at) VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)",
-                    (str(uuid.uuid4()), user_id, message, "SUCCESS")
-                )
-                cursor.connection.commit()
-
-        # 4. Log to the Audit trail
-        await asyncio.to_thread(
-            log_audit_event,
-            user_id=user_id,
-            role=user_role,
-            action="VULN_REPORT_GENERATION_SUCCESS",
-            resource_type="REPORTING",
-            resource_id=test_id,
-            details=f"Generated {uploaded_count} individual vuln reports for '{test_name}'."
-        )
-
-        # 5. Broadcast to the frontend
-        await manager.broadcast(json.dumps({"action": "REPORT_READY", "email": user_email, "message": message}))
-        await manager.broadcast('{"action": "REFRESH_BOARD"}')
-
-    except Exception as e:
-        error_details = str(e)
-        full_traceback = traceback.format_exc()
-        print(f"Error generating vulnerability reports: {error_details}\n{full_traceback}")
-
-        user_message = f"Vuln Report generation failed for '{test_name}': {error_details}"
-
-        with db_cursor_context() as cursor:
-            if cursor:
-                cursor.execute(
-                    "INSERT INTO notifications (id, user_id, message, type, created_at) VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)",
-                    (str(uuid.uuid4()), user_id, user_message, "ERROR")
-                )
-                cursor.connection.commit()
-
-        await asyncio.to_thread(
-            log_audit_event,
-            user_id=user_id,
-            role=user_role,
-            action="VULN_REPORT_GENERATION_CRASH",
-            resource_type="REPORTING",
-            resource_id=test_id,
-            details=f"Crash during vuln report generation for '{test_name}': {error_details}\nTraceback: {full_traceback}"
-        )
-
-        await manager.broadcast(json.dumps({"action": "REPORT_FAILED", "email": user_email, "message": user_message}))
-
-
-# Vulnerability analysis
-async def process_vuln_analysis_background(test_id: str, kiss24_id: str, user_id: str, user_email: str, test_name: str):
-    try:
-        # 1. Build Payload
-        payload = await build_payload(kiss24_id)
-        if not payload or not payload.get("vulnerabilities"):
-            raise ValueError("No vulnerabilities found to analyze.")
-
-        # 2. Call Cloud Run
-        analysis_response = await run_cloud_run_analysis(payload)
-
-        # 3. Stitch Markdown
-        results = analysis_response.get("results", [])
-        stitched_markdown = "\n\n---\n\n".join([r.get("analysis", "") for r in results if r.get("status") == "success"])
-
-        if not stitched_markdown:
-            raise ValueError("Cloud Run returned no valid analysis text.")
-
-        # 4. Save to Database (UPDATE test_analyses AND UPSERT INTO test_documents for RAG)
-        virtual_file_id = f"analysis_{test_id}"
-        analysis_filename = f"LLM_Vulnerability_Analysis_{test_name}.md"
-
-        with db_cursor_context() as cursor:
-            if cursor:
-                cursor.execute("""
-                    UPDATE test_analyses 
-                    SET status = 'COMPLETED', analysis_text = %s, timestamp = CURRENT_TIMESTAMP 
-                    WHERE test_id = %s
-                """, (stitched_markdown, test_id))
-
-                # UPSERT virtual LLM_ANALYSIS document for RAG indexing
-                cursor.execute("""
-                    INSERT INTO test_documents (id, test_id, drive_file_id, file_name, mime_type, file_url, doc_type, last_modified, synced_at, is_virtual)
-                    VALUES (gen_random_uuid(), %s, %s, %s, 'text/markdown', %s, 'LLM_ANALYSIS', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, TRUE)
-                    ON CONFLICT (drive_file_id) DO UPDATE SET 
-                        file_name = EXCLUDED.file_name,
-                        last_modified = CURRENT_TIMESTAMP, 
-                        synced_at = CURRENT_TIMESTAMP
-                """, (test_id, virtual_file_id, analysis_filename, f"{BASE_URL}/tests/{test_id}/analysis"))
-
-                cursor.execute("""
-                    INSERT INTO test_milestones (id, test_id, step_name, is_completed) 
-                    VALUES (gen_random_uuid(), %s, 'Validate Finding', true)
-                    ON CONFLICT (test_id, step_name) DO UPDATE SET is_completed = true
-                """, (test_id,))
-                cursor.connection.commit()
-
-        # 5. Trigger RAG Ingestion for this test immediately
-        try:
-            await asyncio.to_thread(process_test_documents_background, test_id, user_id, "admin")
-        except Exception as rag_err:
-            print(f"RAG ingestion warning (Vulnerability Analysis): {rag_err}")
-
-        # 6. Notify User
-        db_message = f"Vulnerability Analysis for '{test_name}' is ready! Link: {BASE_URL}/tests/{test_id}/analysis"
-        with db_cursor_context() as cursor:
-            if cursor:
-                cursor.execute(
-                    "INSERT INTO notifications (id, user_id, message, type, created_at) VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)",
-                    (str(uuid.uuid4()), user_id, db_message, "SUCCESS")
-                )
-                cursor.connection.commit()
-
-        toast_message = f"Vulnerability Analysis for '{test_name}' is ready!"
-        await manager.broadcast(json.dumps({
-            "action": "REPORT_READY",
-            "email": user_email,
-            "message": toast_message,
-            "link": f"/tests/{test_id}/analysis"
-        }))
-
-    except Exception as e:
-        print(f"Analysis failed: {e}")
-        with db_cursor_context() as cursor:
-            if cursor:
-                cursor.execute(
-                    "UPDATE test_analyses SET status = 'FAILED', timestamp = CURRENT_TIMESTAMP WHERE test_id = %s",
-                    (test_id,))
-                cursor.connection.commit()
-
-        await manager.broadcast(json.dumps({
-            "action": "REPORT_FAILED",
-            "email": user_email,
-            "message": f"Analysis failed for '{test_name}': {str(e)}"
-        }))
-
-
-# bulk generation
-def process_bulk_tests_background(asset_ids: List[UUID4], user_id: str, role: str, service_lane_id: str = None):
-    tests_to_provision = []
-
-    with db_cursor_context() as cursor:
-        if not cursor: return
-
-        for asset_id in asset_ids:
-            # 1. Base query setup
-            query = """
-                SELECT r.name, r.service_forecast_id, s.default_credits, s.default_duration_weeks,
-                       s.name as service_name, c.name as country_name, s.auto_provision_workspace, r.category_id
-                FROM assets a
-                JOIN raw_assets r ON a.raw_asset_id = r.id
-                LEFT JOIN services_lanes s ON r.service_forecast_id = s.id
-                LEFT JOIN countries c ON r.country_id = c.id
-                WHERE a.id = %s
-            """
-            params = [str(asset_id)]
-
-            # 2. Add Service Lane constraint if user is a maintainer
-            if role == 'maintainer':
-                if service_lane_id:
-                    query += " AND r.service_forecast_id = %s"
-                    params.append(str(service_lane_id))
-                else:
-                    # Fallback to prevent unauthorized creation if maintainer has no lane assigned
-                    query += " AND r.service_forecast_id = '00000000-0000-0000-0000-000000000000'"
-
-            # 3. Add the duplicate check
-            query += """
-                AND (r.duplicate_allowed = TRUE OR NOT EXISTS (
-                    SELECT 1 FROM test_assets ta 
-                    JOIN tests t ON ta.test_id = t.id 
-                    WHERE ta.asset_id = a.id 
-                    AND t.stages::text IN ('NOT_PLANNED', 'SCHEDULED', 'IN_PROGRESS')
-                ))
-            """
-
-            cursor.execute(query, tuple(params))
-            asset_data = cursor.fetchone()
-
-            # If asset_data is None, it means the asset doesn't exist, has duplicates, OR it belongs to a different lane
-            if not asset_data or not asset_data[1]: continue
-
-            asset_name, asset_service_lane_id, default_credits, default_duration_weeks, service_name, country_name, auto_provision, cat_id = asset_data
-
-            new_test_id = str(uuid.uuid4())
-            credits = float(default_credits) if default_credits is not None else 2.0
-            duration = int(default_duration_weeks) if default_duration_weeks is not None else 1
-
-            # Insert with category_id
-            cursor.execute("""
-                INSERT INTO tests (id, name, service_lane_id, category_id, credits_per_week, duration_weeks, stages)
-                  VALUES (%s, %s, %s, %s, %s, %s, 'NOT_PLANNED') RETURNING id
-            """, (new_test_id, asset_name, str(asset_service_lane_id), str(cat_id) if cat_id else None, credits,
-                  duration))
-
-            log_audit_event(
-                user_id=str(user_id),
-                role=str(role),
-                action="TEST_CREATED",
-                resource_type="TESTS",
-                resource_id=str(new_test_id),
-                details=f"Test {asset_name} with ID: {new_test_id} was created. Service Lane ID: {asset_service_lane_id} in a Bulk Action."
-            )
-
-            cursor.execute('INSERT INTO test_assets (test_id, asset_id) VALUES (%s, %s)', (new_test_id, str(asset_id)))
-            log_test_history(cursor, new_test_id, user_id, "GENERATED", f"Test generated from Asset Pool.")
-
-            # Store the data to provision later
-            current_year = datetime.now().year
-            tests_to_provision.append(
-                (new_test_id, current_year, service_name, country_name, asset_name, auto_provision))
-
-        # Commit the transaction so the database unlocks the rows!
-        cursor.connection.commit()
-
-    # Now that the DB is unlocked, we can safely contact Google Drive
-    for test_id, year, s_name, c_name, t_name, auto_prov in tests_to_provision:
-        if auto_prov:
-            DriveManager().provision_test_workspace(test_id, year, s_name, c_name, t_name)
-
-
-####################################
-# ---   Test endpoint api     ---  #
-####################################
 @router.post("/", summary="[Admin/Maintainer] Create a new Test")
 def create_test(t: TestCreate, background_tasks: BackgroundTasks,
                 current_user: dict = Depends(require_maintainer_or_admin), cursor=Depends(get_db_cursor)):
-    """
-    Admin or Maintainer Endpoint to create a new Test
-    """
-    # 1. Enforce that Maintainers can only create tests for their own Service Lane
-    verify_lane_access(current_user, str(t.service_lane_id))
-
-    new_test_id = str(uuid.uuid4())
-    cat_id = str(t.category_id) if hasattr(t, 'category_id') and t.category_id else None
-
-    cursor.execute('''
-            INSERT INTO tests (id, name, service_lane_id, category_id, credits_per_week, duration_weeks, stages) 
-             VALUES (%s, %s, %s, %s, %s, %s, 'NOT_PLANNED') RETURNING id
-        ''', (new_test_id, t.name, str(t.service_lane_id), cat_id, t.credits_per_week, t.duration_weeks))
-
-    new_id = cursor.fetchone()[0]
-
-    if t.asset_ids:
-        for asset_id in t.asset_ids:
-            cursor.execute('INSERT INTO test_assets (test_id, asset_id) VALUES (%s, %s)', (new_id, str(asset_id)))
-
-    log_test_history(cursor, new_id, current_user['id'], "CREATED", f"Test manually created.")
-
-    cursor.connection.commit()
-
-    log_audit_event(
-        user_id=str(current_user["id"]),
-        role=current_user["role"],
-        action="TEST_CREATED",
-        resource_type="TESTS",
-        resource_id=str(new_test_id),
-        details=f"Test {t.name} with ID: {new_test_id} was created. Service Lane ID: {t.service_lane_id}."
-    )
-
+    res = test_service.create_test(cursor, t, current_user)
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
-    return {"message": "Test created successfully", "id": new_id}
+    return res
 
 
 @router.get("/", summary="Return all tests")
 def get_all_tests(current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
-    """
-    Return all tests
-    """
-    where_clauses = []
-    params = []
-
-    # 1. Restrict maintainers to their assigned service lane
-    if current_user.get('role') == 'maintainer':
-        lane_id = current_user.get('service_lane_id')
-        if lane_id:
-            where_clauses.append("t.service_lane_id = %s")
-            params.append(str(lane_id))
-        else:
-            # Safely return nothing if the Maintainer hasn't been assigned a lane yet
-            where_clauses.append("t.service_lane_id = '00000000-0000-0000-0000-000000000000'")
-
-    # 2. Build the dynamic WHERE string
-    where_str = "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
-
-    query = f'''
-        SELECT t.id, t.name, t.start_week, t.start_year, t.duration_weeks, t.stages::text as status,
-            s.name as service_lane_name, s.is_active as is_service_active,
-            s.auto_provision_workspace,
-            sc.name as category_name, 
-            COALESCE((SELECT string_agg(DISTINCT u.name, ', ') FROM assignments a JOIN users u ON a.user_id = u.id WHERE a.test_id = t.id), 'Unassigned') as assigned_pentesters,
-            EXISTS(SELECT 1 FROM secret_notes WHERE test_id = t.id) as has_secret,
-            t.drive_folder_url,
-            t.kiss24,
-            (SELECT a.raw_asset_id FROM test_assets ta JOIN assets a ON ta.asset_id = a.id WHERE ta.test_id = t.id LIMIT 1) as raw_asset_id,
-            (SELECT ra.is_kpi FROM test_assets ta JOIN assets a ON ta.asset_id = a.id JOIN raw_assets ra ON a.raw_asset_id = ra.id WHERE ta.test_id = t.id LIMIT 1) as is_kpi,
-            (SELECT ra.is_critical FROM test_assets ta JOIN assets a ON ta.asset_id = a.id JOIN raw_assets ra ON a.raw_asset_id = ra.id WHERE ta.test_id = t.id LIMIT 1) as is_critical,
-            (SELECT at.name FROM test_assets ta JOIN assets a ON ta.asset_id = a.id JOIN raw_assets ra ON a.raw_asset_id = ra.id JOIN asset_types at ON ra.asset_type_id = at.id WHERE ta.test_id = t.id LIMIT 1) as asset_type_name
-        FROM tests t 
-        LEFT JOIN services_lanes s ON t.service_lane_id = s.id
-        LEFT JOIN service_categories sc ON t.category_id = sc.id
-        {where_str}
-        ORDER BY t.start_year DESC NULLS LAST, t.start_week DESC NULLS LAST, t.name ASC
-    '''
-
-    cursor.execute(query, tuple(params))
-
-    columns = [col[0] for col in cursor.description]
-    return [dict(zip(columns, row)) for row in cursor.fetchall()]
+    return test_service.get_all_tests(cursor, current_user)
 
 
 @router.get("/{test_id}", summary="Get Full Test Details & Contacts")
 def get_test_details(test_id: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
-    """
-    Return test details
-    1. Fetch Test Base Details
-    2. Fetch Attached Assets
-    3. Extract IDs for contacts aggregation
-    4. Fetch Asset Contacts (Combined across all linked assets)
-    5. Fetch Country Contacts (Combined across all linked asset regions)
-    6. Fetch Test History
-    """
-    # 0. Start with the base requirement: It must match the requested test_id!
-    where_clauses = ["t.id = %s"]
-    params = [test_id]
-
-    # 1. Restrict maintainers to their assigned service lane
-    if current_user.get('role') == 'maintainer':
-        lane_id = current_user.get('service_lane_id')
-        if lane_id:
-            where_clauses.append("t.service_lane_id = %s")
-            params.append(str(lane_id))
-        else:
-            # Safely return nothing if the Maintainer hasn't been assigned a lane yet
-            where_clauses.append("t.service_lane_id = '00000000-0000-0000-0000-000000000000'")
-
-    # 2. Build the dynamic WHERE string
-    where_str = "WHERE " + " AND ".join(where_clauses)
-
-    # 3. Inject the `where_str` using an f-string (f''') and pass the tuple(params)
-    cursor.execute(f'''
-        SELECT t.id, t.name, t.service_lane_id, t.credits_per_week, 
-               t.duration_weeks, t.stages::text as status, t.start_week, t.start_year, 
-               t.is_tentative, t.kiss24, t.drive_folder_id, t.drive_folder_url,
-               s.name as service_lane_name, s.auto_provision_workspace,
-               ct.kiss24_uuid as country_kiss24_uuid,
-               EXISTS(SELECT 1 FROM secret_notes WHERE test_id = t.id) as has_secret,
-               COALESCE((SELECT string_agg(DISTINCT u.name, ', ') FROM assignments a JOIN users u ON a.user_id = u.id WHERE a.test_id = t.id), 'Unassigned') as assigned_pentesters,
-               ra.category_id,
-               c.name as category_name
-        FROM tests t
-        LEFT JOIN services_lanes s ON t.service_lane_id = s.id
-        LEFT JOIN test_assets ta ON t.id = ta.test_id
-        LEFT JOIN assets a ON ta.asset_id = a.id
-        LEFT JOIN raw_assets ra ON a.raw_asset_id = ra.id
-        LEFT JOIN service_categories c ON ra.category_id = c.id
-        LEFT JOIN countries ct ON ra.country_id = ct.id
-        {where_str}
-        LIMIT 1
-    ''', tuple(params))
-
-    test_row = cursor.fetchone()
-    if not test_row:
-        raise HTTPException(status_code=404, detail="Test not found")
-
-    columns = [desc[0] for desc in cursor.description]
-    test_data = dict(zip(columns, test_row))
-
-    # 4. Fetch Attached Assets
-    cursor.execute('''
-            SELECT a.id as asset_id, a.raw_asset_id, r.name as asset_name, r.country_id, r.kiss24_asset_id
-            FROM test_assets ta
-            JOIN assets a ON ta.asset_id = a.id
-            JOIN raw_assets r ON a.raw_asset_id = r.id
-            WHERE ta.test_id = %s
-        ''', (test_id,))
-    assets_cols = [desc[0] for desc in cursor.description]
-    assets_data = [dict(zip(assets_cols, row)) for row in cursor.fetchall()]
-    test_data["assets"] = assets_data
-
-    # Extract IDs for contacts aggregation
-    raw_asset_ids = [a['raw_asset_id'] for a in assets_data if a['raw_asset_id']]
-    country_ids = list(set([a['country_id'] for a in assets_data if a['country_id']]))
-
-    # 5. Fetch Asset Contacts (Combined across all linked assets)
-    asset_contacts = []
-    if raw_asset_ids:
-        format_strings = ','.join(['%s'] * len(raw_asset_ids))
-        cursor.execute(f'''
-            SELECT DISTINCT c.id as contact_id, c.email, c.full_name, 
-                   rac.is_stakeholder, rac.is_developer
-            FROM raw_asset_contacts rac
-            JOIN contacts c ON rac.contact_id = c.id
-            WHERE rac.raw_asset_id IN ({format_strings})
-            ORDER BY c.email ASC
-        ''', tuple(raw_asset_ids))
-        ac_cols = [desc[0] for desc in cursor.description]
-        asset_contacts = [dict(zip(ac_cols, row)) for row in cursor.fetchall()]
-    test_data["asset_contacts"] = asset_contacts
-
-    # 6. Fetch Country Contacts (Combined across all linked asset regions)
-    country_contacts = []
-    if country_ids:
-        format_strings = ','.join(['%s'] * len(country_ids))
-        cursor.execute(f'''
-            SELECT DISTINCT c.id as contact_id, c.email, c.full_name, 
-                   cc.is_stakeholder, cc.is_developer
-            FROM country_contacts cc
-            JOIN contacts c ON cc.contact_id = c.id
-            WHERE cc.country_id IN ({format_strings})
-            ORDER BY c.email ASC
-        ''', tuple(country_ids))
-        cc_cols = [desc[0] for desc in cursor.description]
-        country_contacts = [dict(zip(cc_cols, row)) for row in cursor.fetchall()]
-    test_data["country_contacts"] = country_contacts
-
-    # 7. Fetch Test History
-    cursor.execute('''
-        SELECT th.id, th.action, th.details, th.timestamp, u.name as user_name
-        FROM test_history th
-        LEFT JOIN users u ON th.user_id = u.id
-        WHERE th.test_id = %s
-        ORDER BY th.timestamp DESC
-    ''', (test_id,))
-    hist_cols = [desc[0] for desc in cursor.description]
-    test_data["history"] = [dict(zip(hist_cols, row)) for row in cursor.fetchall()]
-
-    return test_data
+    return test_service.get_test_details(cursor, test_id, current_user)
 
 
 @router.put("/{test_id}", summary="[Admin/Maintainer] Update a specific test")
 def update_test(test_id: str, t: TestBase, background_tasks: BackgroundTasks,
                 current_user: dict = Depends(require_maintainer_or_admin), cursor=Depends(get_db_cursor)):
-    """
-    Admin or Maintainer Endpoint to update a specific test
-    0. Enforce that Maintainers can only edit tests for their own Service Lane
-    1. Fetch old data to see if we need to relocate the Google Drive folder
-    2. Update the test
-    3. Trigger Folder Relocation if a folder exists
-    """
-    # 0. Enforce that Maintainers can only edit tests for their own Service Lane
-    verify_lane_access(current_user, str(t.service_lane_id))
-
-    # 1. Fetch old data to see if we need to relocate the Google Drive folder
-    cursor.execute('''
-        SELECT t.drive_folder_id, s.name, c.name, t.start_year
-        FROM tests t
-        LEFT JOIN services_lanes s ON t.service_lane_id = s.id
-        LEFT JOIN test_assets ta ON t.id = ta.test_id
-        LEFT JOIN assets a ON ta.asset_id = a.id
-        LEFT JOIN countries c ON a.country_id = c.id
-        WHERE t.id = %s LIMIT 1
-    ''', (test_id,))
-    old_data = cursor.fetchone()
-
-    db_stage = FRONTEND_TO_DB_STAGES.get(t.status, "NOT_PLANNED")
-    if db_stage == 'NOT_PLANNED':
-        cursor.execute('DELETE FROM assignments WHERE test_id = %s', (test_id,))
-        cursor.execute('UPDATE tests SET start_week = NULL, start_year = NULL WHERE id = %s', (test_id,))
-
-    cat_id = str(t.category_id) if hasattr(t, 'category_id') and t.category_id else None
-    kiss24_val = str(t.kiss24) if hasattr(t, 'kiss24') and t.kiss24 else None
-
-    # Update the test
-    cursor.execute('''
-        UPDATE tests 
-         SET name=%s, service_lane_id=%s, category_id=%s, credits_per_week=%s, duration_weeks=%s, stages=%s, is_tentative=%s, kiss24=%s
-        WHERE id=%s
-    ''', (t.name, str(t.service_lane_id), cat_id, t.credits_per_week, t.duration_weeks, db_stage,
-          t.is_tentative, kiss24_val,
-          test_id))
-
-    cursor.execute('''
-        UPDATE raw_assets 
-        SET category_id = %s 
-        WHERE id IN (
-            SELECT a.raw_asset_id 
-            FROM test_assets ta 
-            JOIN assets a ON ta.asset_id = a.id 
-            WHERE ta.test_id = %s
-        )
-    ''', (cat_id, test_id))
-
-    log_test_history(cursor, test_id, current_user['id'], "UPDATED",
-                     f"Settings updated: {t.credits_per_week}cr, {t.duration_weeks}wks.")
-    cursor.connection.commit()
-
-    log_audit_event(
-        user_id=str(current_user["id"]),
-        role=current_user["role"],
-        action="TEST_UPDATED",
-        resource_type="TESTS",
-        resource_id=str(test_id),
-        details=f"Test with ID: {test_id} was updated."
-    )
-
-    # 2. Trigger Folder Relocation if a folder exists
-    if old_data and old_data[0]:
-        folder_id = old_data[0]
-        country_name = old_data[2] or "General"
-
-        # Ensure we pass the NEW year if it was updated, otherwise fallback to the old year
-        target_year = t.start_year if t.start_year else (old_data[3] or datetime.now().year)
-
-        # Get the new service name to construct the new path
-        cursor.execute("SELECT name FROM services_lanes WHERE id = %s", (str(t.service_lane_id),))
-        new_service_name = cursor.fetchone()[0]
-
-        background_tasks.add_task(background_relocate_workspace, folder_id, target_year, new_service_name, country_name, t.name)
-
+    res = test_service.update_test(cursor, test_id, t, current_user, background_tasks)
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
-    return {"message": "Test updated successfully."}
+    return res
 
 
 @router.delete("/{test_id}", summary="[Admin/Maintainer] Delete a specific test")
 def delete_test(test_id: str, background_tasks: BackgroundTasks,
                 current_user: dict = Depends(require_maintainer_or_admin), cursor=Depends(get_db_cursor)):
-    """
-    Admin or Maintainer Endpoint to delete a specific test
-    """
-
-    # 1. Fetch test name, drive_folder_id, and service_lane_id
-    cursor.execute("SELECT name, drive_folder_id, service_lane_id FROM tests WHERE id = %s", (test_id,))
-    test_data = cursor.fetchone()
-
-    if not test_data:
-        raise HTTPException(status_code=404, detail="Test not found")
-
-    # 2. Enforce that Maintainers can only delete tests in their own lane
-    verify_lane_access(current_user, str(test_data[2]))
-
-    # Log deletion BEFORE removing links, so the assets receive the cascade
-    log_test_history(cursor, test_id, current_user['id'], "DELETED", "Test permanently deleted and assets freed.")
-
-    cursor.execute('DELETE FROM test_assets WHERE test_id = %s', (test_id,))
-    cursor.execute('DELETE FROM assignments WHERE test_id = %s', (test_id,))
-    cursor.execute('DELETE FROM tests WHERE id = %s', (test_id,))
-    cursor.connection.commit()
-
-    log_audit_event(
-        user_id=str(current_user["id"]),
-        role=current_user["role"],
-        action="TEST_DELETED",
-        resource_type="TESTS",
-        resource_id=str(test_id),
-        details=f"Test with ID: {test_id} was deleted."
-    )
-
-    if test_data and test_data[1]:
-        test_name, folder_id = test_data[0], test_data[1]
-        background_tasks.add_task(background_archive_workspace, folder_id, test_name)
-
+    res = test_service.delete_test(cursor, test_id, current_user, background_tasks)
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
-    return {"message": "Test permanently deleted and assets freed."}
+    return res
+
 
 @router.post("/bulk", summary="[Admin/Maintainer] bulk creation of tests")
 def bulk_create_tests(req: BulkTestCreate, background_tasks: BackgroundTasks,
-                      current_user: dict = Depends(require_maintainer_or_admin)): # CHANGED DEPENDENCY
-    """
-    Admin or Maintainer Endpoint to bulk create new tests
-    """
-    # Extract service_lane_id safely
+                      current_user: dict = Depends(require_maintainer_or_admin)):
     sl_id = str(current_user.get('service_lane_id')) if current_user.get('service_lane_id') else None
-
-    # Pass the lane ID down to the background worker
-    background_tasks.add_task(process_bulk_tests_background, req.asset_ids, str(current_user['id']), str(current_user['role']), sl_id)
+    background_tasks.add_task(test_service.process_bulk_tests_background, req.asset_ids, str(current_user['id']),
+                              str(current_user['role']), sl_id)
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": f"Generating {len(req.asset_ids)} tests from active pool."}
 
 
-####################################
-# ---       Action menu       ---  #
-####################################
 @router.post("/{test_id}/workspace", summary="Create workspace on Google for each test")
 def provision_workspace_manually(test_id: str, background_tasks: BackgroundTasks,
                                  current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
-    """
-    Admin Only Endpoint to create new workspace on Google for each test
-    """
-    # Fetch required metadata to create the folder path
-    where_clauses = ["t.id = %s"]
-    params = [test_id]
-
-    # 1. Restrict maintainers to their assigned service lane
-    if current_user.get('role') == 'maintainer':
-        lane_id = current_user.get('service_lane_id')
-        if lane_id:
-            where_clauses.append("t.service_lane_id = %s")
-            params.append(str(lane_id))
-        else:
-            # Safely return nothing if the Maintainer hasn't been assigned a lane yet
-            where_clauses.append("t.service_lane_id = '00000000-0000-0000-0000-000000000000'")
-
-    # 2. Build the dynamic WHERE string
-    where_str = "WHERE " + " AND ".join(where_clauses)
-
-    cursor.execute(f'''
-        SELECT t.name, s.name, c.name, t.start_year
-        FROM tests t
-        LEFT JOIN services_lanes s ON t.service_lane_id = s.id
-        LEFT JOIN test_assets ta ON t.id = ta.test_id
-        LEFT JOIN assets a ON ta.asset_id = a.id
-        LEFT JOIN countries c ON a.country_id = c.id
-        {where_str}
-        LIMIT 1
-    ''', tuple(params))
-
-    test_data = cursor.fetchone()
-    if not test_data:
-        raise HTTPException(status_code=404, detail="Test not found.")
-
-    test_name, service_name, country_name, start_year = test_data
-    target_year = start_year if start_year else datetime.now().year
-
-    # Run the provisioner in the background. It will automatically broadcast a REFRESH_BOARD event when done!
-    background_tasks.add_task(background_provision_workspace, test_id, target_year, service_name, country_name,
-                              test_name)
-
-    log_audit_event(
-        user_id=str(current_user["id"]),
-        role=current_user["role"],
-        action="PROVISIONING_GOOGLE_WORKSPACE_MANUALLY",
-        resource_type="TESTS",
-        resource_id=str(test_id),
-        details=f"Google Workspace for {test_name} ID: {test_id} was provisioned."
-    )
-
-    return {"message": "Workspace provisioning started."}
+    return test_service.provision_workspace_manually(cursor, test_id, current_user, background_tasks)
 
 
 @router.put("/{test_id}/tentative", summary="[Admin/Maintainer] Flag the test as Tentative")
 def toggle_tentative(test_id: str, background_tasks: BackgroundTasks,
                      current_user: dict = Depends(require_maintainer_or_admin), cursor=Depends(get_db_cursor)):
-    """
-    Admin/Maintainer Endpoint to toggle Tentative
-    """
-    cursor.execute("SELECT service_lane_id FROM tests WHERE id = %s", (test_id,))
-    test_data = cursor.fetchone()
-
-    if not test_data:
-        raise HTTPException(status_code=404, detail="Test not found")
-
-    # 2. Enforce that Maintainers can only delete tests in their own lane
-    verify_lane_access(current_user, str(test_data[0]))
-
-
-    # Flips the boolean from True to False, or False to True
-    cursor.execute("UPDATE tests SET is_tentative = NOT is_tentative WHERE id = %s", (test_id,))
-
-    # Log it
-    cursor.execute("SELECT is_tentative FROM tests WHERE id = %s", (test_id,))
-    is_tent = cursor.fetchone()[0]
-    state_str = "Marked as Tentative (TBC)" if is_tent else "Removed Tentative mark"
-    log_test_history(cursor, test_id, current_user['id'], "UPDATED", state_str)
-
-    cursor.connection.commit()
+    res = test_service.toggle_tentative(cursor, test_id, current_user)
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
-    return {"message": state_str}
+    return res
 
 
-# --- test Scheduling ---
 @router.put("/{test_id}/schedule", summary="[Admin/Maintainer] Schedule a test")
 def schedule_test(test_id: str, schedule: TestSchedule, background_tasks: BackgroundTasks,
                   current_user: dict = Depends(require_maintainer_or_admin), cursor=Depends(get_db_cursor)):
-    """
-    Admin Only Endpoint to schedule a test
-    """
-    # Fetch old schedule to see if the dates are actively shifting
-    cursor.execute('SELECT start_week, start_year, name, service_lane_id FROM tests WHERE id = %s', (test_id,))
-    test_row = cursor.fetchone()
-
-    verify_lane_access(current_user, str(test_row[3]))
-
-    if test_row:
-        old_week, old_year, test_name, _ = test_row
-        # If the test was already scheduled, and the target week or year has changed:
-        if old_week is not None and old_year is not None:
-            if old_week != schedule.start_week or old_year != schedule.start_year:
-                # Find all assigned users
-                cursor.execute('SELECT DISTINCT user_id FROM assignments WHERE test_id = %s', (test_id,))
-                assigned_users = cursor.fetchall()
-
-                # Notify them
-                for (u_id,) in assigned_users:
-                    cursor.execute(
-                        "INSERT INTO notifications (id, user_id, message, type, created_at) VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)",
-                        (str(uuid.uuid4()), str(u_id),
-                         f"You were removed from {test_name} because it was rescheduled to Week {schedule.start_week}, {schedule.start_year}.",
-                         "REMOVAL"))
-
-                # Drop assignments to unlock their capacity on the old week
-                cursor.execute('DELETE FROM assignments WHERE test_id = %s', (test_id,))
-                log_test_history(cursor, test_id, current_user['id'], "UNASSIGNED",
-                                 "Pentesters removed due to schedule shift. Reassignment required.")
-    else:
-        raise HTTPException(status_code=404, detail="Test not found")
-
-    #Proceed with updating the new schedule
-    cursor.execute('UPDATE tests SET start_week = %s, start_year = %s, stages = %s WHERE id = %s',
-                   (schedule.start_week, schedule.start_year, "SCHEDULED", test_id))
-
-    log_test_history(cursor, test_id, current_user['id'], "SCHEDULED",
-                     f"Scheduled for Week {schedule.start_week}, {schedule.start_year}.")
-    cursor.connection.commit()
-
-    log_audit_event(
-        user_id=str(current_user["id"]),
-        role=current_user["role"],
-        action="TEST_SCHEDULED",
-        resource_type="TESTS",
-        resource_id=str(test_id),
-        details=f"Test with ID: {test_id} was scheduled for Week {schedule.start_week}, {schedule.start_year}."
-    )
-
+    res = test_service.schedule_test(cursor, test_id, schedule, current_user)
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
-    return {"message": "Test scheduled on the board."}
+    return res
 
 
 @router.put("/{test_id}/unschedule", summary="[Admin/Maintainer] Unschedule a test")
 def unschedule_test(test_id: str, background_tasks: BackgroundTasks,
                     current_user: dict = Depends(require_maintainer_or_admin), cursor=Depends(get_db_cursor)):
-    """
-    Admin/Maintainer Endpoint to unschedule a test
-    """
-    cursor.execute('SELECT user_id FROM assignments WHERE test_id = %s', (test_id,))
-    assigned_users = cursor.fetchall()
-    cursor.execute("SELECT name, service_lane_id FROM tests WHERE id = %s", (test_id,))
-    test_row = cursor.fetchone()
-
-    verify_lane_access(current_user, str(test_row[1]))
-
-    if test_row:
-        for (user_id,) in assigned_users:
-            cursor.execute("INSERT INTO notifications (id, user_id, message, type, created_at) VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)",
-                           (str(uuid.uuid4()), str(user_id), f"You were removed from {test_row[0]} because it was unscheduled.",
-                            "REMOVAL"))
-
-    cursor.execute('DELETE FROM assignments WHERE test_id = %s', (test_id,))
-    cursor.execute('UPDATE tests SET start_week = NULL, start_year = NULL, stages = %s WHERE id = %s',
-                   ("NOT_PLANNED", test_id,))
-
-    log_test_history(cursor, test_id, current_user['id'], "UNSCHEDULED",
-                     "Test removed from calendar and returned to backlog.")
-
-    log_audit_event(
-        user_id=str(current_user["id"]),
-        role=current_user["role"],
-        action="TEST_UNSCHEDULED",
-        resource_type="TESTS",
-        resource_id=str(test_id),
-        details=f"Test with ID: {test_id} was unscheduled."
-    )
-
-    cursor.connection.commit()
-
+    res = test_service.unschedule_test(cursor, test_id, current_user)
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
-    return {"message": "Test returned to backlog."}
+    return res
 
 
 @router.put("/{test_id}/complete", summary="[Admin/Maintainer] Flag a test as complete")
 def complete_test(test_id: str, background_tasks: BackgroundTasks,
                   current_user: dict = Depends(require_maintainer_or_admin), cursor=Depends(get_db_cursor)):
-    """
-    Admin/Maintainer Endpoint to complete a test
-    """
-    cursor.execute("SELECT service_lane_id FROM tests WHERE id = %s", (test_id,))
-    test_data = cursor.fetchone()
-
-    if not test_data:
-        raise HTTPException(status_code=404, detail="Test not found")
-
-    # 2. Enforce that Maintainers can only delete tests in their own lane
-    verify_lane_access(current_user, str(test_data[0]))
-
-    cursor.execute("UPDATE tests SET stages = 'COMPLETED' WHERE id = %s", (test_id,))
-
-    log_test_history(cursor, test_id, current_user['id'], "COMPLETED", "Test successfully marked as completed.")
-
-    cursor.connection.commit()
-
+    res = test_service.complete_test(cursor, test_id, current_user)
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
-    return {"message": "Test marked as Completed."}
+    return res
 
 
 @router.put("/{test_id}/unable", summary="[Admin/Maintainer] Flag a test as unable")
 def mark_test_unable(test_id: str, background_tasks: BackgroundTasks,
                      current_user: dict = Depends(require_maintainer_or_admin), cursor=Depends(get_db_cursor)):
-    """
-    Admin/Maintainer Endpoint to mark a test as unable
-    """
-    #  original test details
-    cursor.execute('SELECT name, service_lane_id, credits_per_week, duration_weeks FROM tests WHERE id = %s',
-                   (test_id,))
-    row = cursor.fetchone()
-    if not row: raise HTTPException(status_code=404, detail="Test not found.")
-    name, service_lane_id, credits, duration = row
-
-    verify_lane_access(current_user, str(service_lane_id))
-
-    # keep the original test on the board  marked  as STOPPED and adding [BLOCKED] text as prefix
-    cursor.execute("UPDATE tests SET stages = 'STOPPED', name = %s WHERE id = %s", (f"[BLOCKED] {name}", test_id))
-
-    # release the pentesters credits by deleting assignments
-    cursor.execute('DELETE FROM assignments WHERE test_id = %s', (test_id,))
-
-    clone_id = str(uuid.uuid4())
-    cursor.execute('''
-        INSERT INTO tests (id, name, service_lane_id, credits_per_week, duration_weeks, stages) 
-        VALUES (%s, %s, %s, %s, %s, 'NOT_PLANNED')
-    ''', (clone_id, name, str(service_lane_id), credits, duration))
-
-    cursor.execute('SELECT asset_id FROM test_assets WHERE test_id = %s', (test_id,))
-    for (asset_id,) in cursor.fetchall():
-        cursor.execute('INSERT INTO test_assets (test_id, asset_id) VALUES (%s, %s)', (clone_id, str(asset_id)))
-
-    # copy the history to the clone
-    cursor.execute("SELECT user_id, action, details, timestamp FROM test_history WHERE test_id = %s", (test_id,))
-    old_history = cursor.fetchall()
-    for h_user, h_action, h_details, h_time in old_history:
-        new_h_id = str(uuid.uuid4())
-        cursor.execute('''
-            INSERT INTO test_history (id, test_id, user_id, action, details, timestamp)
-            VALUES (%s, %s, %s, %s, %s, %s)
-        ''', (new_h_id, clone_id, str(h_user) if h_user else None, h_action, h_details, h_time))
-
-    #  Log the split event for both tests
-    log_test_history(cursor, clone_id, current_user['id'], "CLONED", "Test resumed in backlog from stopped original.")
-    log_test_history(cursor, test_id, current_user['id'], "STOPPED", f"Test stopped. Clone generated in backlog: {clone_id}")
-
-    cursor.connection.commit()
+    res = test_service.mark_test_unable(cursor, test_id, current_user)
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
-    return {"message": "Test marked as Stopped."}
+    return res
 
 
 @router.put("/{test_id}/unstop", summary="[Admin/Maintainer] Roll back a unable test to normal")
 def unstop_test(test_id: str, background_tasks: BackgroundTasks,
                 current_user: dict = Depends(require_maintainer_or_admin), cursor=Depends(get_db_cursor)):
-    """
-    Admin/Maintainer Endpoint to roll back a unable test to normal
-    """
-
-    cursor.execute("SELECT name, service_lane_id FROM tests WHERE id = %s AND stages = 'STOPPED'", (test_id,))
-    row = cursor.fetchone()
-    if not row: raise HTTPException(status_code=404, detail="Stopped test not found.")
-
-    verify_lane_access(current_user, str(row[1]))
-
-    name = row[0]
-    original_name = name.replace("[BLOCKED] ", "") if name.startswith("[BLOCKED] ") else name
-
-    cursor.execute("""
-        SELECT details FROM test_history 
-        WHERE test_id = %s AND action = 'STOPPED' 
-        ORDER BY timestamp DESC LIMIT 1
-    """, (test_id,))
-    hist_row = cursor.fetchone()
-
-    if hist_row and "Clone generated in backlog: " in hist_row[0]:
-        clone_id = hist_row[0].split("Clone generated in backlog: ")[1].strip()
-
-        cursor.execute("SELECT stages FROM tests WHERE id = %s", (clone_id,))
-        clone_stage_row = cursor.fetchone()
-
-        if clone_stage_row:
-            if clone_stage_row[0] == 'NOT_PLANNED':
-                # Safe to delete: still in the backlog
-                cursor.execute("DELETE FROM test_assets WHERE test_id = %s", (clone_id,))
-                cursor.execute("DELETE FROM tests WHERE id = %s", (clone_id,))
-            else:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Cannot Undo Stop: The remaining work for this test has already been rescheduled."
-                )
-
-    #  revert original test back to SCHEDULED and  clean its name
-    cursor.execute("UPDATE tests SET name = %s, stages = 'SCHEDULED' WHERE id = %s", (original_name, test_id))
-
-    log_test_history(cursor, test_id, current_user['id'], "UNSTOPPED", "Test unblocked and clone removed.")
-    cursor.connection.commit()
-
+    res = test_service.unstop_test(cursor, test_id, current_user)
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
-    return {"message": "Test unstopped successfully."}
+    return res
 
 
 @router.put("/{test_id}/uncomplete", summary="[Admin/Maintainer] Make un-completing a test cleaner on the backend")
 def uncomplete_test(test_id: str, background_tasks: BackgroundTasks,
                     current_user: dict = Depends(require_maintainer_or_admin), cursor=Depends(get_db_cursor)):
-    """
-    Admin/Maintainer Endpoint to make un-completing a test cleaner on the backend
-    """
-    cursor.execute("SELECT service_lane_id FROM tests WHERE id = %s", (test_id,))
-    test_data = cursor.fetchone()
-
-    if not test_data:
-        raise HTTPException(status_code=404, detail="Test not found")
-
-    # 2. Enforce that Maintainers can only delete tests in their own lane
-    verify_lane_access(current_user, str(test_data[0]))
-
-    cursor.execute("UPDATE tests SET stages = 'SCHEDULED' WHERE id = %s", (test_id,))
-    log_test_history(cursor, test_id, current_user['id'], "UNCOMPLETED", "Test reverted to Scheduled.")
-    cursor.connection.commit()
+    res = test_service.uncomplete_test(cursor, test_id, current_user)
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
-    return {"message": "Test uncompleted."}
+    return res
 
 
-####################################
-# ---   Test Assignement      ---  #
-####################################
 @router.post("/assignments", summary="[Admin Only] Assigne a test to a pentester")
 def create_assignment(assign: AssignmentCreate, background_tasks: BackgroundTasks,
                       current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
-    """
-    Admin Only Endpoint to create a new pentester assignment
-    """
-    cursor.execute('''
-        SELECT a.id FROM assignments a
-        WHERE a.user_id = %s AND a.week_number = %s AND a.year = %s AND a.test_id = %s
-    ''', (str(assign.user_id), assign.week_number, assign.year, str(assign.test_id)))
-
-    if cursor.fetchone():
-        raise HTTPException(status_code=400, detail="Pentester is already assigned to this test for this week!")
-
-    new_assignment_id = str(uuid.uuid4())
-    cursor.execute('''
-        INSERT INTO assignments (id, test_id, user_id, week_number, year, allocated_credits) 
-        VALUES (%s, %s, %s, %s, %s, %s)
-    ''', (new_assignment_id, str(assign.test_id), str(assign.user_id), assign.week_number, assign.year,
-          assign.allocated_credits))
-
-    cursor.execute("SELECT name FROM tests WHERE id = %s", (str(assign.test_id),))
-    test_row = cursor.fetchone()
-
-    cursor.execute("SELECT name FROM users WHERE id = %s", (str(assign.user_id),))
-    user_row = cursor.fetchone()
-
-    if test_row:
-        cursor.execute(
-            "INSERT INTO notifications (id, user_id, message, type, created_at) VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)",
-            (str(uuid.uuid4()), str(assign.user_id),
-             f"You were assigned to {test_row[0]} for Week {assign.week_number}.",
-             "ASSIGNMENT"))
-
-    # Logging assignment to test and asset History
-    pentester_name = user_row[0] if user_row else "Unknown User"
-    log_test_history(cursor, str(assign.test_id), current_user['id'], "ASSIGNED",
-                     f"Assigned {pentester_name} for Wk {assign.week_number} ({assign.allocated_credits} cr).")
-
-    cursor.connection.commit()
+    res = test_service.create_assignment(cursor, assign, current_user)
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
-    return {"message": "Successfully Assigned"}
+    return res
 
 
 @router.delete("/assignments/{test_id}/{user_id}", summary="[Admin Only] Remove pentester from assigned test")
 def remove_assignment(test_id: str, user_id: str, background_tasks: BackgroundTasks,
                       current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
-    """
-    Admin Only Endpoint to remove a pentester from assigned test
-    """
-
-    cursor.execute("SELECT name FROM tests WHERE id = %s", (test_id,))
-    test_row = cursor.fetchone()
-
-    cursor.execute("SELECT name FROM users WHERE id = %s", (user_id,))
-    user_row = cursor.fetchone()
-
-    if test_row:
-        cursor.execute(
-            "INSERT INTO notifications (id, user_id, message, type, created_at) VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)",
-            (str(uuid.uuid4()), str(user_id), f"You were removed from {test_row[0]}.", "REMOVAL"))
-
-    cursor.execute('DELETE FROM assignments WHERE test_id = %s AND user_id = %s', (test_id, user_id))
-
-    # logging removal to test and asset History
-    pentester_name = user_row[0] if user_row else "Unknown User"
-    log_test_history(cursor, test_id, current_user['id'], "UNASSIGNED", f"Removed {pentester_name} from the team.")
-
-    cursor.connection.commit()
+    res = test_service.remove_assignment(cursor, test_id, user_id, current_user)
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
-    return {"message": "Successfully Unassigned"}
+    return res
 
-####################################
-# ---   Test History          ---  #
-####################################
+
 @router.get("/{test_id}/history", summary="Return the test history")
 def get_test_history(test_id: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
-    """
-    Endpoint to get test history
-    """
-    where_clauses = ["th.test_id = %s"]
-    params = [test_id]
-
-    # 1. Restrict maintainers to their assigned service lane
-    if current_user.get('role') == 'maintainer':
-        lane_id = current_user.get('service_lane_id')
-        if lane_id:
-            where_clauses.append("t.service_lane_id = %s")
-            params.append(str(lane_id))
-        else:
-            # Safely return nothing if the Maintainer hasn't been assigned a lane yet
-            where_clauses.append("t.service_lane_id = '00000000-0000-0000-0000-000000000000'")
-
-    # 2. Build the dynamic WHERE string
-    where_str = "WHERE " + " AND ".join(where_clauses)
-
-    cursor.execute(f'''
-        SELECT th.id, th.action, th.details, th.timestamp, u.name as user_name
-        FROM test_history th
-        LEFT JOIN users u ON th.user_id = u.id
-        {where_str}
-        ORDER BY th.timestamp DESC
-    ''', tuple(params))
-    columns = [col[0] for col in cursor.description]
-    return [dict(zip(columns, row)) for row in cursor.fetchall()]
+    return test_service.get_test_history(cursor, test_id, current_user)
 
 
-####################################
-# ---   Test Secure note      ---  #
-####################################
 @router.get("/{test_id}/secret", summary="Return the encrypted test secret")
 def get_test_secret(test_id: str, current_user: dict = Depends(require_write_access), cursor=Depends(get_db_cursor)):
-
-    role_allowed = ['admin', 'pentester']
-
-    if current_user.get('role') not in role_allowed:
-        raise HTTPException(status_code=403, detail=f"{current_user.get('role')} do not have access to Secure Notes.")
-
-    # 1. Get the encrypted note
-    cursor.execute("SELECT encrypted_data FROM secret_notes WHERE test_id = %s", (test_id,))
-    note_row = cursor.fetchone()
-    if not note_row: return {"exists": False}
-
-    # 2. Get the specific encrypted key for the requesting user
-    cursor.execute("SELECT encrypted_key FROM secret_note_access WHERE test_id = %s AND user_id = %s",
-                   (test_id, str(current_user["id"])))
-    key_row = cursor.fetchone()
-
-    # 3. Get the list of users who currently have access
-    cursor.execute("SELECT user_id FROM secret_note_access WHERE test_id = %s", (test_id,))
-    shared_with = [str(r[0]) for r in cursor.fetchall()]
-
-    log_audit_event(str(current_user["id"]), current_user["name"], "SECRET_FETCHED", "TEST_SECRET",
-                    details=f"Fetched encrypted secure note for test {test_id}.")
-
-    return {
-        "exists": True,
-        "encrypted_data": note_row[0],
-        "encrypted_key": key_row[0] if key_row else None,  # None means they aren't authorized!
-        "shared_with": shared_with
-    }
+    return test_service.get_test_secret(cursor, test_id, current_user)
 
 
 @router.put("/{test_id}/secret", summary="Update the test secret")
 def update_test_secret(test_id: str, payload: dict, background_tasks: BackgroundTasks,
                        current_user: dict = Depends(require_write_access), cursor=Depends(get_db_cursor)):
-
-    role_allowed = ['admin', 'pentester']
-
-    if current_user.get('role') not in role_allowed:
-        raise HTTPException(status_code=403, detail=f"{current_user.get('role')} do not have access to Secure Notes.")
-
-    # payload expects: { encrypted_data: "...", access_list: [{"user_id": "...", "encrypted_key": "..."}] }
-
-    # 1. Upsert the encrypted note
-    cursor.execute('''
-        INSERT INTO secret_notes (test_id, encrypted_data, updated_at) 
-        VALUES (%s, %s, CURRENT_TIMESTAMP)
-        ON CONFLICT (test_id) DO UPDATE SET encrypted_data = EXCLUDED.encrypted_data, updated_at = CURRENT_TIMESTAMP
-    ''', (test_id, payload.get("encrypted_data")))
-
-    # 2. Wipe old access and insert the new access list
-    cursor.execute("DELETE FROM secret_note_access WHERE test_id = %s", (test_id,))
-    for access in payload.get("access_list", []):
-        cursor.execute('''
-            INSERT INTO secret_note_access (test_id, user_id, encrypted_key)
-            VALUES (%s, %s, %s)
-        ''', (test_id, access["user_id"], access["encrypted_key"]))
-
-    log_audit_event(str(current_user["id"]), current_user["name"], "SECRET_UPDATED", "TEST_SECRET",
-                    details=f"Updated E2EE secure note for test {test_id}.")
-    cursor.connection.commit()
-
+    res = test_service.update_test_secret(cursor, test_id, payload, current_user)
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
-    return {"message": "Secure note securely vaulted."}
+    return res
 
 
 @router.delete("/{test_id}/secret", summary="[Admin Only] Delete the test secret")
 def delete_test_secret(test_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin),
                        cursor=Depends(get_db_cursor)):
-
-    role_allowed = ['admin', 'pentester']
-
-    if current_user.get('role') not in role_allowed:
-        raise HTTPException(status_code=403, detail=f"{current_user.get('role')} do not have access to Secure Notes.")
-    # Because of our ON DELETE CASCADE rule on the table, deleting the note automatically wipes the access_list table too!
-    cursor.execute("DELETE FROM secret_notes WHERE test_id = %s", (test_id,))
-    log_audit_event(str(current_user["id"]), current_user["name"], "SECRET_DELETED", "TEST_SECRET",
-                    details=f"Deleted secure note for test {test_id}.")
-    cursor.connection.commit()
+    res = test_service.delete_test_secret(cursor, test_id, current_user)
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
-    return {"message": "Secure note permanently deleted."}
+    return res
 
 
-####################################
-# --- Test report generation  ---  #
-####################################
-# --- Generation PPT ---
 @router.post("/{test_id}/presentation", summary="Create a new presentation")
 def trigger_presentation_generation(test_id: str, background_tasks: BackgroundTasks,
                                     current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
-    """
-    Endpoint to create a new presentation
-    """
-    if current_user.get('role') == 'read_only':
-        raise HTTPException(status_code=403, detail="Read-only users cannot trigger generation.")
+    if current_user.get('role') == 'read_only': raise HTTPException(status_code=403,
+                                                                    detail="Read-only users cannot trigger generation.")
 
-    where_clauses = ["t.id = %s"]
-    params = [test_id]
-
-    # 1. Restrict maintainers to their assigned service lane
+    where_clauses, params = ["t.id = %s"], [test_id]
     if current_user.get('role') == 'maintainer':
-        lane_id = current_user.get('service_lane_id')
-        if lane_id:
-            where_clauses.append("t.service_lane_id = %s")
-            params.append(str(lane_id))
-        else:
-            # Safely return nothing if the Maintainer hasn't been assigned a lane yet
-            where_clauses.append("t.service_lane_id = '00000000-0000-0000-0000-000000000000'")
+        where_clauses.append("t.service_lane_id = %s")
+        params.append(str(current_user.get('service_lane_id') or '00000000-0000-0000-0000-000000000000'))
 
-    # 2. Build the dynamic WHERE string
-    where_str = "WHERE " + " AND ".join(where_clauses)
-
-    cursor.execute(f"""
-        SELECT t.name, t.kiss24, t.drive_folder_id, sl.name as service_name, ra.snow_number,
-               t.start_week, t.start_year, t.duration_weeks
-        FROM tests t
-        LEFT JOIN services_lanes sl ON t.service_lane_id = sl.id
-        LEFT JOIN test_assets ta ON t.id = ta.test_id
-        LEFT JOIN assets a ON ta.asset_id = a.id
-        LEFT JOIN raw_assets ra ON a.raw_asset_id = ra.id
-        {where_str}
-        LIMIT 1
-    """, tuple(params))
-
-    row = cursor.fetchone()
-
-    if not row:
-        log_audit_event(
-            user_id=str(current_user["id"]),
-            role=str(current_user["role"]),
-            action="GENERATION_PRESENTATION_TEST_NOT_FOUND",
-            resource_type="PRESENTATION",
-            resource_id=str(test_id),
-            details=f"Test with ID {test_id} was not found."
-        )
-        raise HTTPException(status_code=404, detail="Test not found.")
+    cursor.execute(
+        f"SELECT t.name, t.kiss24, t.drive_folder_id, sl.name as service_name, ra.snow_number, t.start_week, t.start_year, t.duration_weeks FROM tests t LEFT JOIN services_lanes sl ON t.service_lane_id = sl.id LEFT JOIN test_assets ta ON t.id = ta.test_id LEFT JOIN assets a ON ta.asset_id = a.id LEFT JOIN raw_assets ra ON a.raw_asset_id = ra.id WHERE {' AND '.join(where_clauses)} LIMIT 1",
+        tuple(params))
+    if not (row := cursor.fetchone()): raise HTTPException(status_code=404, detail="Test not found.")
 
     test_name, kiss24_id, drive_folder_id, service_name, snow_number, start_week, start_year, duration_weeks = row
+    if not kiss24_id: raise HTTPException(status_code=400, detail="Missing kiss24 UUID.")
+    if not drive_folder_id: raise HTTPException(status_code=400, detail="Missing Drive Workspace.")
 
-    if not kiss24_id:
-        log_audit_event(
-            user_id=str(current_user["id"]),
-            role=str(current_user["role"]),
-            action="GENERATION_PRESENTATION_TEST_NO_KISS UUID",
-            resource_type="PRESENTATION",
-            resource_id=str(test_id),
-            details=f"Test with ID {test_id} is Missing kiss24 UUID."
-        )
-        raise HTTPException(status_code=400, detail="Missing kiss24 UUID. Please set it in the test settings first.")
-
-    if not drive_folder_id:
-        log_audit_event(
-            user_id=str(current_user["id"]),
-            role=str(current_user["role"]),
-            action="GENERATION_PRESENTATION_TEST_NO_DRIVE_WORKSPACE",
-            resource_type="PRESENTATION",
-            resource_id=str(test_id),
-            details=f"Test with ID {test_id} is missing Google Drive Workspace."
-        )
-        raise HTTPException(status_code=400,
-                            detail="Missing Drive Workspace. Please click the 'Create Drive Workspace' button first.")
-
-    background_tasks.add_task(
-        process_presentation_background,
-        test_id, str(kiss24_id), str(current_user["id"]), current_user["email"], str(current_user["role"]), test_name,
-        drive_folder_id, service_name, snow_number, start_week, start_year, duration_weeks
-    )
-
-    log_audit_event(
-        user_id=str(current_user["id"]),
-        role=str(current_user["role"]),
-        action="PRESENTATION_TRIGGERED",
-        resource_type="PRESENTATION",
-        resource_id=str(test_id),
-        details=f"Presentation for Kiss24 test with ID: {kiss24_id} was started. Service Lane: {service_name}. SNow Asset ID {snow_number}. Start week: {start_week}. Start year: {start_year}"
-    )
-
-    return {
-        "message": "Presentation generation started in the background. You will receive a notification when it's ready!"}
+    background_tasks.add_task(test_service.process_presentation_background, test_id, str(kiss24_id),
+                              str(current_user["id"]), current_user["email"], str(current_user["role"]), test_name,
+                              drive_folder_id, service_name, snow_number, start_week, start_year, duration_weeks)
+    return {"message": "Presentation generation started in the background."}
 
 
-# --- Generation PDF ---
 @router.post("/{test_id}/report", summary="Generate PDF report")
 def trigger_report_generation(test_id: str, background_tasks: BackgroundTasks,
                               current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
-    """
-    API Endpoint to trigger the background report generation.
-    """
+    if current_user.get('role') == 'read_only': raise HTTPException(status_code=403,
+                                                                    detail="Read-only users cannot trigger generation.")
 
-    if current_user.get('role') == 'read_only':
-        raise HTTPException(status_code=403, detail="Read-only users cannot trigger generation.")
-
-    where_clauses = ["t.id = %s"]
-    params = [test_id]
-
-    # 1. Restrict maintainers to their assigned service lane
+    where_clauses, params = ["t.id = %s"], [test_id]
     if current_user.get('role') == 'maintainer':
-        lane_id = current_user.get('service_lane_id')
-        if lane_id:
-            where_clauses.append("t.service_lane_id = %s")
-            params.append(str(lane_id))
-        else:
-            # Safely return nothing if the Maintainer hasn't been assigned a lane yet
-            where_clauses.append("t.service_lane_id = '00000000-0000-0000-0000-000000000000'")
+        where_clauses.append("t.service_lane_id = %s")
+        params.append(str(current_user.get('service_lane_id') or '00000000-0000-0000-0000-000000000000'))
 
-    # 2. Build the dynamic WHERE string
-    where_str = "WHERE " + " AND ".join(where_clauses)
-
-    cursor.execute(f"""
-        SELECT t.name, t.kiss24, t.drive_folder_id, sl.display_order,
-               t.start_week, t.start_year, t.duration_weeks
-        FROM tests t
-        LEFT JOIN services_lanes sl ON t.service_lane_id = sl.id
-        {where_str} 
-        LIMIT 1
-    """, tuple(params))
-    row = cursor.fetchone()
-
-    if not row:
-        raise HTTPException(status_code=404, detail="Test not found.")
+    cursor.execute(
+        f"SELECT t.name, t.kiss24, t.drive_folder_id, sl.display_order, t.start_week, t.start_year, t.duration_weeks FROM tests t LEFT JOIN services_lanes sl ON t.service_lane_id = sl.id WHERE {' AND '.join(where_clauses)} LIMIT 1",
+        tuple(params))
+    if not (row := cursor.fetchone()): raise HTTPException(status_code=404, detail="Test not found.")
 
     test_name, kiss24_id, drive_folder_id, display_order, start_week, start_year, duration_weeks = row
+    if not kiss24_id: raise HTTPException(status_code=400, detail="Missing kiss24 UUID.")
+    if not drive_folder_id: raise HTTPException(status_code=400, detail="Missing Drive Workspace.")
 
-    if not kiss24_id:
-        raise HTTPException(status_code=400, detail="Missing kiss24 UUID. Please set it in the test settings first.")
-
-    if not drive_folder_id:
-        raise HTTPException(status_code=400, detail="Missing Drive Workspace. Please provision the workspace first.")
-
-    safe_display_order = display_order if display_order is not None else 99
-
-    # Notice the injection of `str(current_user["role"])` here
-    background_tasks.add_task(
-        process_report_background,
-        test_id, str(kiss24_id), str(current_user["id"]), current_user["email"], str(current_user["role"]),
-        test_name, drive_folder_id, safe_display_order, start_week, start_year, duration_weeks
-    )
-
-    log_audit_event(
-        user_id=str(current_user["id"]),
-        role=str(current_user["role"]),
-        action="REPORT_TRIGGERED",
-        resource_type="REPORTING",
-        resource_id=str(test_id),
-        details=f"Report generation triggered for test {test_name} (Kiss24: {kiss24_id})."
-    )
-
-    return {
-        "message": "Report generation started in the background. You will receive a notification when it's ready!"
-    }
+    background_tasks.add_task(test_service.process_report_background, test_id, str(kiss24_id), str(current_user["id"]),
+                              current_user["email"], str(current_user["role"]), test_name, drive_folder_id,
+                              display_order if display_order is not None else 99, start_week, start_year,
+                              duration_weeks)
+    return {"message": "Report generation started in the background."}
 
 
 @router.post("/{test_id}/vulnerabilities/report", summary="Generate Specific Vuln PDFs")
 def trigger_vuln_reports(test_id: str, payload: dict, background_tasks: BackgroundTasks,
                          current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
-    if current_user.get('role') == 'read_only':
-        raise HTTPException(status_code=403, detail="Read-only users cannot trigger generation.")
+    if current_user.get('role') == 'read_only': raise HTTPException(status_code=403,
+                                                                    detail="Read-only users cannot trigger generation.")
+    if not (vuln_uuids := payload.get("vuln_uuids", [])): raise HTTPException(status_code=400,
+                                                                              detail="No vulnerabilities selected.")
 
-    where_clauses = ["t.id = %s"]
-    params = [test_id]
-
-    # 1. Restrict maintainers to their assigned service lane
+    where_clauses, params = ["t.id = %s"], [test_id]
     if current_user.get('role') == 'maintainer':
-        lane_id = current_user.get('service_lane_id')
-        if lane_id:
-            where_clauses.append("t.service_lane_id = %s")
-            params.append(str(lane_id))
-        else:
-            # Safely return nothing if the Maintainer hasn't been assigned a lane yet
-            where_clauses.append("t.service_lane_id = '00000000-0000-0000-0000-000000000000'")
+        where_clauses.append("t.service_lane_id = %s")
+        params.append(str(current_user.get('service_lane_id') or '00000000-0000-0000-0000-000000000000'))
 
-    # 2. Build the dynamic WHERE string
-    where_str = "WHERE " + " AND ".join(where_clauses)
-
-    vuln_uuids = payload.get("vuln_uuids", [])
-    if not vuln_uuids:
-        raise HTTPException(status_code=400, detail="No vulnerabilities selected.")
-
-    cursor.execute(f"""
-        SELECT t.name, t.kiss24, t.drive_folder_id, sl.display_order
-        FROM tests t
-        LEFT JOIN services_lanes sl ON t.service_lane_id = sl.id
-       {where_str} 
-        LIMIT 1
-    """, tuple(params))
-    row = cursor.fetchone()
-    if not row: raise HTTPException(status_code=404, detail="Test not found.")
+    cursor.execute(
+        f"SELECT t.name, t.kiss24, t.drive_folder_id, sl.display_order FROM tests t LEFT JOIN services_lanes sl ON t.service_lane_id = sl.id WHERE {' AND '.join(where_clauses)} LIMIT 1",
+        tuple(params))
+    if not (row := cursor.fetchone()): raise HTTPException(status_code=404, detail="Test not found.")
 
     test_name, kiss24_id, drive_folder_id, display_order = row
-
     if not kiss24_id: raise HTTPException(status_code=400, detail="Missing kiss24 UUID.")
     if not drive_folder_id: raise HTTPException(status_code=400, detail="Missing Drive Workspace.")
 
-    safe_display_order = display_order if display_order is not None else 99
-
-    background_tasks.add_task(
-        process_vuln_report_background,
-        test_id, str(kiss24_id), str(current_user["id"]), current_user["email"], str(current_user["role"]),
-        test_name, drive_folder_id, safe_display_order, vuln_uuids
-    )
+    background_tasks.add_task(test_service.process_vuln_report_background, test_id, str(kiss24_id),
+                              str(current_user["id"]), current_user["email"], str(current_user["role"]), test_name,
+                              drive_folder_id, display_order if display_order is not None else 99, vuln_uuids)
     return {"message": f"Generating {len(vuln_uuids)} report(s) in the background!"}
 
 
-# --- Vulne analysis ---
-@router.get("/{test_id}/analysis", response_model=TestAnalysisResponse, summary="Get Analysis report")
+@router.get("/{test_id}/analysis", summary="Get Analysis report")
 def get_test_analysis(test_id: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
-    """
-    Check if an analysis exists and retrieve it.
-    """
-
-    role_allowed = ['admin', 'pentester', 'read_only']
-
-    if current_user.get('role') not in role_allowed:
-        raise HTTPException(status_code=403, detail=f"{current_user.get('role')} users cannot trigger generation.")
-
+    if current_user.get('role') not in ['admin', 'pentester', 'read_only']: raise HTTPException(status_code=403,
+                                                                                                detail="Access denied.")
     cursor.execute("SELECT status, analysis_text, timestamp FROM test_analyses WHERE test_id = %s", (test_id,))
-    row = cursor.fetchone()
-    if not row:
-        raise HTTPException(status_code=404, detail="No analysis found.")
-
-    return {
-        "status": row[0],
-        "analysis_text": row[1],
-        "timestamp": row[2]
-    }
+    if not (row := cursor.fetchone()): raise HTTPException(status_code=404, detail="No analysis found.")
+    return {"status": row[0], "analysis_text": row[1], "timestamp": row[2]}
 
 
 @router.post("/{test_id}/analysis", summary="Perform vulnerabilities analysis")
 def trigger_test_analysis(test_id: str, background_tasks: BackgroundTasks,
                           current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
-    """
-    Creates a PENDING record and triggers the background generator.
-    """
-    role_allowed = ['admin', 'pentester']
-
-    if current_user.get('role') not in role_allowed:
-        raise HTTPException(status_code=403, detail=f"{current_user.get('role')} users cannot trigger generation.")
-
-    # Get Test Data
+    if current_user.get('role') not in ['admin', 'pentester']: raise HTTPException(status_code=403,
+                                                                                   detail="Access denied.")
     cursor.execute("SELECT name, kiss24 FROM tests WHERE id = %s", (test_id,))
-    row = cursor.fetchone()
-    if not row or not row[1]:
-        raise HTTPException(status_code=400, detail="Missing Kiss24 UUID.")
+    if not (row := cursor.fetchone()) or not row[1]: raise HTTPException(status_code=400, detail="Missing Kiss24 UUID.")
 
-    test_name, kiss24_id = row[0], row[1]
-
-    # Upsert PENDING status
-    cursor.execute("""
-        INSERT INTO test_analyses (test_id, status, timestamp) 
-        VALUES (%s, 'PENDING', CURRENT_TIMESTAMP)
-        ON CONFLICT (test_id) DO UPDATE SET status = 'PENDING', analysis_text = NULL, timestamp = CURRENT_TIMESTAMP
-    """, (test_id,))
+    cursor.execute(
+        "INSERT INTO test_analyses (test_id, status, timestamp) VALUES (%s, 'PENDING', CURRENT_TIMESTAMP) ON CONFLICT (test_id) DO UPDATE SET status = 'PENDING', analysis_text = NULL, timestamp = CURRENT_TIMESTAMP",
+        (test_id,))
     cursor.connection.commit()
-
-    # Trigger Background Task
-    background_tasks.add_task(
-        process_vuln_analysis_background,
-        test_id, str(kiss24_id), str(current_user["id"]), current_user["email"], test_name
-    )
-
+    background_tasks.add_task(test_service.process_vuln_analysis_background, test_id, str(row[1]),
+                              str(current_user["id"]), current_user["email"], row[0])
     return {"message": "Analysis started in the background."}
 
 
-####################################
-# ---   Test Milestones       ---  #
-####################################
 @router.get("/{test_id}/milestones", summary="Get Milestones test")
 def get_milestones(test_id: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
-    # 1. Fetch the service lane ID to verify access
-    cursor.execute("SELECT service_lane_id FROM tests WHERE id = %s", (test_id,))
-    row = cursor.fetchone()
-    if not row:
-        raise HTTPException(status_code=404, detail="Test not found.")
-    verify_lane_access(current_user, str(row[0]))
-
-    cursor.execute("SELECT step_name, is_completed FROM test_milestones WHERE test_id = %s", (test_id,))
-    # Return a simple dictionary: {"Information Email Sent": true, "Intake Meeting Planned": false}
-    return {row[0]: row[1] for row in cursor.fetchall()}
+    return test_service.get_milestones(cursor, test_id, current_user)
 
 
 @router.put("/{test_id}/milestones", summary="Update Milestones test")
-def update_milestone(test_id: str, payload: MilestoneUpdate, current_user: dict = Depends(require_write_access), cursor=Depends(get_db_cursor)):
-    """
-    UPSERT logic: Insert it, or if it exists, update the boolean
-    """
-    # 1. Fetch the service lane ID to verify access
-    cursor.execute("SELECT service_lane_id FROM tests WHERE id = %s", (test_id,))
-    row = cursor.fetchone()
-    if not row:
-        raise HTTPException(status_code=404, detail="Test not found.")
-    verify_lane_access(current_user, str(row[0]))
-
-    cursor.execute("""
-        INSERT INTO test_milestones (id, test_id, step_name, is_completed) 
-        VALUES (gen_random_uuid(), %s, %s, %s)
-        ON CONFLICT (test_id, step_name) DO UPDATE SET is_completed = EXCLUDED.is_completed
-    """, (test_id, payload.step_name, payload.is_completed))
-
-    cursor.connection.commit()
-    return {"message": "Updated"}
+def update_milestone(test_id: str, payload: MilestoneUpdate, current_user: dict = Depends(require_write_access),
+                     cursor=Depends(get_db_cursor)):
+    return test_service.update_milestone(cursor, test_id, payload, current_user)
 
 
 @router.get("/{test_id}/requirements", summary="Get Requirement test")
 def get_requirements(test_id: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
-    # 1. Fetch the service lane ID to verify access
-    cursor.execute("SELECT service_lane_id FROM tests WHERE id = %s", (test_id,))
-    row = cursor.fetchone()
-    if not row:
-        raise HTTPException(status_code=404, detail="Test not found.")
-    verify_lane_access(current_user, str(row[0]))
-
-    cursor.execute("SELECT id, description, is_completed FROM test_requirements WHERE test_id = %s ORDER BY id", (test_id,))
-    return [{"id": str(r[0]), "description": r[1], "is_completed": r[2]} for r in cursor.fetchall()]
+    return test_service.get_requirements(cursor, test_id, current_user)
 
 
 @router.post("/{test_id}/requirements", summary="Add Requirement test")
-def add_requirement(test_id: str, req: RequirementCreate, current_user: dict = Depends(require_write_access), cursor=Depends(get_db_cursor)):
-    # 1. Fetch the service lane ID to verify access
-    cursor.execute("SELECT service_lane_id FROM tests WHERE id = %s", (test_id,))
-    row = cursor.fetchone()
-    if not row:
-        raise HTTPException(status_code=404, detail="Test not found.")
-    verify_lane_access(current_user, str(row[0]))
-
-    cursor.execute("""
-        INSERT INTO test_requirements (id, test_id, description, is_completed) 
-        VALUES (gen_random_uuid(), %s, %s, false) RETURNING id
-    """, (test_id, req.description))
-    req_id = cursor.fetchone()[0]
-    cursor.connection.commit()
-    return {"id": str(req_id), "description": req.description, "is_completed": False}
+def add_requirement(test_id: str, req: RequirementCreate, current_user: dict = Depends(require_write_access),
+                    cursor=Depends(get_db_cursor)):
+    return test_service.add_requirement(cursor, test_id, req, current_user)
 
 
 @router.delete("/requirements/{req_id}", summary="Delete Requirement test")
 def delete_requirement(req_id: str, current_user: dict = Depends(require_write_access), cursor=Depends(get_db_cursor)):
-    # 1. Fetch the requirement to get its parent test's service_lane_id
-    cursor.execute("""
-        SELECT tr.test_id, t.service_lane_id 
-        FROM test_requirements tr
-        JOIN tests t ON tr.test_id = t.id
-        WHERE tr.id = %s
-    """, (req_id,))
-    row = cursor.fetchone()
-
-    if not row:
-        raise HTTPException(status_code=404, detail="Requirement not found.")
-
-    verify_lane_access(current_user, str(row[1]))
-
-    cursor.execute("DELETE FROM test_requirements WHERE id = %s", (req_id,))
-    cursor.connection.commit()
-    return {"message": "Deleted"}
+    return test_service.delete_requirement(cursor, req_id, current_user)
 
 
 @router.put("/requirements/{req_id}/toggle", summary="Edit Requirement test")
 def toggle_requirement(req_id: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
-    # 1. Fetch the test_id and service_lane_id BEFORE making any changes
-    cursor.execute("""
-            SELECT t.id, t.service_lane_id 
-            FROM test_requirements tr
-            JOIN tests t ON tr.test_id = t.id
-            WHERE tr.id = %s
-        """, (req_id,))
-
-    row = cursor.fetchone()
-    if not row:
-        raise HTTPException(status_code=404, detail="Requirement not found.")
-
-    test_id, service_lane_id = row
-
-    # 2. Verify lane access (Blocks maintainers from editing out-of-lane requirements)
-    verify_lane_access(current_user, str(service_lane_id))
-
-    # 3. Toggle the requirement now that we know they are authorized
-    cursor.execute("""
-            UPDATE test_requirements SET is_completed = NOT is_completed 
-            WHERE id = %s RETURNING is_completed
-        """, (req_id,))
-
-    new_status = cursor.fetchone()[0]
-
-    # 4. Check if ALL requirements for this test are now complete
-    cursor.execute("""
-            SELECT 
-                COUNT(*) as total_reqs,
-                SUM(CASE WHEN is_completed THEN 1 ELSE 0 END) as completed_reqs
-            FROM test_requirements
-            WHERE test_id = %s
-        """, (test_id,))
-
-    total_reqs, completed_reqs = cursor.fetchone()
-
-    # 5. If all are complete, auto-complete the milestone
-    if total_reqs > 0 and total_reqs == completed_reqs:
-        cursor.execute("""
-                    INSERT INTO test_milestones (id, test_id, step_name, is_completed) 
-                    VALUES (gen_random_uuid(), %s, 'Requirements', true)
-                    ON CONFLICT (test_id, step_name) DO UPDATE SET is_completed = true
-                """, (test_id,))
-    else:
-        # If they uncheck a requirement, uncheck the milestone
-        cursor.execute("""
-                    UPDATE test_milestones 
-                    SET is_completed = false 
-                    WHERE test_id = %s AND step_name = 'Requirements'
-                """, (test_id,))
-
-    cursor.connection.commit()
-    return {"is_completed": new_status, "all_completed": total_reqs == completed_reqs}
+    return test_service.toggle_requirement(cursor, req_id, current_user)
