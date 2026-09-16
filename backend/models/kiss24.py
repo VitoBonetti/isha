@@ -46,7 +46,7 @@ class Kiss24VulnTypes(Base):
 class Kiss24ValidatingVulns(Base):
     __tablename__ = "kiss24_validating_vulns"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column('uuid', UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     validating_team = Column(String(50), nullable=False)
     need_credentials = Column(Boolean, nullable=False, default=False)
     need_vpn = Column(Boolean, nullable=False, default=False)

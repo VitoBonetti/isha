@@ -1,7 +1,16 @@
 import json
 from collections import defaultdict
 from fastapi import HTTPException
+from sqlalchemy.orm import Session
+from sqlalchemy import func, or_
+from sqlalchemy.dialects.postgresql import insert
+from models.raw_assets import AssetCriteria, RawAssets, RawAssetsSnowMetadata, AssetTypes
+from models.territories import Country
+from models.assets import Assets
+from models.tests import Tests, TestAssets, TestStages
+from models.services import ServiceLanes
 from audit_logger import log_audit_event
+from utils.timeaware import aware_utcnow
 
 
 def get_valid_fields():
@@ -71,28 +80,41 @@ def evaluate_kpi_rule(asset_value, operator: str, rule_value):
     return False
 
 
-def get_all_criteria(cursor):
-    cursor.execute("SELECT id, year, criticality_threshold, kpi_rules, updated_at, is_evaluated FROM asset_criteria ORDER BY year DESC")
-    columns = [col[0] for col in cursor.description]
-    return [dict(zip(columns, row)) for row in cursor.fetchall()]
+def get_all_criteria(db: Session):
+    criteria = db.query(AssetCriteria).order_by(AssetCriteria.year.desc()).all()
+    return [
+        {
+            "id": str(c.id), "year": c.year, "criticality_threshold": c.criticality_threshold,
+            "kpi_rules": c.kpi_rules, "updated_at": c.updated_at, "is_evaluated": c.is_evaluated
+        }
+        for c in criteria
+    ]
 
 
-def upsert_criteria(cursor, payload, current_user: dict):
-    rules_json = json.dumps([rule.dict() for rule in payload.kpi_rules])
+def upsert_criteria(db: Session, payload, current_user: dict):
+    rules_json = [rule.dict() for rule in payload.kpi_rules]
 
-    cursor.execute("""
-        INSERT INTO asset_criteria (id, year, criticality_threshold, kpi_rules, updated_at, is_evaluated)
-        VALUES (gen_random_uuid(), %s, %s, %s, CURRENT_TIMESTAMP, FALSE)
-        ON CONFLICT (year) DO UPDATE SET 
-            criticality_threshold = EXCLUDED.criticality_threshold,
-            kpi_rules = EXCLUDED.kpi_rules,
-            updated_at = CURRENT_TIMESTAMP,
-            is_evaluated = FALSE
-        RETURNING id
-    """, (payload.year, payload.criticality_threshold, rules_json))
+    # SQLAlchemy PostgreSQL specific ON CONFLICT DO UPDATE
+    stmt = insert(AssetCriteria).values(
+        year=payload.year,
+        criticality_threshold=payload.criticality_threshold,
+        kpi_rules=rules_json,
+        updated_at=aware_utcnow(),
+        is_evaluated=False
+    )
 
-    new_id = cursor.fetchone()[0]
-    cursor.connection.commit()
+    stmt = stmt.on_conflict_do_update(
+        index_elements=['year'],
+        set_={
+            'criticality_threshold': stmt.excluded.criticality_threshold,
+            'kpi_rules': stmt.excluded.kpi_rules,
+            'updated_at': aware_utcnow(),
+            'is_evaluated': False
+        }
+    ).returning(AssetCriteria.id)
+
+    new_id = db.execute(stmt).scalar()
+    db.commit()
 
     log_audit_event(
         user_id=str(current_user["id"]), role=current_user["role"], action="CRITERIA_UPSERTED",
@@ -102,48 +124,43 @@ def upsert_criteria(cursor, payload, current_user: dict):
     return {"message": "Criteria saved successfully.", "id": str(new_id)}
 
 
-def delete_criteria(cursor, year: int):
-    cursor.execute("DELETE FROM asset_criteria WHERE year = %s", (year,))
-    cursor.connection.commit()
+def delete_criteria(db: Session, year: int):
+    db.query(AssetCriteria).filter(AssetCriteria.year == year).delete()
+    db.commit()
     return {"message": f"Criteria for {year} deleted."}
 
 
-def evaluate_assets(cursor, year: int, req, current_user: dict):
-    cursor.execute("SELECT criticality_threshold, kpi_rules FROM asset_criteria WHERE year = %s", (year,))
-    criteria_row = cursor.fetchone()
-    if not criteria_row:
+def evaluate_assets(db: Session, year: int, req, current_user: dict):
+    criteria = db.query(AssetCriteria).filter(AssetCriteria.year == year).first()
+    if not criteria:
         raise HTTPException(status_code=404, detail=f"No criteria rules found for {year}.")
 
-    threshold, kpi_rules = criteria_row
+    threshold = criteria.criticality_threshold
+    kpi_rules = criteria.kpi_rules
 
-    query = """
-        SELECT ra.*, sm.snow_data
-        FROM raw_assets ra
-        LEFT JOIN countries c ON ra.country_id = c.id
-        LEFT JOIN raw_assets_snow_metadata sm ON ra.id = sm.correlation_id
-        WHERE (c.is_team = FALSE OR c.is_team IS NULL) AND ra.snow_number IS NOT NULL and ra.snow_active = TRUE
-    """
-    params = []
+    query = (db.query(RawAssets, RawAssetsSnowMetadata.snow_data)
+    .outerjoin(Country, RawAssets.country_id == Country.id)
+    .outerjoin(RawAssetsSnowMetadata, RawAssets.id == RawAssetsSnowMetadata.correlation_id)
+    .filter(
+        or_(Country.is_team == False, Country.is_team.is_(None)),
+        RawAssets.snow_number.isnot(None),
+        RawAssets.snow_active == True
+    ))
+
     if req.raw_asset_ids:
-        format_strings = ','.join(['%s'] * len(req.raw_asset_ids))
-        query += f" AND ra.id IN ({format_strings})"
-        params.extend([str(aid) for aid in req.raw_asset_ids])
+        query = query.filter(RawAssets.id.in_(req.raw_asset_ids))
 
-    cursor.execute(query, tuple(params))
-    assets = cursor.fetchall()
-    columns = [col[0] for col in cursor.description]
-
+    assets = query.all()
     updates_made = 0
     rules_by_field = defaultdict(list)
+
     if kpi_rules:
         for rule in kpi_rules:
             rules_by_field[rule.get('field')].append(rule)
 
-    for asset_row in assets:
-        asset = dict(zip(columns, asset_row))
-        asset_id = asset['id']
-
+    for raw_asset_obj, snow_data in assets:
         new_is_kpi = True if kpi_rules else False
+        snow_payload = snow_data or {}
 
         for field_name, rules in rules_by_field.items():
             has_positive_rules = False
@@ -156,10 +173,10 @@ def evaluate_assets(cursor, year: int, req, current_user: dict):
 
                 if field_name.startswith('snow:'):
                     snow_key = field_name.split('snow:')[1]
-                    snow_payload = asset.get('snow_data') or {}
                     asset_value = snow_payload.get(snow_key)
                 else:
-                    asset_value = asset.get(field_name)
+                    # Safely pull the attribute from the SQLAlchemy Model
+                    asset_value = getattr(raw_asset_obj, field_name, None)
 
                 rule_passed = evaluate_kpi_rule(asset_value, operator, rule_value)
 
@@ -183,18 +200,20 @@ def evaluate_assets(cursor, year: int, req, current_user: dict):
         new_is_critical = False
         if new_is_kpi:
             try:
-                biz_critical_val = int(asset.get('business_critical') or 0)
+                biz_critical_val = int(raw_asset_obj.business_critical or 0)
             except (ValueError, TypeError):
                 biz_critical_val = 0
             new_is_critical = biz_critical_val >= threshold
 
-        if asset.get('is_critical') != new_is_critical or asset.get('is_kpi') != new_is_kpi:
-            cursor.execute("UPDATE raw_assets SET is_critical = %s, is_kpi = %s WHERE id = %s",
-                           (new_is_critical, new_is_kpi, str(asset_id)))
+        if raw_asset_obj.is_critical != new_is_critical or raw_asset_obj.is_kpi != new_is_kpi:
+            raw_asset_obj.is_critical = new_is_critical
+            raw_asset_obj.is_kpi = new_is_kpi
             updates_made += 1
 
-    cursor.execute("UPDATE asset_criteria SET updated_at = CURRENT_TIMESTAMP, is_evaluated = TRUE WHERE year = %s", (year,))
-    cursor.connection.commit()
+    # Update Criteria Evaluation Status
+    criteria.updated_at = aware_utcnow()
+    criteria.is_evaluated = True
+    db.commit()
 
     log_audit_event(
         user_id=str(current_user["id"]), role=current_user["role"], action="CRITERIA_EVALUATED",
@@ -205,35 +224,63 @@ def evaluate_assets(cursor, year: int, req, current_user: dict):
     return {"message": "Evaluation complete.", "assets_evaluated": len(assets), "assets_updated": updates_made}
 
 
-def dashboard_data(cursor):
-    cursor.execute("""
-    SELECT COUNT(*) FROM tests t
-    LEFT JOIN services_lanes sl ON t.service_lane_id = sl.id
-    LEFT JOIN test_assets ta ON t.id = ta.test_id
-    LEFT JOIN assets a ON ta.asset_id = a.id
-    LEFT JOIN raw_assets ra ON a.raw_asset_id = ra.id
-    LEFT JOIN asset_types at ON ra.asset_type_id = at.id
-    LEFT JOIN countries c ON ra.country_id = c.id
-    WHERE (c.is_team = FALSE OR c.is_team IS NULL) AND sl.auto_provision_workspace = TRUE AND ra.is_kpi = TRUE 
-    AND t.stages != 'STOPPED'
-    """)
-    total_count = cursor.fetchone()[0]
+def dashboard_data(db: Session):
+    query = (db.query(
+        Tests.name.label("Name"),
+        ServiceLanes.name.label("Service"),
+        RawAssets.id.label("Inventory_Id"),
+        RawAssets.snow_number.label("ID"),
+        Country.code,
+        AssetTypes.name.label("Type"),
+        RawAssets.snow_active.label("Status"),
+        RawAssets.business_critical,
+        RawAssets.confidentiality_rating,
+        RawAssets.integrity_rating,
+        RawAssets.availability_rating,
+        RawAssets.facing_internet,
+        Tests.start_week,
+        Tests.start_year,
+        Tests.stages,
+        RawAssets.is_kpi,
+        RawAssets.is_critical
+    ).select_from(Tests)
+    .outerjoin(ServiceLanes, Tests.service_lane_id == ServiceLanes.id)
+    .outerjoin(TestAssets, Tests.id == TestAssets.test_id)
+    .outerjoin(Assets, TestAssets.asset_id == Assets.id)
+    .outerjoin(RawAssets, Assets.raw_asset_id == RawAssets.id)
+    .outerjoin(AssetTypes, RawAssets.asset_type_id == AssetTypes.id)
+    .outerjoin(Country, RawAssets.country_id == Country.id)
+    .filter(
+        or_(Country.is_team == False, Country.is_team.is_(None)),
+        ServiceLanes.auto_provision_workspace == True,
+        RawAssets.is_kpi == True,
+        Tests.stages != TestStages.STOPPED
+    ))
 
-    cursor.execute("""
-    SELECT t.name as Name, sl.name as Service, ra.id as Inventory_Id, ra.snow_number as ID, c.code, at.name as Type, 
-    ra.snow_active as Status, ra.business_critical, ra.confidentiality_rating, ra.integrity_rating, 
-    ra.availability_rating, ra.facing_internet, t.start_week, t.start_year, t.stages, ra.is_kpi, ra.is_critical 
-    FROM tests t
-    LEFT JOIN services_lanes sl ON t.service_lane_id = sl.id
-    LEFT JOIN test_assets ta ON t.id = ta.test_id
-    LEFT JOIN assets a ON ta.asset_id = a.id
-    LEFT JOIN raw_assets ra ON a.raw_asset_id = ra.id
-    LEFT JOIN asset_types at ON ra.asset_type_id = at.id
-    LEFT JOIN countries c ON ra.country_id = c.id
-    WHERE (c.is_team = FALSE OR c.is_team IS NULL) AND sl.auto_provision_workspace = TRUE AND ra.is_kpi = TRUE 
-    AND t.stages != 'STOPPED'
-    """)
-    columns = [col[0] for col in cursor.description]
+    total_count = query.count()
+    rows = query.all()
 
-    items = [dict(zip(columns, row)) for row in cursor.fetchall()]
+    items = [
+        {
+            "Name": r.Name,
+            "Service": r.Service,
+            "Inventory_Id": str(r.Inventory_Id) if r.Inventory_Id else None,
+            "ID": r.ID,
+            "code": r.code,
+            "Type": r.Type,
+            "Status": r.Status,
+            "business_critical": r.business_critical,
+            "confidentiality_rating": r.confidentiality_rating,
+            "integrity_rating": r.integrity_rating,
+            "availability_rating": r.availability_rating,
+            "facing_internet": r.facing_internet,
+            "start_week": r.start_week,
+            "start_year": r.start_year,
+            "stages": r.stages.name if r.stages else None,
+            "is_kpi": r.is_kpi,
+            "is_critical": r.is_critical
+        }
+        for r in rows
+    ]
+
     return {"items": items, "total_count": total_count}

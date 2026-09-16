@@ -2,7 +2,8 @@ from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Backgro
 from typing import Optional
 from datetime import datetime
 import anyio
-from database import get_db_cursor
+from database import get_db
+from sqlalchemy.orm import Session
 from routers.auth import get_current_user, require_admin, require_maintainer_or_admin, require_admin_or_read_only
 from schema import RawAssetCreate, AssetTypeBase, BulkAssetRequest, BulkServiceUpdateRequest, SnowSyncRequest
 from starlette import status
@@ -17,24 +18,24 @@ router = APIRouter(prefix="/api/assets", tags=["Assets"])
 # --- ASSET TYPES DICTIONARY  --- #
 ###################################
 @router.get("/types")
-def get_asset_types(current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
-    return asset_service.get_all_asset_types(cursor)
+def get_asset_types(current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    return asset_service.get_all_asset_types(db)
 
 
 @router.post("/types/", summary="[Admin Only]")
-def create_asset_type(at: AssetTypeBase, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
-    return asset_service.create_asset_type(cursor, at, current_user)
+def create_asset_type(at: AssetTypeBase, current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    return asset_service.create_asset_type(db, at, current_user)
 
 
 @router.put("/types/{type_id}", summary="[Admin Only]")
 def update_asset_type(type_id: str, at: AssetTypeBase, current_user: dict = Depends(require_admin),
-                      cursor=Depends(get_db_cursor)):
-    return asset_service.update_asset_type(cursor, type_id, at, current_user)
+                      db: Session = Depends(get_db)):
+    return asset_service.update_asset_type(db, type_id, at, current_user)
 
 
 @router.delete("/types/{type_id}", summary="[Admin Only]")
-def delete_asset_type(type_id: str, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
-    return asset_service.delete_asset_type(cursor, type_id, current_user)
+def delete_asset_type(type_id: str, current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    return asset_service.delete_asset_type(db, type_id, current_user)
 
 
 ###################################
@@ -49,31 +50,31 @@ def get_raw_assets(
         business_critical: Optional[int] = None, status: Optional[str] = None,
         is_kpi: Optional[bool] = None, is_critical: Optional[bool] = None,
         sort_by: Optional[str] = "name", sort_dir: Optional[str] = "asc",
-        current_user: dict = Depends(require_admin_or_read_only), cursor=Depends(get_db_cursor)
+        current_user: dict = Depends(require_admin_or_read_only), db: Session = Depends(get_db)
 ):
     return asset_service.get_paginated_raw_assets(
-        cursor, page, limit, search, country_id, service_id, category_id,
+        db, page, limit, search, country_id, service_id, category_id,
         asset_type_id, facing_internet, business_critical, status, is_kpi, is_critical, sort_by, sort_dir
     )
 
 
 @router.post("/raw", summary="[Admin Only]")
 def create_manual_raw_asset(asset: RawAssetCreate, background_tasks: BackgroundTasks,
-                            current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
-    res = asset_service.create_manual_raw_asset(cursor, asset, current_user)
+                            current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    res = asset_service.create_manual_raw_asset(db, asset, current_user)
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
     return res
 
 
 @router.get("/raw/{raw_id}")
-def get_single_raw_asset(raw_id: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
-    return asset_service.get_single_raw_asset(cursor, raw_id, current_user)
+def get_single_raw_asset(raw_id: str, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    return asset_service.get_single_raw_asset(db, raw_id, current_user)
 
 
 @router.put("/raw/{raw_id}", summary="[Admin/Maintainer]")
 def update_raw_asset(raw_id: str, asset: RawAssetCreate, background_tasks: BackgroundTasks,
-                     current_user: dict = Depends(require_maintainer_or_admin), cursor=Depends(get_db_cursor)):
-    res = asset_service.update_raw_asset(cursor, raw_id, asset, current_user)
+                     current_user: dict = Depends(require_maintainer_or_admin), db: Session = Depends(get_db)):
+    res = asset_service.update_raw_asset(db, raw_id, asset, current_user)
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
     return res
 
@@ -81,8 +82,8 @@ def update_raw_asset(raw_id: str, asset: RawAssetCreate, background_tasks: Backg
 @router.delete("/raw/{raw_id}", summary="[Admin Only]")
 def delete_raw_asset(raw_id: str, year: int = Query(default_factory=lambda: datetime.now().year),
                      background_tasks: BackgroundTasks = BackgroundTasks(),
-                     current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
-    res = asset_service.delete_raw_asset(cursor, raw_id, year, current_user)
+                     current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    res = asset_service.delete_raw_asset(db, raw_id, year, current_user)
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
     return res
 
@@ -90,8 +91,8 @@ def delete_raw_asset(raw_id: str, year: int = Query(default_factory=lambda: date
 @router.put("/raw/{raw_id}/restore", summary="[Admin Only]")
 def restore_raw_asset(raw_id: str, year: int = Query(default_factory=lambda: datetime.now().year),
                       background_tasks: BackgroundTasks = BackgroundTasks(),
-                      current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
-    res = asset_service.restore_raw_asset(cursor, raw_id, year, current_user)
+                      current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    res = asset_service.restore_raw_asset(db, raw_id, year, current_user)
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
     return res
 
@@ -99,8 +100,8 @@ def restore_raw_asset(raw_id: str, year: int = Query(default_factory=lambda: dat
 @router.post("/raw/bulk-delete", summary="[Admin Only]")
 def bulk_delete_raw_assets(req: BulkAssetRequest, year: int = Query(default_factory=lambda: datetime.now().year),
                            background_tasks: BackgroundTasks = BackgroundTasks(),
-                           current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
-    res = asset_service.bulk_delete_raw_assets(cursor, req, year, current_user)
+                           current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    res = asset_service.bulk_delete_raw_assets(db, req, year, current_user)
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
     return res
 
@@ -135,16 +136,16 @@ async def import_assets(file: UploadFile = File(...), background_tasks: Backgrou
 ###################################
 @router.post("/promote", summary="[Admin Only]")
 def promote_raw_assets_to_pool(req: BulkAssetRequest, background_tasks: BackgroundTasks,
-                               current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
-    res = asset_service.promote_raw_assets_to_pool(cursor, req, current_user)
+                               current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    res = asset_service.promote_raw_assets_to_pool(db, req, current_user)
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
     return res
 
 
 @router.put("/bulk-service", summary="[Admin Only]")
 def bulk_update_service_lane(req: BulkServiceUpdateRequest, background_tasks: BackgroundTasks,
-                             current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
-    res = asset_service.bulk_update_service_lane(cursor, req, current_user)
+                             current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    res = asset_service.bulk_update_service_lane(db, req, current_user)
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
     return res
 
@@ -154,16 +155,16 @@ def bulk_update_service_lane(req: BulkServiceUpdateRequest, background_tasks: Ba
 ###################################
 @router.get("/")
 def get_active_asset_pool(year: Optional[int] = None, current_user: dict = Depends(get_current_user),
-                          cursor=Depends(get_db_cursor)):
+                          db: Session = Depends(get_db)):
     if not year:
         year = datetime.now().year
-    return asset_service.get_active_asset_pool(cursor, year, current_user)
+    return asset_service.get_active_asset_pool(db, year, current_user)
 
 
 @router.delete("/{asset_id}", summary="[Admin Only]")
 def remove_from_active_pool(asset_id: str, year: int, background_tasks: BackgroundTasks,
-                            current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
-    res = asset_service.remove_from_active_pool(cursor, asset_id, year, current_user)
+                            current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    res = asset_service.remove_from_active_pool(db, asset_id, year, current_user)
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
     return res
 
@@ -187,7 +188,5 @@ def trigger_snow_sync(payload: SnowSyncRequest, background_tasks: BackgroundTask
 
 
 @router.get("/servicenow/last-sync", summary="[Admin Only]")
-def get_last_snow_sync(current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
-    cursor.execute("SELECT MAX(last_snow_sync) FROM raw_assets_snow_metadata")
-    row = cursor.fetchone()
-    return {"last_sync": row[0] if row and row[0] else None}
+def get_last_snow_sync(current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    return asset_service.get_last_snow_sync(db, current_user)

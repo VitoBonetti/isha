@@ -1,6 +1,7 @@
 import json
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request as FastAPIRequest
-from database import get_db_cursor
+from database import get_db
+from sqlalchemy.orm import Session
 from routers.auth import get_current_user, require_maintainer_or_admin
 from schema import SendEmailPayload, MeetingProposalRequest
 from websockets_manager import manager
@@ -28,39 +29,39 @@ def verify_luigi_token(request: FastAPIRequest):
 # --- 1. INTRO EMAIL ENDPOINTS ---
 # ================================
 @router.get("/{test_id}/draft-intro-email", summary="[Admin/Maintainer]")
-def draft_intro_email(test_id: str, current_user: dict = Depends(require_maintainer_or_admin), cursor=Depends(get_db_cursor)):
-    return luigi_service.draft_intro_email(cursor, test_id, current_user)
+def draft_intro_email(test_id: str, current_user: dict = Depends(require_maintainer_or_admin), db: Session = Depends(get_db)):
+    return luigi_service.draft_intro_email(db, test_id, current_user)
 
 
 @router.post("/{test_id}/send-intro-email", summary="[Admin/Maintainer]")
-def send_intro_email(test_id: str, payload: SendEmailPayload, current_user: dict = Depends(require_maintainer_or_admin), cursor=Depends(get_db_cursor)):
-    return luigi_service.send_intro_email(cursor, test_id, payload, current_user)
+def send_intro_email(test_id: str, payload: SendEmailPayload, current_user: dict = Depends(require_maintainer_or_admin), db: Session = Depends(get_db)):
+    return luigi_service.send_intro_email(db, test_id, payload, current_user)
 
 
 # ================================
 # --- 2. FINAL EMAIL ENDPOINTS ---
 # ================================
 @router.get("/{test_id}/draft-final-email")
-def draft_final_email(test_id: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
-    return luigi_service.draft_final_email(cursor, test_id, current_user)
+def draft_final_email(test_id: str, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    return luigi_service.draft_final_email(db, test_id, current_user)
 
 
 @router.post("/{test_id}/send-final-email")
-def send_final_email(test_id: str, payload: SendEmailPayload, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
-    return luigi_service.send_final_email(cursor, test_id, payload, current_user)
+def send_final_email(test_id: str, payload: SendEmailPayload, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    return luigi_service.send_final_email(db, test_id, payload, current_user)
 
 
 # =======================================
 # --- 3. MEETING SCHEDULING ENDPOINTS ---
 # =======================================
 @router.get("/{test_id}/meeting-participants")
-def get_meeting_participants(test_id: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
-    return luigi_service.get_meeting_participants(cursor, test_id, current_user)
+def get_meeting_participants(test_id: str, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    return luigi_service.get_meeting_participants(db, test_id, current_user)
 
 
 @router.post("/{test_id}/request-meeting-proposals")
-def request_meeting_proposals(test_id: str, payload: MeetingProposalRequest, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
-    return luigi_service.request_meeting_proposals(cursor, test_id, payload, current_user)
+def request_meeting_proposals(test_id: str, payload: MeetingProposalRequest, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    return luigi_service.request_meeting_proposals(db, test_id, payload, current_user)
 
 
 @router.post("/save-meeting-proposals")
@@ -78,16 +79,16 @@ async def receive_meeting_proposals(payload: dict, token: str = Depends(verify_l
 
 
 @router.post("/{test_id}/book-meeting")
-def book_meeting(test_id: str, payload: dict, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
-    return luigi_service.book_meeting(cursor, test_id, payload, current_user)
+def book_meeting(test_id: str, payload: dict, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    return luigi_service.book_meeting(db, test_id, payload, current_user)
 
 
 # =================================
 # --- 4. VULNERABILITY DRAFTING ---
 # =================================
 @router.post("/draft-vulnerability")
-def trigger_luigi_draft(payload: dict, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
-    return luigi_service.trigger_luigi_draft(cursor, payload, current_user)
+def trigger_luigi_draft(payload: dict, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    return luigi_service.trigger_luigi_draft(db, payload, current_user)
 
 
 @router.post("/vuln-draft-callback")
@@ -106,8 +107,8 @@ def luigi_draft_callback(payload: dict, background_tasks: BackgroundTasks, token
 # --- 5. VALIDATION QUEUE ---
 # ===========================
 @router.post("/validation-callback", summary="Webhook for Luigi's Validation Verdict")
-async def luigi_validation_callback(payload: dict, background_tasks: BackgroundTasks, cursor=Depends(get_db_cursor), token: str = Depends(verify_luigi_token)):
-    res, gcs_uris = luigi_service.process_validation_callback(cursor, payload)
+async def luigi_validation_callback(payload: dict, background_tasks: BackgroundTasks, db: Session = Depends(get_db), token: str = Depends(verify_luigi_token)):
+    res, gcs_uris = luigi_service.process_validation_callback(db, payload)
     if gcs_uris:
         background_tasks.add_task(luigi_service.cleanup_temp_evidence, gcs_uris)
     await manager.broadcast(json.dumps({"action": "REFRESH_BOARD"}))

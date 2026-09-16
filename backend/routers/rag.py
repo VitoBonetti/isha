@@ -2,7 +2,8 @@ import asyncio
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, BackgroundTasks
 from pydantic import UUID4
-from database import get_db_cursor
+from database import get_db
+from sqlalchemy.orm import Session
 from routers.auth import require_admin
 from schema import RagChatRequest, RagChatBulkDeleteRequest, FeedbackRequest
 from audit_logger import log_audit_event
@@ -19,8 +20,8 @@ def trigger_knowledge_base_sync(background_tasks: BackgroundTasks, current_user:
 
 
 @router.get("/", summary="[Admin] Testing endpoint for check the chunck")
-def check_chunks(current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
-    return rag_service.check_all_chunks(cursor)
+def check_chunks(current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    return rag_service.check_all_chunks(db)
 
 
 @router.post("/tests/{test_id}/sync", summary="[Admin] Sync test documents to AI Knowledge Base")
@@ -49,50 +50,50 @@ async def start_nightly_rag_scheduler():
 
 
 @router.get("/filters", summary="Get autocomplete filters for RAG chat")
-def get_rag_filters(current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
-    return rag_service.get_rag_filters(cursor)
+def get_rag_filters(current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    return rag_service.get_rag_filters(db)
 
 
 @router.get("/stats", summary="Get RAG knowledge base statistics")
-def get_rag_stats(current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
-    return rag_service.get_rag_stats(cursor)
+def get_rag_stats(current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    return rag_service.get_rag_stats(db)
 
 
 @router.post("/chat", summary="Query the RAG Knowledge Base (Streaming)")
-def chat_with_documents(req: RagChatRequest, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
-    return rag_service.chat_with_documents(cursor, req, current_user)
+def chat_with_documents(req: RagChatRequest, current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    return rag_service.chat_with_documents(db, req, current_user)
 
 
 @router.get('/rag_chat_logs', summary='{Admin only] Rag Chat Logs')
-def rag_chat_logs(current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
-    return rag_service.get_all_rag_logs(cursor)
+def rag_chat_logs(current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    return rag_service.get_all_rag_logs(db)
 
 
 @router.get("/sessions", summary="Get user chat sessions")
-def get_chat_sessions(current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
-    return rag_service.get_chat_sessions(cursor, current_user)
+def get_chat_sessions(current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    return rag_service.get_chat_sessions(db, current_user)
 
 
 @router.get("/sessions/{session_id}", summary="Get messages for a specific session")
-def get_session_messages(session_id: str, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
-    return rag_service.get_session_messages(cursor, session_id, current_user)
+def get_session_messages(session_id: str, current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    return rag_service.get_session_messages(db, session_id, current_user)
 
 
 @router.post("/logs/{log_id}/feedback", summary="Submit feedback for a response")
-def submit_rag_feedback(log_id: str, request: FeedbackRequest, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
-    return rag_service.submit_rag_feedback(cursor, log_id, request, current_user)
+def submit_rag_feedback(log_id: str, request: FeedbackRequest, current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    return rag_service.submit_rag_feedback(db, log_id, request, current_user)
 
 
 @router.delete("/sessions/{session_id}", summary="Soft delete a single chat session")
-def delete_chat_session(session_id: str, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
-    return rag_service.delete_chat_session(cursor, session_id, current_user)
+def delete_chat_session(session_id: str, current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    return rag_service.delete_chat_session(db, session_id, current_user)
 
 
 @router.post("/sessions/bulk-delete", summary="Soft delete multiple chat sessions")
-def bulk_delete_chat_sessions(request: RagChatBulkDeleteRequest, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
-    return rag_service.bulk_delete_chat_sessions(cursor, request, current_user)
+def bulk_delete_chat_sessions(request: RagChatBulkDeleteRequest, current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    return rag_service.bulk_delete_chat_sessions(db, request, current_user)
 
 
 @router.get("/sessions/shared/{session_id}", summary="Get messages for a shared session (Read-Only)")
-def get_shared_session_messages(session_id: str, current_user: dict = Depends(require_admin), cursor=Depends(get_db_cursor)):
-    return rag_service.get_shared_session_messages(cursor, session_id)
+def get_shared_session_messages(session_id: str, current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    return rag_service.get_shared_session_messages(db, session_id)

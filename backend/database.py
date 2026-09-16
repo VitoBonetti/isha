@@ -125,3 +125,12 @@ def run_alembic_migrations():
 
     print("Running remaining Alembic migrations...")
     command.upgrade(alembic_cfg, "head")
+
+
+def get_db():
+    """FastAPI dependency that provides a SQLAlchemy Session."""
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()

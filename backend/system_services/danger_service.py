@@ -1,10 +1,15 @@
 from fastapi import HTTPException, status
+from sqlalchemy.orm import Session
+from sqlalchemy import text
+from models.tests import Tests, TestDocuments
+from models.raw_assets import RawAssets, AssetCriteria
 from audit_logger import log_audit_event
 
 
-def wipe_system_data(cursor, current_user: dict):
+def wipe_system_data(db: Session, current_user: dict):
     try:
-        cursor.execute("""
+        # Use text() to safely execute raw DDL statements through the SQLAlchemy Session
+        db.execute(text("""
             TRUNCATE TABLE notifications CASCADE;
             TRUNCATE TABLE countries CASCADE;
             TRUNCATE TABLE regions CASCADE;
@@ -17,8 +22,8 @@ def wipe_system_data(cursor, current_user: dict):
             TRUNCATE TABLE service_categories CASCADE;
             TRUNCATE TABLE asset_history CASCADE;
             TRUNCATE TABLE test_history CASCADE;
-        """)
-        cursor.connection.commit()
+        """))
+        db.commit()
 
         log_audit_event(
             user_id=str(current_user["id"]),
@@ -30,12 +35,13 @@ def wipe_system_data(cursor, current_user: dict):
         )
         return {"message": "System data wiped successfully."}
     except Exception as e:
-        cursor.connection.rollback()
+        db.rollback()
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to wipe system data.")
 
 
-def wipe_all_secrets(cursor, current_user: dict):
-    cursor.execute("TRUNCATE TABLE secret_notes CASCADE;")
+def wipe_all_secrets(db: Session, current_user: dict):
+    db.execute(text("TRUNCATE TABLE secret_notes CASCADE;"))
+    db.commit()
 
     log_audit_event(
         user_id=str(current_user["id"]),
@@ -48,15 +54,17 @@ def wipe_all_secrets(cursor, current_user: dict):
     return {"message": "All secure notes wiped."}
 
 
-def wipe_drive_folders(cursor, current_user: dict):
+def wipe_drive_folders(db: Session, current_user: dict):
     try:
-        cursor.execute("""
-            UPDATE tests 
-            SET drive_folder_id = NULL, drive_folder_url = NULL;
-        """)
-        cursor.execute("TRUNCATE TABLE test_documents CASCADE;")
-        cursor.execute("TRUNCATE TABLE test_analyses CASCADE;")
-        cursor.connection.commit()
+        # Pure SQLAlchemy Bulk Update
+        db.query(Tests).update(
+            {Tests.drive_folder_id: None, Tests.drive_folder_url: None},
+            synchronize_session=False
+        )
+
+        db.execute(text("TRUNCATE TABLE test_documents CASCADE;"))
+        db.execute(text("TRUNCATE TABLE test_analyses CASCADE;"))
+        db.commit()
 
         log_audit_event(
             user_id=str(current_user["id"]),
@@ -68,14 +76,14 @@ def wipe_drive_folders(cursor, current_user: dict):
         )
         return {"message": "All Google Drive folders unlinked and document metadata wiped."}
     except Exception as e:
-        cursor.connection.rollback()
+        db.rollback()
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to wipe drive folders.")
 
 
-def wipe_all_documents(cursor, current_user: dict):
+def wipe_all_documents(db: Session, current_user: dict):
     try:
-        cursor.execute("TRUNCATE TABLE test_documents CASCADE;")
-        cursor.connection.commit()
+        db.execute(text("TRUNCATE TABLE test_documents CASCADE;"))
+        db.commit()
 
         log_audit_event(
             user_id=str(current_user["id"]),
@@ -87,14 +95,14 @@ def wipe_all_documents(cursor, current_user: dict):
         )
         return {"message": "All document metadata wiped successfully."}
     except Exception as e:
-        cursor.connection.rollback()
+        db.rollback()
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to wipe documents.")
 
 
-def wipe_all_rag_chat_logs(cursor, current_user: dict):
+def wipe_all_rag_chat_logs(db: Session, current_user: dict):
     try:
-        cursor.execute("TRUNCATE TABLE rag_chat_logs CASCADE;")
-        cursor.connection.commit()
+        db.execute(text("TRUNCATE TABLE rag_chat_logs CASCADE;"))
+        db.commit()
 
         log_audit_event(
             user_id=str(current_user["id"]),
@@ -106,15 +114,17 @@ def wipe_all_rag_chat_logs(cursor, current_user: dict):
         )
         return {"message": "All rag chat logs wiped successfully."}
     except Exception as e:
-        cursor.connection.rollback()
+        db.rollback()
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to wipe rag chat logs.")
 
 
-def wipe_all_test_analyses(cursor, current_user: dict):
+def wipe_all_test_analyses(db: Session, current_user: dict):
     try:
-        cursor.execute("TRUNCATE TABLE test_analyses CASCADE;")
-        cursor.execute("DELETE FROM test_documents WHERE is_virtual=TRUE;")
-        cursor.connection.commit()
+        db.execute(text("TRUNCATE TABLE test_analyses CASCADE;"))
+
+        # Pure SQLAlchemy Bulk Delete
+        db.query(TestDocuments).filter(TestDocuments.is_virtual == True).delete(synchronize_session=False)
+        db.commit()
 
         log_audit_event(
             user_id=str(current_user["id"]),
@@ -126,15 +136,23 @@ def wipe_all_test_analyses(cursor, current_user: dict):
         )
         return {"message": "All test_analyses wiped successfully."}
     except Exception as e:
-        cursor.connection.rollback()
+        db.rollback()
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to wipe test_analyses.")
 
 
-def reset_asset_kpi_criteria(cursor, current_user: dict):
+def reset_asset_kpi_criteria(db: Session, current_user: dict):
     try:
-        cursor.execute("UPDATE raw_assets SET is_kpi = FALSE, is_critical = FALSE;")
-        cursor.execute("UPDATE asset_criteria SET is_evaluated = FALSE;")
-        cursor.connection.commit()
+        # Pure SQLAlchemy Bulk Updates
+        db.query(RawAssets).update(
+            {RawAssets.is_kpi: False, RawAssets.is_critical: False},
+            synchronize_session=False
+        )
+        db.query(AssetCriteria).update(
+            {AssetCriteria.is_evaluated: False},
+            synchronize_session=False
+        )
+
+        db.commit()
 
         log_audit_event(
             user_id=str(current_user["id"]),
@@ -146,6 +164,6 @@ def reset_asset_kpi_criteria(cursor, current_user: dict):
         )
         return {"message": "All KPI Criteria from the raw_assets table reset successfully."}
     except Exception as e:
-        cursor.connection.rollback()
+        db.rollback()
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                             detail="Failed to reset KPI Criteria from the raw_assets.")

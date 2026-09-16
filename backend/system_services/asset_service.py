@@ -4,9 +4,22 @@ import io
 from fastapi import HTTPException
 from starlette import status
 from datetime import datetime
+from sqlalchemy.orm import Session
+from sqlalchemy import func, case, and_, or_, literal_column
+
+# Import SQLAlchemy Models
+from models.assets import Assets
+from models.raw_assets import AssetTypes, RawAssets, RawAssetsSnowMetadata
+from models.histories import AssetHistory, TestHistory
+from models.territories import Country
+from models.services import ServiceLanes, ServiceCategories
+from models.tests import Tests, TestAssets, Assignments, TestStages
+from models.users import Users
+
 from audit_logger import log_audit_event
 from utils.snow_sync import process_and_sync_snow_data, fetch_raw_snow_data
-from database import db_cursor_context, SessionLocal
+from utils.timeaware import aware_utcnow
+from database import SessionLocal
 from routers.auth import verify_lane_access
 from schema import AssetTypeBase, RawAssetCreate, BulkAssetRequest, BulkServiceUpdateRequest
 
@@ -42,509 +55,695 @@ def sanitize_csv_injection(text: str) -> str:
     return text
 
 
-def insert_asset_history(cursor, raw_asset_id: str, user_id: str, action: str, details: str):
-    cursor.execute("""
-        INSERT INTO asset_history (id, raw_asset_id, user_id, action, details, timestamp)
-        VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
-    """, (str(uuid.uuid4()), raw_asset_id, user_id, action, details))
+def insert_asset_history(db: Session, raw_asset_id: str, user_id: str, action: str, details: str):
+    history_entry = AssetHistory(
+        raw_asset_id=str(raw_asset_id),
+        user_id=str(user_id) if user_id else None,
+        action=action,
+        details=details
+    )
+    db.add(history_entry)
 
 
 ###################################
 # ---      ASSET TYPES        --- #
 ###################################
-def get_all_asset_types(cursor):
-    cursor.execute("SELECT id, name FROM asset_types ORDER BY name ASC")
-    columns = [col[0] for col in cursor.description]
-    return [dict(zip(columns, row)) for row in cursor.fetchall()]
+def get_all_asset_types(db: Session):
+    return db.query(AssetTypes).order_by(AssetTypes.name.asc()).all()
 
 
-def create_asset_type(cursor, at: AssetTypeBase, current_user: dict):
-    new_id = str(uuid.uuid4())
+def create_asset_type(db: Session, at: AssetTypeBase, current_user: dict):
     try:
-        cursor.execute("INSERT INTO asset_types (id, name) VALUES (%s, %s)", (new_id, at.name))
-        cursor.connection.commit()
+        new_asset_type = AssetTypes(name=at.name)
+        db.add(new_asset_type)
+        db.commit()
+        db.refresh(new_asset_type)
+
         log_audit_event(
-            user_id=str(current_user["id"]), role=current_user["role"], action="ASSET_TYPE_CREATE",
-            resource_type="ASSETS", resource_id=str(new_id), details=f"Asset Type {at.name} created with ID: {new_id}"
+            user_id=str(current_user["id"]),
+            role=current_user["role"],
+            action="ASSET_TYPE_CREATE",
+            resource_type="ASSETS",
+            resource_id=str(new_asset_type.id),
+            details=f"Asset Type {new_asset_type.name} created with ID: {new_asset_type.id}"
         )
-        return {"id": new_id, "message": "Asset Type created."}
+        return {"id": str(new_asset_type.id), "message": "Asset Type created."}
     except Exception:
-        cursor.connection.rollback()
+        db.rollback()
         raise HTTPException(status_code=400, detail="Asset type name might already exist.")
 
 
-def update_asset_type(cursor, type_id: str, at: AssetTypeBase, current_user: dict):
-    cursor.execute("UPDATE asset_types SET name=%s WHERE id=%s", (at.name, type_id))
+def update_asset_type(db: Session, type_id: str, at: AssetTypeBase, current_user: dict):
+    asset_type = db.query(AssetTypes).filter(AssetTypes.id == type_id).first()
+    if not asset_type:
+        raise HTTPException(status_code=404, detail="Asset type not found")
+
+    asset_type.name = at.name
+    db.commit()
+
     log_audit_event(
-        user_id=str(current_user["id"]), role=current_user["role"], action="ASSET_TYPE_UPDATE",
-        resource_type="ASSETS", resource_id=str(type_id), details=f"Asset Type {type_id} has been updated as {at.name} "
+        user_id=str(current_user["id"]),
+        role=current_user["role"],
+        action="ASSET_TYPE_UPDATE",
+        resource_type="ASSETS",
+        resource_id=str(type_id),
+        details=f"Asset Type {type_id} has been updated as {asset_type.name}"
     )
-    cursor.connection.commit()
     return {"message": "Asset Type updated."}
 
 
-def delete_asset_type(cursor, type_id: str, current_user: dict):
-    cursor.execute("DELETE FROM asset_types WHERE id = %s", (type_id,))
+def delete_asset_type(db: Session, type_id: str, current_user: dict):
+    asset_type = db.query(AssetTypes).filter(AssetTypes.id == type_id).first()
+    if not asset_type:
+        raise HTTPException(status_code=404, detail="Asset type not found")
+
+    db.delete(asset_type)
+    db.commit()
+
     log_audit_event(
-        user_id=str(current_user["id"]), role=current_user["role"], action="ASSET_TYPE_DELETED",
-        resource_type="ASSETS", resource_id=str(type_id), details=f"Asset Type {type_id} has been Deleted "
+        user_id=str(current_user["id"]),
+        role=current_user["role"],
+        action="ASSET_TYPE_DELETED",
+        resource_type="ASSETS",
+        resource_id=str(type_id),
+        details=f"Asset Type {type_id} has been Deleted"
     )
-    cursor.connection.commit()
     return {"message": "Asset Type deleted."}
 
 
 ###################################
 # ---      RAW ASSETS         --- #
 ###################################
-def get_paginated_raw_assets(cursor, page, limit, search, country_id, service_id, category_id, asset_type_id,
-                             facing_internet, business_critical, status, is_kpi, is_critical, sort_by, sort_dir):
+def get_paginated_raw_assets(
+    db: Session, page: int, limit: int, search: str, country_id: str,
+    service_id: str, category_id: str, asset_type_id: str, facing_internet: str,
+    business_critical: int, status: str, is_kpi: bool, is_critical: bool,
+    sort_by: str, sort_dir: str
+):
     offset = (page - 1) * limit
-    params = []
-    where_clauses = []
 
+    query = db.query(
+        RawAssets.id,
+        RawAssets.name,
+        Country.code.label("country_code"),
+        Country.name.label("country_name"),
+        ServiceLanes.name.label("service_name"),
+        ServiceCategories.name.label("category_name"),
+        AssetTypes.name.label("asset_type_name"),
+        RawAssets.facing_internet,
+        RawAssets.business_critical,
+        RawAssets.snow_active,
+        case((Assets.id.isnot(None), True), else_=False).label("is_promoted")
+    ).outerjoin(Country, RawAssets.country_id == Country.id)\
+     .outerjoin(ServiceLanes, RawAssets.service_forecast_id == ServiceLanes.id)\
+     .outerjoin(ServiceCategories, RawAssets.category_id == ServiceCategories.id)\
+     .outerjoin(AssetTypes, RawAssets.asset_type_id == AssetTypes.id)\
+     .outerjoin(Assets, RawAssets.id == Assets.raw_asset_id)
+
+    # Dynamic Filter Conditions
     if search:
-        where_clauses.append("r.name ILIKE %s")
-        params.append(f"%{search}%")
+        query = query.filter(RawAssets.name.ilike(f"%{search}%"))
     if country_id:
-        where_clauses.append("r.country_id = %s")
-        params.append(country_id)
+        query = query.filter(RawAssets.country_id == country_id)
     if service_id:
-        where_clauses.append("r.service_forecast_id = %s")
-        params.append(service_id)
+        query = query.filter(RawAssets.service_forecast_id == service_id)
     if category_id:
-        where_clauses.append("r.category_id = %s")
-        params.append(category_id)
+        query = query.filter(RawAssets.category_id == category_id)
     if asset_type_id:
-        where_clauses.append("r.asset_type_id = %s")
-        params.append(asset_type_id)
+        query = query.filter(RawAssets.asset_type_id == asset_type_id)
     if facing_internet == 'true':
-        where_clauses.append("r.facing_internet = true")
+        query = query.filter(RawAssets.facing_internet == True)
     elif facing_internet == 'false':
-        where_clauses.append("r.facing_internet = false")
+        query = query.filter(RawAssets.facing_internet == False)
     elif facing_internet == 'null':
-        where_clauses.append("r.facing_internet IS NULL")
+        query = query.filter(RawAssets.facing_internet.is_(None))
     if business_critical is not None:
-        where_clauses.append("r.business_critical >= %s")
-        params.append(business_critical)
+        query = query.filter(RawAssets.business_critical >= business_critical)
     if is_kpi is not None:
-        where_clauses.append("r.is_kpi = %s")
-        params.append(is_kpi)
+        query = query.filter(RawAssets.is_kpi == is_kpi)
     if is_critical is not None:
-        where_clauses.append("r.is_critical = %s")
-        params.append(is_critical)
+        query = query.filter(RawAssets.is_critical == is_critical)
     if status == 'raw':
-        where_clauses.append("a.id IS NULL")
+        query = query.filter(Assets.id.is_(None))
     elif status == 'pool':
-        where_clauses.append("a.id IS NOT NULL")
+        query = query.filter(Assets.id.isnot(None))
 
-    where_str = "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
+    total_count = query.count()
 
-    count_query = f"SELECT COUNT(*) FROM raw_assets r LEFT JOIN assets a ON r.id = a.raw_asset_id {where_str}"
-    cursor.execute(count_query, tuple(params))
-    total_count = cursor.fetchone()[0]
+    # Dynamic Sorting
+    sort_map = {
+        "name": RawAssets.name,
+        "country": Country.code,
+        "service": ServiceLanes.name,
+        "category": ServiceCategories.name,
+        "type": AssetTypes.name,
+        "status": case((Assets.id.isnot(None), True), else_=False)
+    }
+    order_col = sort_map.get(sort_by, RawAssets.name)
+    order_col = order_col.desc() if sort_dir.lower() == "desc" else order_col.asc()
 
-    sort_map = {"name": "r.name", "country": "c.code", "service": "s.name", "category": "cat.name", "type": "at.name",
-                "status": "is_promoted"}
-    order_col = sort_map.get(sort_by, "r.name")
-    order_dir = "DESC" if sort_dir.lower() == "desc" else "ASC"
+    rows = query.order_by(order_col).offset(offset).limit(limit).all()
 
-    query = f"""
-        SELECT r.id, r.name, c.code as country_code, c.name as country_name, s.name as service_name, cat.name as category_name,
-               at.name as asset_type_name, r.facing_internet, r.business_critical, r.snow_active,
-               CASE WHEN a.id IS NOT NULL THEN true ELSE false END as is_promoted
-        FROM raw_assets r
-        LEFT JOIN countries c ON r.country_id = c.id
-        LEFT JOIN services_lanes s ON r.service_forecast_id = s.id
-        LEFT JOIN service_categories cat ON r.category_id = cat.id
-        LEFT JOIN asset_types at ON r.asset_type_id = at.id
-        LEFT JOIN assets a ON r.id = a.raw_asset_id
-        {where_str}
-        ORDER BY {order_col} {order_dir}
-        LIMIT %s OFFSET %s
-    """
-    cursor.execute(query, tuple(params + [limit, offset]))
-    columns = [col[0] for col in cursor.description]
-    items = [dict(zip(columns, row)) for row in cursor.fetchall()]
+    items = [
+        {
+            "id": str(r[0]),
+            "name": r[1],
+            "country_code": r[2],
+            "country_name": r[3],
+            "service_name": r[4],
+            "category_name": r[5],
+            "asset_type_name": r[6],
+            "facing_internet": r[7],
+            "business_critical": r[8],
+            "snow_active": r[9],
+            "is_promoted": r[10]
+        }
+        for r in rows
+    ]
 
     return {"items": items, "total_count": total_count}
 
 
-def create_manual_raw_asset(cursor, asset: RawAssetCreate, current_user: dict):
+def create_manual_raw_asset(db: Session, asset: RawAssetCreate, current_user: dict):
     c_id = str(asset.country_id) if asset.country_id else None
     s_id = str(asset.service_forecast_id) if asset.service_forecast_id else None
     cat_id = str(asset.category_id) if asset.category_id else None
     at_id = str(asset.asset_type_id)
 
-    new_raw_assets_id = str(uuid.uuid4())
-    cursor.execute("""
-        INSERT INTO raw_assets (
-            id, name, description, business_critical, confidentiality_rating, integrity_rating, availability_rating, 
-            country_id, service_forecast_id, category_id, asset_type_id, facing_internet, duplicate_allowed, is_kpi, is_critical, create_date
-        )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP) RETURNING id
-    """, (
-        new_raw_assets_id, asset.name, asset.description, asset.business_critical, asset.confidentiality_rating,
-        asset.integrity_rating, asset.availability_rating, c_id, s_id, cat_id, at_id, asset.facing_internet,
-        asset.duplicate_allowed, asset.is_kpi, asset.is_critical
-    ))
+    new_raw_asset = RawAssets(
+        name=asset.name,
+        description=asset.description,
+        business_critical=asset.business_critical,
+        confidentiality_rating=asset.confidentiality_rating,
+        integrity_rating=asset.integrity_rating,
+        availability_rating=asset.availability_rating,
+        country_id=c_id,
+        service_forecast_id=s_id,
+        category_id=cat_id,
+        asset_type_id=at_id,
+        facing_internet=asset.facing_internet,
+        duplicate_allowed=asset.duplicate_allowed,
+        is_kpi=asset.is_kpi,
+        is_critical=asset.is_critical
+    )
+    db.add(new_raw_asset)
+    db.flush()
+
+    new_id_str = str(new_raw_asset.id)
 
     log_audit_event(
-        user_id=str(current_user["id"]), role=current_user["role"], action="RAW_ASSET_CREATED",
-        resource_type="RAW_ASSETS", resource_id=str(new_raw_assets_id), details=f"Asset {asset.name} has been created."
+        user_id=str(current_user["id"]),
+        role=current_user["role"],
+        action="RAW_ASSET_CREATED",
+        resource_type="RAW_ASSETS",
+        resource_id=new_id_str,
+        details=f"Asset {asset.name} has been created."
     )
-    new_id = cursor.fetchone()[0]
-    insert_asset_history(cursor, new_id, str(current_user["id"]), "CREATED", "Asset manually added to the system.")
-    cursor.connection.commit()
-    return {"message": "Raw Asset created", "id": new_id}
+    insert_asset_history(db, new_id_str, str(current_user["id"]), "CREATED", "Asset manually added to the system.")
+    db.commit()
+
+    return {"message": "Raw Asset created", "id": new_id_str}
 
 
-def get_single_raw_asset(cursor, raw_id: str, current_user: dict):
-    where_clauses = ["r.id = %s"]
-    params = [raw_id]
+def get_single_raw_asset(db: Session, raw_id: str, current_user: dict):
+    query = db.query(
+        RawAssets,
+        case((Assets.id.isnot(None), True), else_=False).label("is_promoted"),
+        Assets.is_archived,
+        Assets.archived_years,
+        RawAssetsSnowMetadata.snow_data
+    ).outerjoin(Assets, RawAssets.id == Assets.raw_asset_id)\
+     .outerjoin(RawAssetsSnowMetadata, RawAssets.id == RawAssetsSnowMetadata.correlation_id)\
+     .filter(RawAssets.id == raw_id)
 
     if current_user.get('role') == 'maintainer':
         lane_id = current_user.get('service_lane_id')
         if lane_id:
-            where_clauses.append("r.service_forecast_id = %s")
-            params.append(str(lane_id))
+            query = query.filter(RawAssets.service_forecast_id == str(lane_id))
         else:
-            where_clauses.append("r.service_forecast_id = '00000000-0000-0000-0000-000000000000'")
+            query = query.filter(RawAssets.service_forecast_id == '00000000-0000-0000-0000-000000000000')
 
-    where_str = "WHERE " + " AND ".join(where_clauses)
+    result = query.first()
+    if not result:
+        raise HTTPException(status_code=404, detail="Asset not found")
 
-    cursor.execute(f"""
-        SELECT r.id, r.name, r.description, r.business_critical, r.confidentiality_rating, 
-            r.integrity_rating, r.availability_rating, r.country_id, r.service_forecast_id, 
-            r.category_id, r.asset_type_id, r.facing_internet, r.duplicate_allowed, r.create_date, r.update_date,
-            r.snow_number, r.team_note, r.kiss24_asset_id, r.is_kpi, r.is_critical, r.snow_active, m.snow_data,
-            CASE WHEN a.id IS NOT NULL THEN true ELSE false END as is_promoted,
-            a.is_archived, a.archived_years
-        FROM raw_assets r
-        LEFT JOIN assets a ON r.id = a.raw_asset_id
-        LEFT JOIN raw_assets_snow_metadata m ON r.id = m.correlation_id
-        {where_str}
-    """, tuple(params))
-    row = cursor.fetchone()
-    if not row: raise HTTPException(status_code=404, detail="Asset not found")
+    r_asset, is_promoted, is_archived, archived_years, snow_data = result
 
-    columns = [col[0] for col in cursor.description]
-    asset_data = dict(zip(columns, row))
+    asset_data = {
+        "id": str(r_asset.id),
+        "name": r_asset.name,
+        "description": r_asset.description,
+        "business_critical": r_asset.business_critical,
+        "confidentiality_rating": r_asset.confidentiality_rating,
+        "integrity_rating": r_asset.integrity_rating,
+        "availability_rating": r_asset.availability_rating,
+        "country_id": str(r_asset.country_id) if r_asset.country_id else None,
+        "service_forecast_id": str(r_asset.service_forecast_id) if r_asset.service_forecast_id else None,
+        "category_id": str(r_asset.category_id) if r_asset.category_id else None,
+        "asset_type_id": str(r_asset.asset_type_id) if r_asset.asset_type_id else None,
+        "facing_internet": r_asset.facing_internet,
+        "duplicate_allowed": r_asset.duplicate_allowed,
+        "create_date": r_asset.create_date,
+        "update_date": r_asset.update_date,
+        "snow_number": r_asset.snow_number,
+        "team_note": r_asset.team_note,
+        "kiss24_asset_id": r_asset.kiss24_asset_id,
+        "is_kpi": r_asset.is_kpi,
+        "is_critical": r_asset.is_critical,
+        "snow_active": r_asset.snow_active,
+        "snow_data": snow_data,
+        "is_promoted": is_promoted,
+        "is_archived": is_archived,
+        "archived_years": archived_years
+    }
 
-    cursor.execute("""
-        SELECT h.id, h.action, h.details, h.timestamp, u.name as user_name
-        FROM asset_history h LEFT JOIN users u ON h.user_id = u.id
-        WHERE h.raw_asset_id = %s ORDER BY h.timestamp DESC
-    """, (raw_id,))
-    asset_data["history"] = [dict(zip([col[0] for col in cursor.description], h_row)) for h_row in cursor.fetchall()]
+    # Asset History
+    hist_rows = db.query(
+        AssetHistory.id,
+        AssetHistory.action,
+        AssetHistory.details,
+        AssetHistory.timestamp,
+        Users.name.label("user_name")
+    ).outerjoin(Users, AssetHistory.user_id == Users.id)\
+     .filter(AssetHistory.raw_asset_id == raw_id)\
+     .order_by(AssetHistory.timestamp.desc()).all()
 
-    cursor.execute("""
-        SELECT t.id, t.name, t.start_week, t.start_year, sl.name as service_lane, 
-            (SELECT string_agg(DISTINCT u.name, ', ') FROM assignments a JOIN users u ON a.user_id = u.id WHERE a.test_id = t.id) as pentesters,
-            (SELECT timestamp FROM test_history th WHERE th.test_id = t.id AND th.action = 'COMPLETED' ORDER BY timestamp DESC LIMIT 1) as completion_date
-        FROM tests t JOIN test_assets ta ON t.id = ta.test_id JOIN assets a ON ta.asset_id = a.id
-        LEFT JOIN services_lanes sl ON t.service_lane_id = sl.id
-        WHERE a.raw_asset_id = %s AND t.stages::text = 'COMPLETED' ORDER BY completion_date DESC NULLS LAST
-    """, (raw_id,))
-    asset_data["completed_tests"] = [dict(zip([col[0] for col in cursor.description], t_row)) for t_row in
-                                     cursor.fetchall()]
+    asset_data["history"] = [
+        {
+            "id": str(h[0]),
+            "action": h[1],
+            "details": h[2],
+            "timestamp": h[3],
+            "user_name": h[4]
+        }
+        for h in hist_rows
+    ]
+
+    # Completed Tests
+    pentesters_sub = db.query(
+        func.string_agg(func.distinct(Users.name), ', ')
+    ).select_from(Assignments).join(Users, Assignments.user_id == Users.id)\
+     .filter(Assignments.test_id == Tests.id).correlate(Tests).scalar_subquery()
+
+    completion_sub = db.query(TestHistory.timestamp)\
+     .filter(TestHistory.test_id == Tests.id, TestHistory.action == 'COMPLETED')\
+     .order_by(TestHistory.timestamp.desc()).limit(1).correlate(Tests).scalar_subquery()
+
+    test_rows = db.query(
+        Tests.id,
+        Tests.name,
+        Tests.start_week,
+        Tests.start_year,
+        ServiceLanes.name.label("service_lane"),
+        pentesters_sub.label("pentesters"),
+        completion_sub.label("completion_date")
+    ).join(TestAssets, Tests.id == TestAssets.test_id)\
+     .join(Assets, TestAssets.asset_id == Assets.id)\
+     .outerjoin(ServiceLanes, Tests.service_lane_id == ServiceLanes.id)\
+     .filter(Assets.raw_asset_id == raw_id, Tests.stages == TestStages.COMPLETED)\
+     .order_by(completion_sub.desc().nullslast()).all()
+
+    asset_data["completed_tests"] = [
+        {
+            "id": str(t[0]),
+            "name": t[1],
+            "start_week": t[2],
+            "start_year": t[3],
+            "service_lane": t[4],
+            "pentesters": t[5],
+            "completion_date": t[6]
+        }
+        for t in test_rows
+    ]
 
     return asset_data
 
 
-def update_raw_asset(cursor, raw_id: str, asset: RawAssetCreate, current_user: dict):
-    cursor.execute("""
-        SELECT r.name, r.facing_internet, r.duplicate_allowed, r.confidentiality_rating, r.integrity_rating, r.availability_rating,
-               c.name as country_name, s.name as service_name, cat.name as category_name, at.name as type_name,
-               r.snow_number, r.team_note, r.kiss24_asset_id, r.is_kpi, r.is_critical, r.snow_active, r.service_forecast_id
-        FROM raw_assets r
-        LEFT JOIN countries c ON r.country_id = c.id
-        LEFT JOIN services_lanes s ON r.service_forecast_id = s.id
-        LEFT JOIN service_categories cat ON r.category_id = cat.id
-        LEFT JOIN asset_types at ON r.asset_type_id = at.id
-        WHERE r.id = %s
-    """, (raw_id,))
-    old_state = cursor.fetchone()
-    if not old_state: raise HTTPException(status_code=404, detail="Asset not found")
+def update_raw_asset(db: Session, raw_id: str, asset: RawAssetCreate, current_user: dict):
+    r_asset = db.query(RawAssets).filter(RawAssets.id == raw_id).first()
+    if not r_asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
 
-    old_name, old_internet, old_duplicate_allowed, old_c, old_i, old_a, old_country, old_service, old_category, old_type, old_snow_number, old_team_note, old_kiss24_asset_id, old_is_kpi, old_is_critical, old_snow_active, old_service_id = old_state
+    verify_lane_access(current_user, str(r_asset.service_forecast_id))
 
-    verify_lane_access(current_user, str(old_service_id))
+    old_name = r_asset.name
+    old_internet = r_asset.facing_internet
+    old_duplicate_allowed = r_asset.duplicate_allowed
+    old_country = r_asset.countries.name if r_asset.countries else "None"
+    old_service = r_asset.services_lanes.name if r_asset.services_lanes else "None"
+    old_category = r_asset.service_categories.name if r_asset.service_categories else "None"
+    old_type = r_asset.asset_types.name if r_asset.asset_types else "None"
+    old_team_note = r_asset.team_note
+    old_kiss24_asset_id = r_asset.kiss24_asset_id
+
     changes = []
 
     if current_user.get('role') == 'maintainer':
-        cursor.execute(
-            "UPDATE raw_assets SET team_note=%s, kiss24_asset_id=%s, update_date=CURRENT_TIMESTAMP WHERE id=%s",
-            (asset.team_note, asset.kiss24_asset_id, raw_id))
-        if old_team_note != asset.team_note: changes.append(f"Team Note was updated")
-        if old_kiss24_asset_id != asset.kiss24_asset_id: changes.append(f"Kiss 24 asset uuid was updated")
-    else:
-        new_country, new_service, new_category, new_type = "None", "None", "None", "None"
-        old_country, old_service, old_category, old_type = old_country or "None", old_service or "None", old_category or "None", old_type or "None"
+        r_asset.team_note = asset.team_note
+        r_asset.kiss24_asset_id = asset.kiss24_asset_id
+        r_asset.update_date = aware_utcnow()
 
+        if old_team_note != asset.team_note:
+            changes.append("Team Note was updated")
+        if old_kiss24_asset_id != asset.kiss24_asset_id:
+            changes.append("Kiss 24 asset uuid was updated")
+    else:
         c_id = str(asset.country_id) if asset.country_id else None
         s_id = str(asset.service_forecast_id) if asset.service_forecast_id else None
         cat_id = str(asset.category_id) if asset.category_id else None
         at_id = str(asset.asset_type_id) if asset.asset_type_id else None
 
-        if c_id:
-            cursor.execute("SELECT name FROM countries WHERE id = %s", (c_id,))
-            res = cursor.fetchone()
-            if res: new_country = res[0]
-        if s_id:
-            cursor.execute("SELECT name FROM services_lanes WHERE id = %s", (s_id,))
-            res = cursor.fetchone()
-            if res: new_service = res[0]
-        if cat_id:
-            cursor.execute("SELECT name FROM service_categories WHERE id = %s", (cat_id,))
-            res = cursor.fetchone()
-            if res: new_category = res[0]
-        if at_id:
-            cursor.execute("SELECT name FROM asset_types WHERE id = %s", (at_id,))
-            res = cursor.fetchone()
-            if res: new_type = res[0]
+        new_country_obj = db.query(Country).filter(Country.id == c_id).first() if c_id else None
+        new_service_obj = db.query(ServiceLanes).filter(ServiceLanes.id == s_id).first() if s_id else None
+        new_category_obj = db.query(ServiceCategories).filter(ServiceCategories.id == cat_id).first() if cat_id else None
+        new_type_obj = db.query(AssetTypes).filter(AssetTypes.id == at_id).first() if at_id else None
 
-        cursor.execute("""
-            UPDATE raw_assets 
-            SET name=%s, description=%s, business_critical=%s, confidentiality_rating=%s, integrity_rating=%s, availability_rating=%s, 
-                country_id=%s, service_forecast_id=%s, category_id=%s, asset_type_id=%s, facing_internet=%s, duplicate_allowed=%s,
-                snow_number=%s, team_note=%s, kiss24_asset_id=%s, is_kpi=%s, is_critical=%s, snow_active=%s, update_date=CURRENT_TIMESTAMP
-            WHERE id=%s
-        """, (asset.name, asset.description, asset.business_critical, asset.confidentiality_rating,
-              asset.integrity_rating, asset.availability_rating, c_id, s_id, cat_id, at_id, asset.facing_internet,
-              asset.duplicate_allowed, asset.snow_number, asset.team_note, asset.kiss24_asset_id, asset.is_kpi,
-              asset.is_critical, asset.snow_active, raw_id))
+        new_country = new_country_obj.name if new_country_obj else "None"
+        new_service = new_service_obj.name if new_service_obj else "None"
+        new_category = new_category_obj.name if new_category_obj else "None"
+        new_type = new_type_obj.name if new_type_obj else "None"
+
+        r_asset.name = asset.name
+        r_asset.description = asset.description
+        r_asset.business_critical = asset.business_critical
+        r_asset.confidentiality_rating = asset.confidentiality_rating
+        r_asset.integrity_rating = asset.integrity_rating
+        r_asset.availability_rating = asset.availability_rating
+        r_asset.country_id = c_id
+        r_asset.service_forecast_id = s_id
+        r_asset.category_id = cat_id
+        r_asset.asset_type_id = at_id
+        r_asset.facing_internet = asset.facing_internet
+        r_asset.duplicate_allowed = asset.duplicate_allowed
+        r_asset.snow_number = asset.snow_number
+        r_asset.team_note = asset.team_note
+        r_asset.kiss24_asset_id = asset.kiss24_asset_id
+        r_asset.is_kpi = asset.is_kpi
+        r_asset.is_critical = asset.is_critical
+        r_asset.snow_active = asset.snow_active
+        r_asset.update_date = aware_utcnow()
 
         if old_name != asset.name: changes.append(f"Name: '{old_name}' ➔ '{asset.name}'")
         if old_type != new_type: changes.append(f"Type: '{old_type}' ➔ '{new_type}'")
         if old_country != new_country: changes.append(f"Country: '{old_country}' ➔ '{new_country}'")
         if old_service != new_service: changes.append(f"Service: '{old_service}' ➔ '{new_service}'")
         if old_category != new_category: changes.append(f"Category: '{old_category}' ➔ '{new_category}'")
-        if old_internet != asset.facing_internet: changes.append(
-            f"Internet Facing: {old_internet} ➔ {asset.facing_internet}")
-        if old_duplicate_allowed != asset.duplicate_allowed: changes.append(
-            f"Allow Duplicates: {old_duplicate_allowed} ➔ {asset.duplicate_allowed}")
+        if old_internet != asset.facing_internet: changes.append(f"Internet Facing: {old_internet} ➔ {asset.facing_internet}")
+        if old_duplicate_allowed != asset.duplicate_allowed: changes.append(f"Allow Duplicates: {old_duplicate_allowed} ➔ {asset.duplicate_allowed}")
 
     details_str = " | ".join(changes) if changes else "Description Updated."
-    insert_asset_history(cursor, raw_id, str(current_user["id"]), "UPDATED", details_str)
+    insert_asset_history(db, raw_id, str(current_user["id"]), "UPDATED", details_str)
 
     log_audit_event(
         user_id=str(current_user["id"]), role=current_user["role"], action="RAW_ASSET_UPDATED",
         resource_type="RAW_ASSETS", resource_id=str(raw_id),
-        details=f"Asset {asset.name} has been updated. ID: {raw_id} "
+        details=f"Asset {asset.name} has been updated. ID: {raw_id}"
     )
-    cursor.connection.commit()
+    db.commit()
     return {"message": "Raw Asset updated"}
 
 
-def delete_raw_asset(cursor, raw_id: str, year: int, current_user: dict):
-    cursor.execute('''
-        SELECT COUNT(t.id) FROM test_assets ta
-        JOIN tests t ON ta.test_id = t.id
-        JOIN assets a ON ta.asset_id = a.id
-        WHERE a.raw_asset_id = %s AND t.stages::text = 'COMPLETED'
-    ''', (str(raw_id),))
-    completed_count = cursor.fetchone()[0] or 0
+def delete_raw_asset(db: Session, raw_id: str, year: int, current_user: dict):
+    completed_count = db.query(func.count(Tests.id))\
+        .select_from(TestAssets)\
+        .join(Tests, TestAssets.test_id == Tests.id)\
+        .join(Assets, TestAssets.asset_id == Assets.id)\
+        .filter(Assets.raw_asset_id == raw_id, Tests.stages == TestStages.COMPLETED).scalar() or 0
 
     if completed_count > 0:
-        cursor.execute("SELECT archived_years FROM assets WHERE raw_asset_id = %s", (str(raw_id),))
-        arr_row = cursor.fetchone()
-        current_years = arr_row[0] if arr_row and arr_row[0] else []
+        pool_asset = db.query(Assets).filter(Assets.raw_asset_id == raw_id).first()
+        current_years = list(pool_asset.archived_years) if (pool_asset and pool_asset.archived_years) else []
         if year not in current_years:
             current_years.append(year)
 
-        cursor.execute("UPDATE assets SET archived_years = %s, is_archived = true WHERE raw_asset_id = %s",
-                       (current_years, str(raw_id)))
-        insert_asset_history(cursor, str(raw_id), str(current_user["id"]), "ARCHIVED",
-                             f"Asset safely archived in {year}.")
+        if pool_asset:
+            pool_asset.archived_years = current_years
+            pool_asset.is_archived = True
+
+        insert_asset_history(db, str(raw_id), str(current_user["id"]), "ARCHIVED", f"Asset safely archived in {year}.")
         action_msg = f"Asset safely archived to preserve {completed_count} completed tests."
         log_audit_event(user_id=str(current_user["id"]), role=current_user["role"], action="RAW_ASSET_ARCHIVED",
                         resource_type="RAW_ASSETS", resource_id=str(raw_id), details=f"Asset archived for {year}.")
     else:
-        cursor.execute("DELETE FROM raw_assets WHERE id = %s", (str(raw_id),))
+        raw_asset = db.query(RawAssets).filter(RawAssets.id == raw_id).first()
+        if raw_asset:
+            db.delete(raw_asset)
         action_msg = "Asset permanently deleted."
         log_audit_event(user_id=str(current_user["id"]), role=current_user["role"], action="RAW_ASSET_DELETED",
                         resource_type="RAW_ASSETS", resource_id=str(raw_id), details="Asset deleted.")
 
-    cursor.connection.commit()
+    db.commit()
     return {"message": action_msg}
 
 
-def restore_raw_asset(cursor, raw_id: str, year: int, current_user: dict):
-    cursor.execute("SELECT archived_years FROM assets WHERE raw_asset_id = %s", (str(raw_id),))
-    row = cursor.fetchone()
-    if not row: raise HTTPException(status_code=404, detail="Active pool asset not found.")
+def restore_raw_asset(db: Session, raw_id: str, year: int, current_user: dict):
+    pool_asset = db.query(Assets).filter(Assets.raw_asset_id == raw_id).first()
+    if not pool_asset:
+        raise HTTPException(status_code=404, detail="Active pool asset not found.")
 
-    current_years = row[0] if row[0] else []
+    current_years = list(pool_asset.archived_years) if pool_asset.archived_years else []
     if year in current_years:
         current_years.remove(year)
 
-    cursor.execute("UPDATE assets SET archived_years = %s, is_archived = false WHERE raw_asset_id = %s",
-                   (current_years, str(raw_id)))
-    insert_asset_history(cursor, str(raw_id), str(current_user["id"]), "RESTORED",
-                         f"Asset restored to the active pool for {year}.")
+    pool_asset.archived_years = current_years
+    pool_asset.is_archived = False
+
+    insert_asset_history(db, str(raw_id), str(current_user["id"]), "RESTORED", f"Asset restored to the active pool for {year}.")
     log_audit_event(user_id=str(current_user["id"]), role=current_user["role"], action="RAW_ASSET_RESTORED",
                     resource_type="RAW_ASSETS", resource_id=str(raw_id), details=f"Asset restored for {year}.")
 
-    cursor.connection.commit()
+    db.commit()
     return {"message": f"Asset successfully restored for {year}!"}
 
 
-def bulk_delete_raw_assets(cursor, req: BulkAssetRequest, year: int, current_user: dict):
+def bulk_delete_raw_assets(db: Session, req: BulkAssetRequest, year: int, current_user: dict):
     deleted_count = 0
     archived_count = 0
     for raw_id in req.raw_asset_ids:
-        cursor.execute('''
-            SELECT COUNT(t.id) FROM test_assets ta
-            JOIN tests t ON ta.test_id = t.id
-            JOIN assets a ON ta.asset_id = a.id
-            WHERE a.raw_asset_id = %s AND t.stages::text = 'COMPLETED'
-        ''', (str(raw_id),))
-        completed_count = cursor.fetchone()[0] or 0
+        completed_count = db.query(func.count(Tests.id))\
+            .select_from(TestAssets)\
+            .join(Tests, TestAssets.test_id == Tests.id)\
+            .join(Assets, TestAssets.asset_id == Assets.id)\
+            .filter(Assets.raw_asset_id == str(raw_id), Tests.stages == TestStages.COMPLETED).scalar() or 0
 
         if completed_count > 0:
-            cursor.execute("SELECT archived_years FROM assets WHERE raw_asset_id = %s", (str(raw_id),))
-            arr_row = cursor.fetchone()
-            current_years = arr_row[0] if arr_row and arr_row[0] else []
-            if year not in current_years: current_years.append(year)
+            pool_asset = db.query(Assets).filter(Assets.raw_asset_id == str(raw_id)).first()
+            current_years = list(pool_asset.archived_years) if (pool_asset and pool_asset.archived_years) else []
+            if year not in current_years:
+                current_years.append(year)
 
-            cursor.execute("UPDATE assets SET archived_years = %s, is_archived = true WHERE raw_asset_id = %s",
-                           (current_years, str(raw_id)))
-            insert_asset_history(cursor, str(raw_id), str(current_user["id"]), "ARCHIVED",
-                                 f"Asset safely archived in {year}.")
+            if pool_asset:
+                pool_asset.archived_years = current_years
+                pool_asset.is_archived = True
+
+            insert_asset_history(db, str(raw_id), str(current_user["id"]), "ARCHIVED", f"Asset safely archived in {year}.")
             archived_count += 1
         else:
-            cursor.execute("DELETE FROM raw_assets WHERE id = %s", (str(raw_id),))
+            raw_asset = db.query(RawAssets).filter(RawAssets.id == str(raw_id)).first()
+            if raw_asset:
+                db.delete(raw_asset)
             deleted_count += 1
 
     log_audit_event(user_id=str(current_user["id"]), role=current_user["role"], action="RAW_ASSET_BULK_ACTION",
                     resource_type="RAW_ASSETS", resource_id="BULK",
                     details=f"Bulk action: {deleted_count} deleted, {archived_count} archived.")
-    cursor.connection.commit()
+    db.commit()
     return {"message": f"Processed successfully: {deleted_count} deleted, {archived_count} archived."}
 
 
 ###################################
 # ---  THE PROMOTION ENGINE   --- #
 ###################################
-def promote_raw_assets_to_pool(cursor, req: BulkAssetRequest, current_user: dict):
+def promote_raw_assets_to_pool(db: Session, req: BulkAssetRequest, current_user: dict):
     promoted = 0
     for raw_id in req.raw_asset_ids:
-        cursor.execute("SELECT id FROM assets WHERE raw_asset_id = %s", (str(raw_id),))
-        if cursor.fetchone(): continue
+        existing = db.query(Assets).filter(Assets.raw_asset_id == str(raw_id)).first()
+        if existing:
+            continue
 
-        cursor.execute(
-            "SELECT name, country_id, service_forecast_id, category_id, asset_type_id FROM raw_assets WHERE id = %s",
-            (str(raw_id),))
-        raw_data = cursor.fetchone()
-        if not raw_data: continue
+        raw_asset = db.query(RawAssets).filter(RawAssets.id == str(raw_id)).first()
+        if not raw_asset:
+            continue
 
-        new_promote_id = str(uuid.uuid4())
-        cursor.execute("""
-            INSERT INTO assets (id, raw_asset_id, name, country_id, service_forecast_id, category_id, asset_type_id)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-        """, (new_promote_id, str(raw_id), raw_data[0], raw_data[1], raw_data[2], raw_data[3], raw_data[4]))
-
-        insert_asset_history(cursor, str(raw_id), str(current_user["id"]), "PROMOTED",
-                             "Asset moved to the Active testing pool.")
+        new_pool_asset = Assets(
+            raw_asset_id=str(raw_id),
+            name=raw_asset.name,
+            country_id=raw_asset.country_id,
+            service_forecast_id=raw_asset.service_forecast_id,
+            category_id=raw_asset.category_id,
+            asset_type_id=raw_asset.asset_type_id
+        )
+        db.add(new_pool_asset)
+        insert_asset_history(db, str(raw_id), str(current_user["id"]), "PROMOTED", "Asset moved to the Active testing pool.")
         promoted += 1
 
     log_audit_event(user_id=str(current_user["id"]), role=current_user["role"], action="RAW_ASSET_PROMOTED",
                     resource_type="RAW_ASSETS", resource_id="BULK", details=f"{promoted} assets promoted.")
-    cursor.connection.commit()
+    db.commit()
     return {"message": f"Successfully promoted {promoted} assets to the Active Pool."}
 
 
-def bulk_update_service_lane(cursor, req: BulkServiceUpdateRequest, current_user: dict):
+def bulk_update_service_lane(db: Session, req: BulkServiceUpdateRequest, current_user: dict):
     service_id = str(req.service_lane_id)
-    cursor.execute("SELECT name FROM services_lanes WHERE id = %s", (service_id,))
-    s_row = cursor.fetchone()
-    s_name = s_row[0] if s_row else "Unknown"
+    service_obj = db.query(ServiceLanes).filter(ServiceLanes.id == service_id).first()
+    s_name = service_obj.name if service_obj else "Unknown"
 
     for asset_id in req.asset_ids:
-        cursor.execute("SELECT raw_asset_id FROM assets WHERE id = %s", (str(asset_id),))
-        row = cursor.fetchone()
-        if not row: continue
-        raw_asset_id = str(row[0])
+        pool_asset = db.query(Assets).filter(Assets.id == str(asset_id)).first()
+        if not pool_asset:
+            continue
 
-        cursor.execute("UPDATE assets SET service_forecast_id = %s WHERE id = %s", (service_id, str(asset_id)))
-        cursor.execute("UPDATE raw_assets SET service_forecast_id = %s, update_date = CURRENT_TIMESTAMP WHERE id = %s",
-                       (service_id, raw_asset_id))
-        insert_asset_history(cursor, raw_asset_id, str(current_user["id"]), "UPDATED",
+        pool_asset.service_forecast_id = service_id
+
+        raw_asset = db.query(RawAssets).filter(RawAssets.id == pool_asset.raw_asset_id).first()
+        if raw_asset:
+            raw_asset.service_forecast_id = service_id
+            raw_asset.update_date = aware_utcnow()
+
+        insert_asset_history(db, str(pool_asset.raw_asset_id), str(current_user["id"]), "UPDATED",
                              f"Service Lane bulk updated to '{s_name}'.")
 
     log_audit_event(user_id=str(current_user["id"]), role=current_user["role"],
                     action="ASSET_UPDATED_SERVICE_LANE_BULK", resource_type="ASSETS", resource_id="BULK",
                     details=f"Bulk updated service lane to {service_id}.")
-    cursor.connection.commit()
+    db.commit()
     return {"message": f"Successfully updated service lane for {len(req.asset_ids)} assets."}
 
 
 ###################################
 # ---    ACTIVE ASSET POOL    --- #
 ###################################
-def get_active_asset_pool(cursor, year: int, current_user: dict):
+def get_active_asset_pool(db: Session, year: int, current_user: dict):
     if current_user['role'] == 'pentester':
         raise HTTPException(status_code=403, detail="Pentesters cannot view the unassigned asset inventory.")
 
-    where_clauses = []
-    params = [year, year, year, year]
+    is_assigned_sub = db.query(func.count(TestAssets.test_id) > 0)\
+        .select_from(TestAssets)\
+        .join(Tests, TestAssets.test_id == Tests.id)\
+        .filter(
+            TestAssets.asset_id == Assets.id,
+            or_(
+                Tests.stages == TestStages.NOT_PLANNED,
+                and_(
+                    Tests.stages.in_([TestStages.SCHEDULED, TestStages.IN_PROGRESS]),
+                    Tests.start_year == year
+                )
+            )
+        ).correlate(Assets).scalar_subquery()
+
+    in_backlog_sub = db.query(func.count(TestAssets.test_id) > 0)\
+        .select_from(TestAssets)\
+        .join(Tests, TestAssets.test_id == Tests.id)\
+        .filter(
+            TestAssets.asset_id == Assets.id,
+            Tests.stages == TestStages.NOT_PLANNED
+        ).correlate(Assets).scalar_subquery()
+
+    completed_count_sub = db.query(func.count(TestAssets.test_id))\
+        .select_from(TestAssets)\
+        .join(Tests, TestAssets.test_id == Tests.id)\
+        .filter(
+            TestAssets.asset_id == Assets.id,
+            Tests.stages == TestStages.COMPLETED,
+            Tests.start_year == year
+        ).correlate(Assets).scalar_subquery()
+
+    max_val_sub = db.query(func.max(literal_column("val")))\
+        .select_from(func.unnest(Assets.archived_years).alias("val"))\
+        .correlate(Assets).scalar_subquery()
+
+    is_archived_this_year_expr = and_(
+        Assets.archived_years.isnot(None),
+        or_(
+            Assets.archived_years.any(year),
+            and_(
+                Assets.is_archived == True,
+                year > max_val_sub
+            )
+        )
+    )
+
+    query = db.query(
+        Assets.id,
+        Assets.raw_asset_id,
+        RawAssets.name,
+        RawAssets.country_id,
+        Country.name.label("country"),
+        ServiceLanes.name.label("service_name"),
+        ServiceCategories.name.label("category_name"),
+        AssetTypes.name.label("asset_type_name"),
+        RawAssets.duplicate_allowed,
+        RawAssets.kiss24_asset_id,
+        RawAssets.is_kpi,
+        RawAssets.is_critical,
+        is_assigned_sub.label("is_assigned"),
+        in_backlog_sub.label("in_backlog"),
+        completed_count_sub.label("completed_count"),
+        is_archived_this_year_expr.label("is_archived_this_year")
+    ).join(RawAssets, Assets.raw_asset_id == RawAssets.id)\
+     .outerjoin(Country, RawAssets.country_id == Country.id)\
+     .outerjoin(ServiceLanes, RawAssets.service_forecast_id == ServiceLanes.id)\
+     .outerjoin(ServiceCategories, RawAssets.category_id == ServiceCategories.id)\
+     .outerjoin(AssetTypes, RawAssets.asset_type_id == AssetTypes.id)
 
     if current_user.get('role') == 'maintainer':
         lane_id = current_user.get('service_lane_id')
         if lane_id:
-            where_clauses.append("r.service_forecast_id = %s")
-            params.append(str(lane_id))
+            query = query.filter(RawAssets.service_forecast_id == str(lane_id))
         else:
-            where_clauses.append("r.service_forecast_id = '00000000-0000-0000-0000-000000000000'")
+            query = query.filter(RawAssets.service_forecast_id == '00000000-0000-0000-0000-000000000000')
 
-    where_str = "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
+    rows = query.order_by(RawAssets.name.asc()).all()
 
-    cursor.execute(f'''
-        SELECT a.id, a.raw_asset_id, r.name, r.country_id, c.name as country, s.name as service_name, 
-               cat.name as category_name, at.name as asset_type_name, r.duplicate_allowed, r.kiss24_asset_id,
-               r.is_kpi, r.is_critical,
-            (SELECT COUNT(*) > 0 FROM test_assets ta JOIN tests t ON ta.test_id = t.id WHERE ta.asset_id = a.id AND (t.stages::text = 'NOT_PLANNED' OR (t.stages::text IN ('SCHEDULED', 'IN_PROGRESS') AND t.start_year = %s))) as is_assigned,
-            (SELECT COUNT(*) > 0 FROM test_assets ta JOIN tests t ON ta.test_id = t.id WHERE ta.asset_id = a.id AND t.stages::text = 'NOT_PLANNED') as in_backlog,
-            (SELECT COUNT(*) FROM test_assets ta JOIN tests t ON ta.test_id = t.id WHERE ta.asset_id = a.id AND t.stages::text = 'COMPLETED' AND t.start_year = %s) as completed_count,
-            (a.archived_years IS NOT NULL AND (%s = ANY(a.archived_years) OR (a.is_archived = true AND %s > (SELECT MAX(val) FROM unnest(a.archived_years) as val)))) as is_archived_this_year
-        FROM assets a JOIN raw_assets r ON a.raw_asset_id = r.id
-        LEFT JOIN countries c ON r.country_id = c.id
-        LEFT JOIN services_lanes s ON r.service_forecast_id = s.id
-        LEFT JOIN service_categories cat ON r.category_id = cat.id
-        LEFT JOIN asset_types at ON r.asset_type_id = at.id
-        {where_str}
-        ORDER BY r.name ASC
-    ''', tuple(params))
+    return [
+        {
+            "id": str(r[0]),
+            "raw_asset_id": str(r[1]),
+            "name": r[2],
+            "country_id": str(r[3]) if r[3] else None,
+            "country": r[4],
+            "service_name": r[5],
+            "category_name": r[6],
+            "asset_type_name": r[7],
+            "duplicate_allowed": r[8],
+            "kiss24_asset_id": r[9],
+            "is_kpi": r[10],
+            "is_critical": r[11],
+            "is_assigned": r[12],
+            "in_backlog": r[13],
+            "completed_count": r[14],
+            "is_archived_this_year": r[15]
+        }
+        for r in rows
+    ]
 
-    columns = [col[0] for col in cursor.description]
-    return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
+def remove_from_active_pool(db: Session, asset_id: str, year: int, current_user: dict):
+    pool_asset = db.query(Assets).filter(Assets.id == asset_id).first()
+    if not pool_asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
 
-def remove_from_active_pool(cursor, asset_id: str, year: int, current_user: dict):
-    cursor.execute("SELECT raw_asset_id, name, archived_years FROM assets WHERE id = %s", (asset_id,))
-    row = cursor.fetchone()
-    if not row: raise HTTPException(status_code=404, detail="Asset not found")
-    raw_asset_id, asset_name, current_years = str(row[0]), row[1], row[2] or []
+    raw_asset_id = str(pool_asset.raw_asset_id)
+    current_years = list(pool_asset.archived_years) if pool_asset.archived_years else []
 
-    cursor.execute(
-        '''SELECT COUNT(t.id) FROM test_assets ta JOIN tests t ON ta.test_id = t.id WHERE ta.asset_id = %s AND t.stages::text = 'COMPLETED' ''',
-        (asset_id,))
-    completed_count = cursor.fetchone()[0]
+    completed_count = db.query(func.count(TestAssets.test_id))\
+        .select_from(TestAssets)\
+        .join(Tests, TestAssets.test_id == Tests.id)\
+        .filter(TestAssets.asset_id == asset_id, Tests.stages == TestStages.COMPLETED).scalar() or 0
 
     if completed_count > 0:
-        if year not in current_years: current_years.append(year)
-        cursor.execute("UPDATE assets SET archived_years = %s, is_archived = true WHERE id = %s",
-                       (current_years, asset_id))
+        if year not in current_years:
+            current_years.append(year)
+        pool_asset.archived_years = current_years
+        pool_asset.is_archived = True
         action_msg = f"Archived asset for {year} onwards (Preserving {completed_count} completed tests)."
-        insert_asset_history(cursor, raw_asset_id, str(current_user["id"]), "ARCHIVED",
-                             f"Asset archived from active pool in {year}.")
+        insert_asset_history(db, raw_asset_id, str(current_user["id"]), "ARCHIVED", f"Asset archived from active pool in {year}.")
     else:
-        cursor.execute("DELETE FROM assets WHERE id = %s", (asset_id,))
+        db.delete(pool_asset)
         action_msg = "Asset safely returned to raw data pool."
-        insert_asset_history(cursor, raw_asset_id, str(current_user["id"]), "RETURNED",
-                             "Asset safely returned to Raw Pool (0 tests).")
+        insert_asset_history(db, raw_asset_id, str(current_user["id"]), "RETURNED", "Asset safely returned to Raw Pool (0 tests).")
 
-    cursor.connection.commit()
+    db.commit()
     log_audit_event(user_id=str(current_user["id"]), role=current_user["role"], action="ASSET_REMOVE_FROM_ACTIVE_POOL",
                     resource_type="ASSETS", resource_id=str(asset_id), details=action_msg)
     return {"message": action_msg}
@@ -572,55 +771,78 @@ def full_background_sync_wrapper(user_id: str, user_role: str):
                         details=f"CRITICAL ERROR: {str(e)}")
 
 
+def get_last_snow_sync(db: Session, current_user: dict):
+    # .scalar() returns the actual datetime object, or None if the table is empty!
+    last_sync = db.query(func.max(RawAssetsSnowMetadata.last_snow_sync)).scalar()
+
+    return {"last_sync": last_sync}
+
+
+###################################
+# --- LEgacy --- #
+###################################
 def process_excel_import_sync(contents: bytes, filename: str, current_user: dict):
-    with db_cursor_context() as cursor:
-        if not cursor: return 0, ["Database connection unavailable"]
-        try:
-            df = pd.read_csv(io.BytesIO(contents)) if filename.lower().endswith('.csv') else pd.read_excel(
-                io.BytesIO(contents))
-            df = df.fillna('')
+    db = SessionLocal()
+    try:
+        df = pd.read_csv(io.BytesIO(contents)) if filename.lower().endswith('.csv') else pd.read_excel(io.BytesIO(contents))
+        df = df.fillna('')
 
-            cursor.execute("SELECT LOWER(name), id FROM asset_types")
-            types_map = {row[0]: row[1] for row in cursor.fetchall()}
-            cursor.execute("SELECT LOWER(name), LOWER(code), id FROM countries")
-            countries_map = {name: cid for name, code, cid in cursor.fetchall() if name}
-            cursor.execute("SELECT LOWER(name), id FROM services_lanes")
-            services_map = {row[0]: row[1] for row in cursor.fetchall()}
-            cursor.execute("SELECT LOWER(name), id FROM service_categories")
-            categories_map = {row[0]: row[1] for row in cursor.fetchall()}
-            cursor.execute("SELECT id FROM raw_assets")
-            existing_ids = {str(row[0]) for row in cursor.fetchall()}
+        types_map = {at.name.lower(): str(at.id) for at in db.query(AssetTypes).all() if at.name}
+        countries_map = {}
+        for c in db.query(Country).all():
+            if c.name: countries_map[c.name.lower()] = str(c.id)
+            if c.code: countries_map[c.code.lower()] = str(c.id)
+        services_map = {s.name.lower(): str(s.id) for s in db.query(ServiceLanes).all() if s.name}
+        categories_map = {cat.name.lower(): str(cat.id) for cat in db.query(ServiceCategories).all() if cat.name}
+        existing_ids = {str(r[0]) for r in db.query(RawAssets.id).all()}
 
-            success_count, failed_items = 0, []
+        success_count, failed_items = 0, []
 
-            for _, row in df.iterrows():
-                asset_id = sanitize_csv_injection(str(row.get('ID', '')).strip())
-                name = sanitize_csv_injection(str(row.get('Name', '')).strip())
-                if not name: continue
+        for _, row in df.iterrows():
+            asset_id = sanitize_csv_injection(str(row.get('ID', '')).strip())
+            name = sanitize_csv_injection(str(row.get('Name', '')).strip())
+            if not name: continue
 
-                type_id = types_map.get(sanitize_csv_injection(str(row.get('Asset Type', '')).strip().lower()))
-                country_id = countries_map.get(sanitize_csv_injection(str(row.get('Country', '')).strip().lower()))
+            type_str = sanitize_csv_injection(str(row.get('Asset Type', '')).strip().lower())
+            country_str = sanitize_csv_injection(str(row.get('Country', '')).strip().lower())
 
-                if not type_id or not country_id:
-                    failed_items.append(f"{name} (Unknown Type/Country)")
-                    continue
+            type_id = types_map.get(type_str)
+            country_id = countries_map.get(country_str)
 
-                try:
-                    new_id = asset_id if asset_id else str(uuid.uuid4())
-                    if asset_id and asset_id in existing_ids:
-                        cursor.execute("UPDATE raw_assets SET name=%s, update_date=CURRENT_TIMESTAMP WHERE id=%s",
-                                       (name, asset_id))
-                    else:
-                        cursor.execute(
-                            "INSERT INTO raw_assets (id, name, country_id, asset_type_id, create_date) VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)",
-                            (new_id, name, country_id, type_id))
-                        existing_ids.add(new_id)
-                    success_count += 1
-                except Exception:
-                    cursor.connection.rollback()
-                    failed_items.append(f"{name} (DB Error)")
+            if not type_id or not country_id:
+                failed_items.append(f"{name} (Unknown Type/Country)")
+                continue
 
-            cursor.connection.commit()
-            return success_count, failed_items
-        except Exception as e:
-            return 0, [f"File formatting error: {str(e)}"]
+            try:
+                new_id = asset_id if asset_id else str(uuid.uuid4())
+                if asset_id and asset_id in existing_ids:
+                    raw_asset = db.query(RawAssets).filter(RawAssets.id == asset_id).first()
+                    if raw_asset:
+                        raw_asset.name = name
+                        raw_asset.update_date = aware_utcnow()
+                        insert_asset_history(db, asset_id, str(current_user["id"]), "IMPORTED", "Asset metadata updated via bulk Excel import.")
+                else:
+                    new_raw_asset = RawAssets(
+                        id=new_id,
+                        name=name,
+                        country_id=country_id,
+                        asset_type_id=type_id,
+                        create_date=aware_utcnow()
+                    )
+                    db.add(new_raw_asset)
+                    insert_asset_history(db, new_id, str(current_user["id"]), "IMPORTED", "Asset created via bulk Excel import.")
+                    existing_ids.add(new_id)
+
+                db.flush()
+                success_count += 1
+            except Exception:
+                db.rollback()
+                failed_items.append(f"{name} (DB Error)")
+
+        db.commit()
+        return success_count, failed_items
+    except Exception as e:
+        db.rollback()
+        return 0, [f"File formatting error: {str(e)}"]
+    finally:
+        db.close()

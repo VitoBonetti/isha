@@ -1,61 +1,82 @@
 import uuid
 from datetime import datetime
 from fastapi import HTTPException, status
+from sqlalchemy.orm import Session
+from sqlalchemy import func, case, and_, or_, cast, String
+from sqlalchemy.exc import IntegrityError
+from models.territories import Country, Region
+from models.raw_assets import RawAssets
+from models.assets import Assets
+from models.tests import Tests, TestAssets, TestStages
+from models.services import ServiceLanes
 from audit_logger import log_audit_event
 
 
-def get_countries(cursor, current_user: dict):
+def get_countries(db: Session, current_user: dict):
     if current_user.get('role') == 'pentester':
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"{current_user.get('role')} cannot access country data.")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail=f"{current_user.get('role')} cannot access country data.")
 
-    cursor.execute("""
-        SELECT c.id, c.code, c.name, c.is_active, c.region_id, r.name as region_name, c.kiss24_uuid, c.is_team
-        FROM countries c 
-        LEFT JOIN regions r ON c.region_id = r.id 
-        ORDER BY c.code
-    """)
+    countries = (db.query(Country, Region.name.label("region_name"))
+                 .outerjoin(Region, Country.region_id == Region.id)
+                 .order_by(Country.code.asc()).all())
+
     return [{
-        "id": r[0],
-        "code": r[1],
-        "name": r[2],
-        "is_active": r[3],
-        "region_id": r[4],
-        "region_name": r[5],
-        "kiss24_uuid": r[6],
-        "is_team": r[7]
-    } for r in cursor.fetchall()]
+        "id": str(c.Country.id),
+        "code": c.Country.code,
+        "name": c.Country.name,
+        "is_active": c.Country.is_active,
+        "region_id": str(c.Country.region_id) if c.Country.region_id else None,
+        "region_name": c.region_name,
+        "kiss24_uuid": c.Country.kiss24_uuid,
+        "is_team": c.Country.is_team
+    } for c in countries]
 
 
-def create_country(cursor, c, current_user: dict):
+def create_country(db: Session, c, current_user: dict):
     reg_id = str(c.region_id) if c.region_id else None
-    new_country_id = str(uuid.uuid4())
+
     try:
-        cursor.execute(
-            "INSERT INTO countries (id, code, name, region_id, is_active, kiss24_uuid, is_team) VALUES (%s, %s, %s, %s, %s, %s, %s)",
-            (new_country_id, c.code, c.name, reg_id, c.is_active, c.kiss24_uuid, c.is_team)
+        new_country = Country(
+            code=c.code,
+            name=c.name,
+            region_id=reg_id,
+            is_active=c.is_active,
+            kiss24_uuid=c.kiss24_uuid,
+            is_team=c.is_team
         )
-        cursor.connection.commit()
+        db.add(new_country)
+        db.commit()
+        db.refresh(new_country)
 
         log_audit_event(
             user_id=str(current_user["id"]),
             role=current_user["role"],
             action="COUNTRY_CREATED",
             resource_type="COUNTRY",
-            resource_id=str(new_country_id),
-            details=f"Country {c.name} with ID {new_country_id} has been created in region {reg_id}."
+            resource_id=str(new_country.id),
+            details=f"Country {new_country.name} with ID {new_country.id} has been created in region {reg_id}."
         )
 
-        return {"id": new_country_id, "message": "Country created successfully."}
-    except Exception as e:
-        cursor.connection.rollback()
+        return {"id": str(new_country.id), "message": "Country created successfully."}
+    except IntegrityError:
+        db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Database error (Code might already exist)")
 
 
-def update_country(cursor, country_id: str, c, current_user: dict):
-    cursor.execute(
-        "UPDATE countries SET code=%s, name=%s, region_id=%s, is_active=%s, kiss24_uuid=%s, is_team=%s WHERE id=%s",
-        (c.code, c.name, c.region_id, c.is_active, c.kiss24_uuid, c.is_team, country_id)
-    )
+def update_country(db: Session, country_id: str, c, current_user: dict):
+    country = db.query(Country).filter(Country.id == country_id).first()
+    if not country:
+        raise HTTPException(status_code=404, detail="Country not found.")
+
+    country.code = c.code
+    country.name = c.name
+    country.region_id = str(c.region_id) if c.region_id else None
+    country.is_active = c.is_active
+    country.kiss24_uuid = c.kiss24_uuid
+    country.is_team = c.is_team
+
+    db.commit()
 
     log_audit_event(
         user_id=str(current_user["id"]),
@@ -66,13 +87,16 @@ def update_country(cursor, country_id: str, c, current_user: dict):
         details=f"Country with ID {country_id} has been updated."
     )
 
-    cursor.connection.commit()
     return {"message": "Country updated successfully."}
 
 
-def delete_country(cursor, country_id: str, current_user: dict):
-    cursor.execute("DELETE FROM countries WHERE id = %s", (country_id,))
-    cursor.connection.commit()
+def delete_country(db: Session, country_id: str, current_user: dict):
+    country = db.query(Country).filter(Country.id == country_id).first()
+    if not country:
+        raise HTTPException(status_code=404, detail="Country not found.")
+
+    db.delete(country)
+    db.commit()
 
     log_audit_event(
         user_id=str(current_user["id"]),
@@ -86,159 +110,164 @@ def delete_country(cursor, country_id: str, current_user: dict):
     return {"message": "Country deleted."}
 
 
-def get_country_analytics(cursor, year: int):
+def get_country_analytics(db: Session, year: int):
     if not year:
         year = datetime.now().year
 
-    cursor.execute("""
-        SELECT 
-            c.id, c.code, c.name, r.name as region_name,
-            (SELECT COUNT(*) FROM raw_assets ra WHERE ra.country_id = c.id) as raw_assets_count,
+    # Define the isolated subqueries
+    raw_subq = (db.query(func.count(RawAssets.id))
+                .filter(RawAssets.country_id == Country.id).correlate(Country).scalar_subquery())
 
-            (SELECT COUNT(*) FROM assets a 
-             JOIN raw_assets ra ON a.raw_asset_id = ra.id 
-             WHERE ra.country_id = c.id) as pool_assets_count,
+    pool_subq = (db.query(func.count(Assets.id))
+                 .join(RawAssets, Assets.raw_asset_id == RawAssets.id)
+                 .filter(RawAssets.country_id == Country.id).correlate(Country).scalar_subquery())
 
-            (SELECT COUNT(*) FROM test_assets ta
-             JOIN tests t ON ta.test_id = t.id
-             JOIN assets a ON ta.asset_id = a.id
-             JOIN raw_assets ra ON a.raw_asset_id = ra.id
-             WHERE ra.country_id = c.id 
-               AND t.stages::text = 'COMPLETED' 
-               AND t.start_year = %s) as completed_tests_count,
+    completed_subq = (db.query(func.count(TestAssets.test_id))
+                      .join(Tests, TestAssets.test_id == Tests.id)
+                      .join(Assets, TestAssets.asset_id == Assets.id)
+                      .join(RawAssets, Assets.raw_asset_id == RawAssets.id)
+                      .filter(RawAssets.country_id == Country.id, Tests.stages == TestStages.COMPLETED, Tests.start_year == year)
+                      .correlate(Country).scalar_subquery())
 
-            (SELECT COUNT(*) FROM test_assets ta
-             JOIN tests t ON ta.test_id = t.id
-             JOIN assets a ON ta.asset_id = a.id
-             JOIN raw_assets ra ON a.raw_asset_id = ra.id
-             WHERE ra.country_id = c.id 
-               AND t.stages::text IN ('SCHEDULED', 'IN_PROGRESS') 
-               AND t.start_year = %s) as active_tests_count
+    active_subq = (db.query(func.count(TestAssets.test_id))
+                   .join(Tests, TestAssets.test_id == Tests.id)
+                   .join(Assets, TestAssets.asset_id == Assets.id)
+                   .join(RawAssets, Assets.raw_asset_id == RawAssets.id)
+                   .filter(RawAssets.country_id == Country.id, Tests.stages.in_([TestStages.SCHEDULED, TestStages.IN_PROGRESS]),
+                           Tests.start_year == year)
+                   .correlate(Country).scalar_subquery())
 
-        FROM countries c
-        LEFT JOIN regions r ON c.region_id = r.id
-        WHERE c.is_active = TRUE
-        ORDER BY completed_tests_count DESC, pool_assets_count DESC, c.name ASC
-    """, (year, year))
+    # Build the main query
+    results = (db.query(
+        Country.id, Country.code, Country.name, Region.name.label("region_name"),
+        raw_subq.label("raw_assets_count"),
+        pool_subq.label("pool_assets_count"),
+        completed_subq.label("completed_tests_count"),
+        active_subq.label("active_tests_count")
+    ).outerjoin(Region, Country.region_id == Region.id)
+               .filter(Country.is_active == True)
+               .order_by(completed_subq.desc(), pool_subq.desc(), Country.name.asc()).all())
 
-    columns = [col[0] for col in cursor.description]
-    return [dict(zip(columns, row)) for row in cursor.fetchall()]
+    return [{
+        "id": str(r.id), "code": r.code, "name": r.name, "region_name": r.region_name,
+        "raw_assets_count": r.raw_assets_count or 0,
+        "pool_assets_count": r.pool_assets_count or 0,
+        "completed_tests_count": r.completed_tests_count or 0,
+        "active_tests_count": r.active_tests_count or 0
+    } for r in results]
 
 
-def get_available_years(cursor):
-    cursor.execute("""
-        SELECT DISTINCT start_year 
-        FROM tests 
-        WHERE start_year IS NOT NULL 
-        ORDER BY start_year DESC
-    """)
-    years = [r[0] for r in cursor.fetchall()]
+def get_available_years(db: Session):
+    years = (db.query(Tests.start_year)
+             .filter(Tests.start_year.isnot(None))
+             .distinct()
+             .order_by(Tests.start_year.desc()).all())
+
     if not years:
-        years = [datetime.now().year]
-    return years
+        return [datetime.now().year]
+    return [r[0] for r in years]
 
 
-def get_dashboard_analytics(cursor, year: int, country_id: str, region_id: str, service_lane_id: str):
+def get_dashboard_analytics(db: Session, year: int, country_id: str, region_id: str, service_lane_id: str):
     if not year:
         year = datetime.now().year
 
     # --- KPI QUERY ---
-    kpi_query = f"""
-        SELECT 
-            COUNT(DISTINCT ra.id) as raw,
-            COUNT(DISTINCT a.id) as pool,
-            COUNT(DISTINCT CASE WHEN t.stages::text = 'COMPLETED' AND t.start_year = %s THEN t.id END) as completed,
-            COUNT(DISTINCT CASE WHEN t.stages::text IN ('NOT_PLANNED', 'SCHEDULED', 'IN_PROGRESS') THEN t.id END) as backlog,
-            COUNT(DISTINCT CASE WHEN t.stages::text IN ('SCHEDULED', 'IN_PROGRESS') AND t.start_year = %s THEN t.id END) as planned,
-            COUNT(DISTINCT CASE WHEN t.stages::text IN ('NOT_PLANNED', 'SCHEDULED', 'IN_PROGRESS') AND (t.start_year IS NULL OR t.start_year != %s) THEN t.id END) as true_backlog,
-            COUNT(DISTINCT CASE 
-                WHEN (t.stages::text = 'COMPLETED' AND t.start_year = %s) 
-                OR (t.stages::text IN ('NOT_PLANNED', 'SCHEDULED', 'IN_PROGRESS')) 
-                THEN t.id 
-            END) as total_tests_year,
-            COUNT(DISTINCT CASE WHEN t.stages::text = 'STOPPED' AND t.start_year = %s THEN t.id END) as stopped
-        FROM raw_assets ra
-        {'LEFT JOIN countries c ON ra.country_id = c.id' if region_id else ''}
-        LEFT JOIN assets a ON ra.id = a.raw_asset_id
-        LEFT JOIN test_assets ta ON a.id = ta.asset_id
-        LEFT JOIN tests t ON ta.test_id = t.id
-        WHERE 1=1
-    """
+    kpi_query = (db.query(
+        func.count(func.distinct(RawAssets.id)).label("raw"),
+        func.count(func.distinct(Assets.id)).label("pool"),
+        func.count(func.distinct(
+            case((and_(Tests.stages == TestStages.COMPLETED, Tests.start_year == year), Tests.id)))).label("completed"),
+        func.count(func.distinct(case(
+            (Tests.stages.in_([TestStages.NOT_PLANNED, TestStages.SCHEDULED, TestStages.IN_PROGRESS]),
+             Tests.id)))).label("backlog"),
+        func.count(func.distinct(case(
+            (and_(Tests.stages.in_([TestStages.SCHEDULED, TestStages.IN_PROGRESS]), Tests.start_year == year),
+             Tests.id)))).label("planned"),
+        func.count(func.distinct(case(
+            (and_(Tests.stages.in_([TestStages.NOT_PLANNED, TestStages.SCHEDULED, TestStages.IN_PROGRESS]),
+                  or_(Tests.start_year == None, Tests.start_year != year)), Tests.id)))).label("true_backlog"),
+        func.count(func.distinct(case((or_(and_(Tests.stages == TestStages.COMPLETED, Tests.start_year == year),
+                                           Tests.stages.in_(
+                                               [TestStages.NOT_PLANNED, TestStages.SCHEDULED, TestStages.IN_PROGRESS])),
+                                       Tests.id)))).label("total_tests_year"),
+        func.count(
+            func.distinct(case((and_(Tests.stages == TestStages.STOPPED, Tests.start_year == year), Tests.id)))).label(
+            "stopped")
+    ).select_from(RawAssets)
+                 .outerjoin(Assets, RawAssets.id == Assets.raw_asset_id)
+                 .outerjoin(TestAssets, Assets.id == TestAssets.asset_id)
+                 .outerjoin(Tests, TestAssets.test_id == Tests.id))
 
-    kpi_params = [year, year, year, year, year]
+    if region_id: kpi_query = kpi_query.outerjoin(Country, RawAssets.country_id == Country.id)
+    if country_id: kpi_query = kpi_query.filter(RawAssets.country_id == country_id)
+    if region_id: kpi_query = kpi_query.filter(Country.region_id == region_id)
+    if service_lane_id: kpi_query = kpi_query.filter(Tests.service_lane_id == service_lane_id)
 
-    if country_id:
-        kpi_query += " AND ra.country_id = %s"
-        kpi_params.append(country_id)
-    if region_id:
-        kpi_query += " AND c.region_id = %s"
-        kpi_params.append(region_id)
-    if service_lane_id:
-        kpi_query += " AND t.service_lane_id = %s"
-        kpi_params.append(service_lane_id)
-
-    cursor.execute(kpi_query, tuple(kpi_params))
-    kpi_row = cursor.fetchone()
+    kpi_row = kpi_query.first()
     kpis = {
-        "raw": kpi_row[0], "pool": kpi_row[1], "completed": kpi_row[2],
-        "backlog": kpi_row[3], "planned": kpi_row[4], "true_backlog": kpi_row[5],
-        "total_tests_year": kpi_row[6], "stopped": kpi_row[7]
+        "raw": kpi_row.raw, "pool": kpi_row.pool, "completed": kpi_row.completed,
+        "backlog": kpi_row.backlog, "planned": kpi_row.planned, "true_backlog": kpi_row.true_backlog,
+        "total_tests_year": kpi_row.total_tests_year, "stopped": kpi_row.stopped
     }
 
     # --- PIE CHART QUERY ---
-    pie_query = f"""
-        SELECT COALESCE(sl.name, 'Not Set') as name, COUNT(DISTINCT t.id) as value
-        FROM tests t
-        JOIN test_assets ta ON t.id = ta.test_id
-        JOIN assets a ON ta.asset_id = a.id
-        JOIN raw_assets ra ON a.raw_asset_id = ra.id
-        {'LEFT JOIN countries c ON ra.country_id = c.id' if region_id else ''}
-        LEFT JOIN services_lanes sl ON t.service_lane_id = sl.id
-        WHERE 1=1 AND t.stages::text != 'STOPPED'
-    """
-    pie_params = []
-    if country_id:
-        pie_query += " AND ra.country_id = %s"
-        pie_params.append(country_id)
-    if region_id:
-        pie_query += " AND c.region_id = %s"
-        pie_params.append(region_id)
-    if service_lane_id:
-        pie_query += " AND t.service_lane_id = %s"
-        pie_params.append(service_lane_id)
+    pie_query = (db.query(
+        func.coalesce(ServiceLanes.name, 'Not Set').label("name"),
+        func.count(func.distinct(Tests.id)).label("value")
+    ).select_from(Tests)
+                 .join(TestAssets, Tests.id == TestAssets.test_id)
+                 .join(Assets, TestAssets.asset_id == Assets.id)
+                 .join(RawAssets, Assets.raw_asset_id == RawAssets.id))
 
-    pie_query += " GROUP BY sl.name ORDER BY value DESC"
-    cursor.execute(pie_query, tuple(pie_params))
-    pie_data = [{"name": r[0], "value": r[1]} for r in cursor.fetchall()]
+    if region_id: pie_query = pie_query.outerjoin(Country, RawAssets.country_id == Country.id)
+
+    pie_query = (pie_query.outerjoin(ServiceLanes, Tests.service_lane_id == ServiceLanes.id)
+                 .filter(Tests.stages != TestStages.STOPPED))
+
+    if country_id: pie_query = pie_query.filter(RawAssets.country_id == country_id)
+    if region_id: pie_query = pie_query.filter(Country.region_id == region_id)
+    if service_lane_id: pie_query = pie_query.filter(Tests.service_lane_id == service_lane_id)
+
+    pie_data = [{"name": r.name, "value": r.value} for r in pie_query.group_by(ServiceLanes.name).order_by(func.count(func.distinct(Tests.id)).desc()).all()]
 
     # --- TREND CHART QUERY ---
-    trend_query = f"""
-        SELECT 
-            EXTRACT(MONTH FROM TO_DATE(t.start_year::text || '0101', 'YYYYMMDD') + ((t.start_week - 1) * 7)) as month_num,
-            COUNT(DISTINCT t.id) as tests
-        FROM tests t
-        JOIN test_assets ta ON t.id = ta.test_id
-        JOIN assets a ON ta.asset_id = a.id
-        JOIN raw_assets ra ON a.raw_asset_id = ra.id
-        {'LEFT JOIN countries c ON ra.country_id = c.id' if region_id else ''}
-        WHERE t.start_year = %s AND t.stages::text IN ('SCHEDULED', 'IN_PROGRESS', 'COMPLETED')
-    """
-    trend_params = [year]
-    if country_id:
-        trend_query += " AND ra.country_id = %s"
-        trend_params.append(country_id)
-    if region_id:
-        trend_query += " AND c.region_id = %s"
-        trend_params.append(region_id)
-    if service_lane_id:
-        trend_query += " AND t.service_lane_id = %s"
-        trend_params.append(service_lane_id)
+    trend_query = (db.query(
+        Tests.start_year,
+        Tests.start_week,
+        func.count(func.distinct(Tests.id)).label("tests")
+    ).select_from(Tests)
+                   .join(TestAssets, Tests.id == TestAssets.test_id)
+                   .join(Assets, TestAssets.asset_id == Assets.id)
+                   .join(RawAssets, Assets.raw_asset_id == RawAssets.id))
 
-    trend_query += " GROUP BY month_num ORDER BY month_num"
-    cursor.execute(trend_query, tuple(trend_params))
+    if region_id: trend_query = trend_query.outerjoin(Country, RawAssets.country_id == Country.id)
+
+    trend_query = trend_query.filter(
+        Tests.start_year == year,
+        Tests.stages.in_([TestStages.SCHEDULED, TestStages.IN_PROGRESS, TestStages.COMPLETED])
+    )
+
+    if country_id: trend_query = trend_query.filter(RawAssets.country_id == country_id)
+    if region_id: trend_query = trend_query.filter(Country.region_id == region_id)
+    if service_lane_id: trend_query = trend_query.filter(Tests.service_lane_id == service_lane_id)
+
+    # Group safely by the base columns!
+    trend_results = trend_query.group_by(Tests.start_year, Tests.start_week).all()
+
+    # Calculate the months dynamically in Python
+    monthly_data = {}
+    for r in trend_results:
+        if r.start_year and r.start_week:
+            try:
+                # Convert ISO year and week to a standard month
+                dt = datetime.fromisocalendar(r.start_year, r.start_week, 1)
+                m = dt.month
+                monthly_data[m] = monthly_data.get(m, 0) + r.tests
+            except ValueError:
+                continue
 
     months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-    monthly_data = {int(r[0]): r[1] for r in cursor.fetchall() if r[0]}
     trend_data = [{"month": months[i - 1], "tests": monthly_data.get(i, 0)} for i in range(1, 13)]
 
     return {"kpis": kpis, "pie_data": pie_data, "trend_data": trend_data}

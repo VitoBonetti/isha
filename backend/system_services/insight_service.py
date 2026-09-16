@@ -1,21 +1,28 @@
 from datetime import datetime, timedelta
+from sqlalchemy.orm import Session
+from sqlalchemy import func, case, or_, and_
+from models.tests import Tests, TestStages, Assignments, TestAssets
+from models.users import Users
+from models.events import Events
+from models.territories import Locations
+from models.services import ServiceLanes, ServiceCategories, ServiceCategoryGoals, ServiceLaneGoals, ServicePlaceholders
+from models.assets import Assets
+from models.raw_assets import RawAssets
 
 
-def get_available_years(cursor):
+def get_available_years(db: Session):
     """Fetches the distinct list of years that have scheduled tests."""
-    cursor.execute("""
-        SELECT DISTINCT start_year 
-        FROM tests 
-        WHERE start_year IS NOT NULL 
-        ORDER BY start_year DESC
-    """)
-    years = [r[0] for r in cursor.fetchall()]
+    years = (db.query(Tests.start_year)
+             .filter(Tests.start_year.isnot(None))
+             .distinct()
+             .order_by(Tests.start_year.desc()).all())
+
     if not years:
-        years = [datetime.now().year]
-    return years
+        return [datetime.now().year]
+    return [r[0] for r in years]
 
 
-def get_yearly_insights(cursor, year: int):
+def get_yearly_insights(db: Session, year: int):
     """Calculates gross capacity, time off, wasted credits, and forecast breakdowns."""
     if not year:
         year = datetime.now().year
@@ -33,8 +40,7 @@ def get_yearly_insights(cursor, year: int):
         past_weeks = list(range(1, current_week_real))
 
     # --- GROSS CAPACITY, TIME OFF & WASTED ---
-    cursor.execute("SELECT id, name, base_capacity, start_year, start_week, end_year, end_week, location_id FROM users")
-    users = cursor.fetchall()
+    users = db.query(Users).all()
 
     total_gross_credits = 0.0
     events_cost = {"National Holiday": 0.0, "Team Day": 0.0, "Personal Time Off": 0.0, "Sick Day": 0.0}
@@ -43,11 +49,16 @@ def get_yearly_insights(cursor, year: int):
 
     wasted_breakdown = {}
     total_wasted = 0.0
-
     total_weeks_in_year = datetime(year, 12, 28).isocalendar()[1]
 
-    for u_id, u_name, base_cap, s_year, s_week, e_year, e_week, loc_id in users:
-        base = float(base_cap or 0.0)
+    global_loc = db.query(Locations).filter(Locations.name == 'Global').first()
+    global_loc_id = str(global_loc.id) if global_loc else None
+
+    for user in users:
+        base = float(user.base_capacity or 0.0)
+        s_year, s_week = user.start_year, user.start_week
+        e_year, e_week = user.end_year, user.end_week
+
         start = s_week if s_year == year else 1
         end = e_week if e_year == year else total_weeks_in_year
         if (s_year and year < s_year) or (e_year and year > e_year): continue
@@ -55,19 +66,24 @@ def get_yearly_insights(cursor, year: int):
         active_weeks = max(0, end - start + 1)
         total_gross_credits += (active_weeks * base)
 
-        safe_loc_id = str(loc_id) if loc_id else None
+        safe_loc_id = str(user.location_id) if user.location_id else None
 
-        cursor.execute("""
-            SELECT event_type, start_date, end_date FROM events 
-            WHERE (user_id = %s 
-               OR event_type = 'team_day' 
-               OR (event_type = 'national_holiday' AND (
-                   location_id = %s OR 
-                   location_id IS NULL OR 
-                   location_id = (SELECT id FROM locations WHERE name = 'Global' LIMIT 1)
-               )))
-              AND EXTRACT(YEAR FROM start_date) = %s
-        """, (str(u_id), safe_loc_id, year))
+        # Fetch Events
+        user_events = db.query(Events).filter(
+            func.extract('YEAR', Events.start_date) == year,
+            or_(
+                Events.user_id == str(user.id),
+                Events.event_type == 'team_day',
+                and_(
+                    Events.event_type == 'national_holiday',
+                    or_(
+                        Events.location_id == safe_loc_id,
+                        Events.location_id.is_(None),
+                        Events.location_id == global_loc_id
+                    )
+                )
+            )
+        ).all()
 
         def is_active(y, w):
             if s_year and (y < s_year or (y == s_year and w < s_week)): return False
@@ -76,11 +92,13 @@ def get_yearly_insights(cursor, year: int):
 
         time_off_per_week = {}
 
-        for e_type, e_start, e_end in cursor.fetchall():
-            actual_days_off = 0
-            d = e_start
+        for event in user_events:
+            if not event.start_date or not event.end_date: continue
 
-            while d <= e_end:
+            actual_days_off = 0
+            d = event.start_date
+
+            while d <= event.end_date:
                 iso = d.isocalendar()
                 if iso[0] == year and is_active(iso[0], iso[1]) and d.weekday() < 5:
                     actual_days_off += 1
@@ -88,18 +106,17 @@ def get_yearly_insights(cursor, year: int):
                 d += timedelta(days=1)
 
             cost = actual_days_off * (base * 0.2)
-            friendly_name = event_mapping.get(e_type, e_type)
+            friendly_name = event_mapping.get(event.event_type, event.event_type)
             if friendly_name in events_cost:
                 events_cost[friendly_name] += cost
 
-        cursor.execute("""
-            SELECT week_number, SUM(allocated_credits) 
-            FROM assignments a 
-            JOIN tests t ON a.test_id = t.id 
-            WHERE a.user_id = %s AND a.year = %s AND t.stages::text != 'STOPPED' 
-            GROUP BY week_number
-        """, (str(u_id), year))
-        user_assignments = {row[0]: float(row[1]) for row in cursor.fetchall()}
+        # User Assignments
+        assignments = (db.query(Assignments.week_number, func.sum(Assignments.allocated_credits))
+                       .join(Tests, Assignments.test_id == Tests.id)
+                       .filter(Assignments.user_id == str(user.id), Assignments.year == year, Tests.stages != TestStages.STOPPED)
+                       .group_by(Assignments.week_number).all())
+
+        user_assignments = {r[0]: float(r[1]) for r in assignments}
 
         u_wasted = 0.0
         for w in past_weeks:
@@ -110,96 +127,90 @@ def get_yearly_insights(cursor, year: int):
                 u_wasted += waste
 
         if u_wasted > 0:
-            wasted_breakdown[u_name] = round(u_wasted, 1)
+            wasted_breakdown[user.name] = round(u_wasted, 1)
             total_wasted += u_wasted
 
     total_time_off = sum(events_cost.values())
 
     # --- FORECAST BREAKDOWNS ---
-    cursor.execute("""
-        SELECT sl.name, SUM(a.allocated_credits) 
-        FROM assignments a 
-        JOIN tests t ON a.test_id = t.id 
-        JOIN services_lanes sl ON t.service_lane_id = sl.id 
-        WHERE a.year = %s AND sl.is_active = TRUE AND t.stages::text != 'STOPPED'
-        GROUP BY sl.name
-    """, (year,))
-    scheduled_breakdown = {row[0]: float(row[1]) for row in cursor.fetchall()}
+    sched_breakdown = (db.query(ServiceLanes.name, func.sum(Assignments.allocated_credits))
+                       .join(Tests, Assignments.test_id == Tests.id)
+                       .join(ServiceLanes, Tests.service_lane_id == ServiceLanes.id)
+                       .filter(Assignments.year == year, ServiceLanes.is_active == True, Tests.stages != TestStages.STOPPED)
+                       .group_by(ServiceLanes.name).all())
+
+    scheduled_breakdown = {r[0]: float(r[1]) for r in sched_breakdown}
     total_scheduled = sum(scheduled_breakdown.values())
 
-    cursor.execute("""
-        SELECT sl.name, SUM(t.credits_per_week * t.duration_weeks)
-        FROM tests t
-        JOIN services_lanes sl ON t.service_lane_id = sl.id
-        WHERE t.start_year = %s 
-          AND t.stages::text IN ('SCHEDULED', 'IN_PROGRESS') 
-          AND sl.is_active = TRUE
-          AND NOT EXISTS (
-              SELECT 1 FROM assignments a WHERE a.test_id = t.id AND a.year = %s
-          )
-        GROUP BY sl.name
-    """, (year, year))
-    unassigned_sched_breakdown = {row[0]: float(row[1]) for row in cursor.fetchall()}
+    # Unassigned Scheduled Tests
+    has_assignment_subq = (db.query(Assignments.id)
+                           .filter(Assignments.test_id == Tests.id, Assignments.year == year)
+                           .correlate(Tests).exists())
+
+    unassigned_breakdown = (db.query(ServiceLanes.name, func.sum(Tests.credits_per_week * Tests.duration_weeks))
+                            .join(ServiceLanes, Tests.service_lane_id == ServiceLanes.id)
+                            .filter(Tests.start_year == year,
+                                    Tests.stages.in_([TestStages.SCHEDULED, TestStages.IN_PROGRESS]),
+                                    ServiceLanes.is_active == True,
+                                    ~has_assignment_subq)
+                            .group_by(ServiceLanes.name).all())
+
+    unassigned_sched_breakdown = {r[0]: float(r[1]) for r in unassigned_breakdown}
     total_unassigned_sched = sum(unassigned_sched_breakdown.values())
 
-    cursor.execute("""
-            SELECT SUM(sp.credits)
-            FROM service_placeholders sp
-            JOIN services_lanes sl ON sp.service_lane_id = sl.id
-            WHERE sp.year = %s AND sl.is_active = TRUE
-        """, (year,))
-    ph_sum = cursor.fetchone()[0]
-    total_placeholders = float(ph_sum or 0.0)
+    # Placeholders
+    ph_sum = (db.query(func.sum(ServicePlaceholders.credits))
+              .join(ServiceLanes, ServicePlaceholders.service_lane_id == ServiceLanes.id)
+              .filter(ServicePlaceholders.year == year, ServiceLanes.is_active == True).scalar())
 
+    total_placeholders = float(ph_sum or 0.0)
     if total_placeholders > 0:
         unassigned_sched_breakdown["Placeholders (All Lanes)"] = total_placeholders
 
-    cursor.execute("""
-        SELECT sl.name, SUM(t.credits_per_week * t.duration_weeks) 
-        FROM tests t 
-        JOIN services_lanes sl ON t.service_lane_id = sl.id 
-        WHERE t.stages::text = 'NOT_PLANNED' AND sl.is_active = TRUE
-        GROUP BY sl.name
-    """)
-    backlog_breakdown = {row[0]: float(row[1]) for row in cursor.fetchall()}
+    # Backlog Breakdown
+    backlog_bdown = (db.query(ServiceLanes.name, func.sum(Tests.credits_per_week * Tests.duration_weeks))
+                     .join(ServiceLanes, Tests.service_lane_id == ServiceLanes.id)
+                     .filter(Tests.stages == TestStages.NOT_PLANNED, ServiceLanes.is_active == True)
+                     .group_by(ServiceLanes.name).all())
+
+    backlog_breakdown = {r[0]: float(r[1]) for r in backlog_bdown}
     total_backlog = sum(backlog_breakdown.values())
 
     # --- TARGET VS ACTUAL ---
-    cursor.execute("""
-        SELECT sl.id, sl.name, COALESCE(slg.target_goal, 0) as target_goal, sl.theme_color, sl.is_active
-        FROM services_lanes sl
-        LEFT JOIN service_lane_goals slg ON sl.id = slg.service_lane_id AND slg.year = %s
-        ORDER BY sl.display_order ASC, sl.name ASC
-    """, (year,))
+    services = (db.query(ServiceLanes, ServiceLaneGoals.target_goal)
+                .outerjoin(ServiceLaneGoals, and_(ServiceLanes.id == ServiceLaneGoals.service_lane_id, ServiceLaneGoals.year == year))
+                .order_by(ServiceLanes.display_order.asc(), ServiceLanes.name.asc()).all())
+
     services_data = []
 
-    for s_id, s_name, s_goal, s_color, s_active in cursor.fetchall():
+    for s, target_goal in services:
+        s_id_str = str(s.id)
         s_dict = {
-            "id": str(s_id), "name": s_name, "target_goal": s_goal or 0,
-            "theme_color": s_color, "is_active": s_active, "categories": []
+            "id": s_id_str, "name": s.name, "target_goal": target_goal or 0,
+            "theme_color": s.theme_color, "is_active": s.is_active, "categories": []
         }
 
-        cursor.execute("""
-            SELECT 
-                COUNT(DISTINCT CASE WHEN stages::text = 'NOT_PLANNED' THEN id END),
-                COUNT(DISTINCT CASE WHEN stages::text IN ('SCHEDULED', 'IN_PROGRESS') AND start_year = %s THEN id END),
-                COUNT(DISTINCT CASE WHEN stages::text = 'COMPLETED' AND start_year = %s THEN id END),
-                COALESCE(SUM(CASE 
-                    WHEN stages::text = 'NOT_PLANNED' THEN (credits_per_week * duration_weeks)
-                    WHEN stages::text IN ('SCHEDULED', 'IN_PROGRESS', 'COMPLETED') AND start_year = %s THEN (credits_per_week * duration_weeks)
-                    ELSE 0 
-                END), 0)
-            FROM tests WHERE service_lane_id = %s
-        """, (year, year, year, str(s_id)))
-        counts = cursor.fetchone()
+        counts = db.query(
+            func.count(func.distinct(case((Tests.stages == TestStages.NOT_PLANNED, Tests.id)))),
+            func.count(func.distinct(case(
+                (and_(Tests.stages.in_([TestStages.SCHEDULED, TestStages.IN_PROGRESS]), Tests.start_year == year),
+                 Tests.id)))),
+            func.count(
+                func.distinct(case((and_(Tests.stages == TestStages.COMPLETED, Tests.start_year == year), Tests.id)))),
+            func.coalesce(func.sum(case(
+                (Tests.stages == TestStages.NOT_PLANNED, Tests.credits_per_week * Tests.duration_weeks),
+                (and_(Tests.stages.in_([TestStages.SCHEDULED, TestStages.IN_PROGRESS, TestStages.COMPLETED]),
+                      Tests.start_year == year), Tests.credits_per_week * Tests.duration_weeks),
+                else_=0
+            )), 0)
+        ).filter(Tests.service_lane_id == s_id_str).first()
 
-        cursor.execute("""
-            SELECT COALESCE(SUM(a.allocated_credits), 0)
-            FROM assignments a
-            JOIN tests t ON a.test_id = t.id
-            WHERE t.service_lane_id = %s AND a.year = %s AND t.stages::text != 'STOPPED'
-        """, (str(s_id), year))
-        assigned_credits = cursor.fetchone()[0]
+        assigned_credits = (db.query(func.coalesce(func.sum(Assignments.allocated_credits), 0))
+                            .join(Tests, Assignments.test_id == Tests.id)
+                            .filter(Tests.service_lane_id == s_id_str,
+                                    Assignments.year == year,
+                                    Tests.stages != TestStages.STOPPED)
+                            .scalar())
 
         s_dict.update({
             "unplanned": counts[0],
@@ -209,101 +220,82 @@ def get_yearly_insights(cursor, year: int):
             "assigned_credits": float(assigned_credits)
         })
 
-        cursor.execute("""
-            SELECT c.id, c.name, COALESCE(cg.target_goal, 0) as target_goal 
-            FROM service_categories c
-            LEFT JOIN service_category_goals cg ON c.id = cg.category_id AND cg.year = %s
-            WHERE c.service_lane_id = %s
-        """, (year, str(s_id)))
-        cats = cursor.fetchall()
+        # Category Breakdown
+        cats = (db.query(ServiceCategories, ServiceCategoryGoals.target_goal)
+                .outerjoin(ServiceCategoryGoals,
+                           and_(ServiceCategories.id == ServiceCategoryGoals.category_id,
+                                ServiceCategoryGoals.year == year))
+                .filter(ServiceCategories.service_lane_id == s_id_str).all())
+
         cat_sum_goals = 0
 
+        # ONLY run category and uncategorized math if this lane actually HAS categories!
         if cats:
-            for c_id, c_name, c_goal in cats:
-                cat_sum_goals += (c_goal or 0)
+            cat_sum_goals = sum((cg or 0) for _, cg in cats)
 
-                cursor.execute("""
-                    WITH CategoryTests AS (
-                        SELECT DISTINCT t.id, t.stages, t.start_year, t.credits_per_week, t.duration_weeks
-                        FROM tests t
-                        LEFT JOIN test_assets ta ON t.id = ta.test_id
-                        LEFT JOIN assets a ON ta.asset_id = a.id
-                        LEFT JOIN raw_assets ra ON a.raw_asset_id = ra.id
-                        WHERE t.service_lane_id = %s AND ra.category_id = %s
-                    )
-                    SELECT 
-                        COUNT(CASE WHEN stages::text = 'NOT_PLANNED' THEN id END),
-                        COUNT(CASE WHEN stages::text IN ('SCHEDULED', 'IN_PROGRESS') AND start_year = %s THEN id END),
-                        COUNT(CASE WHEN stages::text = 'COMPLETED' AND start_year = %s THEN id END),
-                        COALESCE(SUM(CASE 
-                            WHEN stages::text = 'NOT_PLANNED' THEN (credits_per_week * duration_weeks)
-                            WHEN stages::text IN ('SCHEDULED', 'IN_PROGRESS', 'COMPLETED') AND start_year = %s THEN (credits_per_week * duration_weeks)
-                            ELSE 0 
-                        END), 0)
-                    FROM CategoryTests
-                """, (str(s_id), str(c_id), year, year, year))
-                c_counts = cursor.fetchone()
+            for cat, c_goal in cats:
+                # 1. Create the deduplicated subquery explicitly
+                c_subq = (db.query(
+                    Tests.id, Tests.stages, Tests.start_year, Tests.credits_per_week, Tests.duration_weeks)
+                          .outerjoin(TestAssets, Tests.id == TestAssets.test_id)
+                          .outerjoin(Assets, TestAssets.asset_id == Assets.id)
+                          .outerjoin(RawAssets, Assets.raw_asset_id == RawAssets.id)
+                          .filter(Tests.service_lane_id == s_id_str, RawAssets.category_id == str(cat.id))
+                          .distinct().subquery())
 
-                cursor.execute("""
-                    WITH CategoryTests AS (
-                        SELECT DISTINCT t.id
-                        FROM tests t
-                        LEFT JOIN test_assets ta ON t.id = ta.test_id
-                        LEFT JOIN assets a ON ta.asset_id = a.id
-                        LEFT JOIN raw_assets ra ON a.raw_asset_id = ra.id
-                        WHERE t.service_lane_id = %s AND ra.category_id = %s AND t.stages::text != 'STOPPED'
-                    )
-                    SELECT COALESCE(SUM(a.allocated_credits), 0)
-                    FROM assignments a
-                    JOIN CategoryTests ct ON a.test_id = ct.id
-                    WHERE a.year = %s
-                """, (str(s_id), str(c_id), year))
-                c_assigned = cursor.fetchone()[0]
+                # 2. Reference the subquery's columns (.c) in the outer query
+                c_counts = db.query(
+                    func.count(case((c_subq.c.stages == TestStages.NOT_PLANNED, c_subq.c.id))),
+                    func.count(case((and_(c_subq.c.stages.in_([TestStages.SCHEDULED, TestStages.IN_PROGRESS]),
+                                          c_subq.c.start_year == year), c_subq.c.id))),
+                    func.count(case(
+                        (and_(c_subq.c.stages == TestStages.COMPLETED, c_subq.c.start_year == year), c_subq.c.id))),
+                    func.coalesce(func.sum(case(
+                        (c_subq.c.stages == TestStages.NOT_PLANNED,
+                         c_subq.c.credits_per_week * c_subq.c.duration_weeks),
+                        (and_(c_subq.c.stages.in_([TestStages.SCHEDULED, TestStages.IN_PROGRESS, TestStages.COMPLETED]),
+                              c_subq.c.start_year == year), c_subq.c.credits_per_week * c_subq.c.duration_weeks),
+                        else_=0
+                    )), 0)
+                ).first()
+
+                c_assigned = (db.query(func.coalesce(func.sum(Assignments.allocated_credits), 0))
+                              .join(c_subq, Assignments.test_id == c_subq.c.id)
+                              .filter(Assignments.year == year, c_subq.c.stages != TestStages.STOPPED).scalar())
 
                 s_dict["categories"].append({
-                    "id": str(c_id), "name": c_name, "target_goal": c_goal or 0,
+                    "id": str(cat.id), "name": cat.name, "target_goal": c_goal or 0,
                     "unplanned": c_counts[0] or 0, "planned": c_counts[1] or 0, "completed": c_counts[2] or 0,
                     "theoretical_credits": float(c_counts[3]), "assigned_credits": float(c_assigned)
                 })
 
-            cursor.execute("""
-                WITH CategoryTests AS (
-                    SELECT DISTINCT t.id, t.stages, t.start_year, t.credits_per_week, t.duration_weeks
-                    FROM tests t
-                    LEFT JOIN test_assets ta ON t.id = ta.test_id
-                    LEFT JOIN assets a ON ta.asset_id = a.id
-                    LEFT JOIN raw_assets ra ON a.raw_asset_id = ra.id
-                    WHERE t.service_lane_id = %s AND ra.category_id IS NULL
-                )
-                SELECT 
-                    COUNT(CASE WHEN stages::text = 'NOT_PLANNED' THEN id END),
-                    COUNT(CASE WHEN stages::text IN ('SCHEDULED', 'IN_PROGRESS') AND start_year = %s THEN id END),
-                    COUNT(CASE WHEN stages::text = 'COMPLETED' AND start_year = %s THEN id END),
-                    COALESCE(SUM(CASE 
-                        WHEN stages::text = 'NOT_PLANNED' THEN (credits_per_week * duration_weeks)
-                        WHEN stages::text IN ('SCHEDULED', 'IN_PROGRESS', 'COMPLETED') AND start_year = %s THEN (credits_per_week * duration_weeks)
-                        ELSE 0 
-                    END), 0)
-                FROM CategoryTests
-            """, (str(s_id), year, year, year))
-            u_counts = cursor.fetchone()
+            # --- Uncategorized Logic (Now safely indented!) ---
+            u_subq = (db.query(
+                Tests.id, Tests.stages, Tests.start_year, Tests.credits_per_week, Tests.duration_weeks)
+                      .outerjoin(TestAssets, Tests.id == TestAssets.test_id)
+                      .outerjoin(Assets, TestAssets.asset_id == Assets.id)
+                      .outerjoin(RawAssets, Assets.raw_asset_id == RawAssets.id)
+                      .filter(Tests.service_lane_id == s_id_str, RawAssets.category_id.is_(None))
+                      .distinct().subquery())
+
+            u_counts = db.query(
+                func.count(case((u_subq.c.stages == TestStages.NOT_PLANNED, u_subq.c.id))),
+                func.count(case((and_(u_subq.c.stages.in_([TestStages.SCHEDULED, TestStages.IN_PROGRESS]),
+                                      u_subq.c.start_year == year), u_subq.c.id))),
+                func.count(
+                    case((and_(u_subq.c.stages == TestStages.COMPLETED, u_subq.c.start_year == year), u_subq.c.id))),
+                func.coalesce(func.sum(case(
+                    (u_subq.c.stages == TestStages.NOT_PLANNED, u_subq.c.credits_per_week * u_subq.c.duration_weeks),
+                    (and_(u_subq.c.stages.in_([TestStages.SCHEDULED, TestStages.IN_PROGRESS, TestStages.COMPLETED]),
+                          u_subq.c.start_year == year), u_subq.c.credits_per_week * u_subq.c.duration_weeks),
+                    else_=0
+                )), 0)
+            ).first()
 
             if sum(u_counts[:3]) > 0:
-                cursor.execute("""
-                    WITH CategoryTests AS (
-                        SELECT DISTINCT t.id
-                        FROM tests t
-                        LEFT JOIN test_assets ta ON t.id = ta.test_id
-                        LEFT JOIN assets a ON ta.asset_id = a.id
-                        LEFT JOIN raw_assets ra ON a.raw_asset_id = ra.id
-                        WHERE t.service_lane_id = %s AND ra.category_id IS NULL AND t.stages::text != 'STOPPED'
-                    )
-                    SELECT COALESCE(SUM(a.allocated_credits), 0)
-                    FROM assignments a
-                    JOIN CategoryTests ct ON a.test_id = ct.id
-                    WHERE a.year = %s
-                """, (str(s_id), year))
-                u_assigned = cursor.fetchone()[0]
+                u_assigned = (db.query(func.coalesce(func.sum(Assignments.allocated_credits), 0))
+                              .join(u_subq, Assignments.test_id == u_subq.c.id)
+                              .filter(Assignments.year == year, u_subq.c.stages != TestStages.STOPPED).scalar())
 
                 s_dict["categories"].append({
                     "id": "uncategorized", "name": "Uncategorized", "target_goal": 0,
@@ -311,7 +303,7 @@ def get_yearly_insights(cursor, year: int):
                     "theoretical_credits": float(u_counts[3]), "assigned_credits": float(u_assigned)
                 })
 
-        s_dict["goal_warning"] = (s_goal or 0) < cat_sum_goals
+        s_dict["goal_warning"] = (target_goal or 0) < cat_sum_goals
         services_data.append(s_dict)
 
     return {
@@ -328,7 +320,8 @@ def get_yearly_insights(cursor, year: int):
             "backlog": {"total": total_backlog, "breakdown": backlog_breakdown},
             "time_off": {"total": total_time_off, "breakdown": events_cost},
             "wasted": {"total": total_wasted, "breakdown": wasted_breakdown},
-            "net_capacity": total_gross_credits - (total_scheduled + total_unassigned_sched + total_backlog + total_time_off + total_wasted)
+            "net_capacity": total_gross_credits - (
+                        total_scheduled + total_unassigned_sched + total_backlog + total_time_off + total_wasted)
         },
         "services": services_data
     }

@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, Query
 from typing import Optional
-from database import get_db_cursor
+from database import get_db
+from sqlalchemy.orm import Session
 from routers.auth import require_admin
 from system_services import document_service
 
@@ -16,8 +17,8 @@ def get_all_documents(
         sort_by: str = Query("synced_at"),
         sort_dir: str = Query("desc"),
         current_user: dict = Depends(require_admin),
-        cursor=Depends(get_db_cursor)
+        db: Session = Depends(get_db)
 ):
     return document_service.get_all_documents(
-        cursor, page, limit, search, service_lane_id, doc_type, sort_by, sort_dir
+        db, page, limit, search, service_lane_id, doc_type, sort_by, sort_dir
     )
