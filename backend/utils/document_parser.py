@@ -6,6 +6,7 @@ from docx import Document
 from pptx import Presentation
 from googleapiclient.discovery import build
 import google.auth
+from audit_logger import log_audit_event
 
 # --- MIME TYPE MAPPINGS ---
 GOOGLE_MIME_TYPES = {
@@ -42,14 +43,38 @@ def extract_text_from_drive_file(drive_file_id: str, mime_type: str) -> str:
 
         MAX_FILE_SIZE_MB = 25
         if file_size_bytes > (MAX_FILE_SIZE_MB * 1024 * 1024):
+            log_audit_event(
+                user_id="SYSTEM",
+                role="SYSTEM",
+                action="DOCUMENT_PARSING_EXTRACT_TEXT_ERROR",
+                resource_type="DOCUMENT_PARSING",
+                resource_id="DOCUMENT_PARSING",
+                details=f"File exceeds maximum allowed ingestion size of {MAX_FILE_SIZE_MB}MB. (Detected: {file_size_bytes / (1024 * 1024):.1f}MB). Parsing aborted to prevent memory exhaustion"
+            )
             raise ValueError(
                 f"File exceeds maximum allowed ingestion size of {MAX_FILE_SIZE_MB}MB "
                 f"(Detected: {file_size_bytes / (1024 * 1024):.1f}MB). "
                 f"Parsing aborted to prevent memory exhaustion."
             )
     except ValueError as ve:
+        log_audit_event(
+            user_id="SYSTEM",
+            role="SYSTEM",
+            action="DOCUMENT_PARSING_EXTRACT_VALUE_ERROR",
+            resource_type="DOCUMENT_PARSING",
+            resource_id="DOCUMENT_PARSING",
+            details=f"Document Parsing: Value error: {ve}"
+        )
         raise ve  # Rethrow our explicit size limit error
-    except Exception:
+    except Exception as ex:
+        log_audit_event(
+            user_id="SYSTEM",
+            role="SYSTEM",
+            action="DOCUMENT_PARSING_EXTRACT_EXCEPTION",
+            resource_type="DOCUMENT_PARSING",
+            resource_id="DOCUMENT_PARSING",
+            details=f"Ignore standard API fetch errors and proceed to download attempt: {ex}"
+        )
         # Ignore standard API fetch errors and proceed to download attempt
         pass
 
@@ -129,7 +154,15 @@ def parse_zip_file(zip_stream: io.BytesIO) -> str:
                     with z.open(filename) as f:
                         file_text = f.read().decode('utf-8', errors='ignore')
                         text_content.append(f"--- FILE: {filename} ---\n{file_text}\n")
-                except Exception:
+                except Exception as ex:
+                    log_audit_event(
+                        user_id="SYSTEM",
+                        role="SYSTEM",
+                        action="DOCUMENT_PARSING_ZIP_FILE_EXCEPTION",
+                        resource_type="DOCUMENT_PARSING",
+                        resource_id="PARSING_ZIP",
+                        details=f"Exception parsing zip file: {ex}. Continue"
+                    )
                     continue
 
     return "\n".join(text_content)
