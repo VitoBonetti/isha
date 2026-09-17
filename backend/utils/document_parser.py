@@ -1,12 +1,16 @@
 import io
 import zipfile
+import tempfile
+import os
 import pandas as pd
 import fitz  # PyMuPDF
 from docx import Document
 from pptx import Presentation
 from googleapiclient.discovery import build
 import google.auth
+from googleapiclient.http import MediaIoBaseDownload
 from audit_logger import log_audit_event
+
 
 # --- MIME TYPE MAPPINGS ---
 GOOGLE_MIME_TYPES = {
@@ -35,9 +39,32 @@ def extract_text_from_drive_file(drive_file_id: str, mime_type: str) -> str:
     """
     service = get_drive_service()
 
+    # --- 1. HANDLE LARGE VIDEO FILES (STREAM DIRECTLY TO DISK) ---
+    if mime_type.startswith('video/'):
+        from system_services.rag_service import analyze_video_from_disk
+        ext = ".mp4" if "mp4" in mime_type else ".webm"
+        tmp_path = ""
+        try:
+            # Stream chunk by chunk into a local temp file on disk
+            request = service.files().get_media(fileId=drive_file_id, supportsAllDrives=True)
+            with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp_file:
+                tmp_path = tmp_file.name
+                downloader = MediaIoBaseDownload(tmp_file, request, chunksize=1024 * 1024 * 8)  # 8MB chunks
+                done = False
+                while not done:
+                    status, done = downloader.next_chunk()
+
+            # Pass the disk file directly to Gemini's File API
+            return analyze_video_from_disk(tmp_path, mime_type)
+        except Exception as e:
+            return f"[Video Processing Error: {str(e)}]"
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
     # Enforce 25MB File Size Limit
     try:
-        file_metadata = service.files().get(fileId=drive_file_id, fields="size").execute()
+        file_metadata = service.files().get(fileId=drive_file_id, fields="size", supportsAllDrives=True).execute()
         # Native Google Docs/Sheets don't return a 'size' field, so we default to 0
         file_size_bytes = int(file_metadata.get('size', 0))
 
@@ -92,12 +119,18 @@ def extract_text_from_drive_file(drive_file_id: str, mime_type: str) -> str:
         return request.execute().decode('utf-8')
 
     # 2. HANDLE STANDARD BLOB FILES (DOWNLOAD)
-    request = service.files().get_media(fileId=drive_file_id)
+    request = service.files().get_media(fileId=drive_file_id, supportsAllDrives=True)
     file_bytes = request.execute()
     file_stream = io.BytesIO(file_bytes)
 
     # 3. PARSE BLOB FILES BASED ON MIME TYPE
-    if mime_type == 'application/pdf':
+    #Handle Images and Videos
+
+    if mime_type.startswith('image/'):
+        from system_services.rag_service import analyze_multimodal_content
+        return analyze_multimodal_content(file_bytes, mime_type)
+
+    elif mime_type == 'application/pdf':
         doc = fitz.open(stream=file_bytes, filetype="pdf")
         text = "\n".join([page.get_text() for page in doc])
         return text

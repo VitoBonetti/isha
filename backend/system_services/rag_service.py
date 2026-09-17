@@ -25,6 +25,70 @@ from utils.timeaware import aware_utcnow
 client = genai.Client(api_key=get_secret(os.environ.get("LUIGI_KEY_NAME")))
 
 
+def analyze_multimodal_content(file_bytes: bytes, mime_type: str) -> str:
+    """Uses Gemini to extract objective text and details from image files."""
+    # 1. Image processing
+    if mime_type.startswith("image/"):
+        prompt = (
+            "You are an objective technical analyst reviewing visual evidence. Describe this image factually and in detail. "
+            "If it is an architecture diagram, outline the specific components and network flow. "
+            "If it is a software screenshot, describe the UI elements and visible data. "
+            "Do NOT assume or imagine a vulnerability. Do NOT invent details that are not visible. "
+            "Extract any visible text, URLs, IP addresses, terminal commands, or code snippets exactly as they appear."
+        )
+        try:
+            response = client.models.generate_content(
+                model='gemini-3.8-flash',
+                contents=[
+                    prompt,
+                    types.Part.from_bytes(data=file_bytes, mime_type=mime_type)
+                ]
+            )
+            return f"--- IMAGE ANALYSIS ---\n{response.text}\n"
+        except Exception as e:
+            return f"[Image Analysis Error: {str(e)}]"
+
+    return ""
+
+
+def analyze_video_from_disk(video_path: str, mime_type: str) -> str:
+    """Uploads a disk-based video file to Gemini File API and fetches a timestamped transcript."""
+    prompt = (
+        "You are an objective technical analyst reviewing a video recording. "
+        "Provide a strictly factual, timestamped timeline of events occurring in the video. "
+        "Include a full transcript of any spoken words or presentations. "
+        "If the video shows a screen recording, document the tools used, terminal commands typed, and URLs visited. "
+        "Do NOT imagine details, skip segments, or assume the video contains a vulnerability."
+    )
+
+    try:
+        # Upload directly from disk (bypasses memory limits)
+        gemini_file = client.files.upload(file=video_path)
+
+        # Poll Google's servers while the video track is processed
+        while str(gemini_file.state).endswith("PROCESSING"):
+            time.sleep(3)
+            gemini_file = client.files.get(name=gemini_file.name)
+
+        if str(gemini_file.state).endswith("FAILED"):
+            return "[Video Analysis Failed: Gemini server could not process the video file]"
+
+        response = client.models.generate_content(
+            model='gemini-3.8-flash',
+            contents=[prompt, gemini_file]
+        )
+
+        # Cleanup file from Google's File API storage
+        try:
+            client.files.delete(name=gemini_file.name)
+        except Exception:
+            pass
+
+        return f"--- VIDEO TRANSCRIPT & TIMELINE ---\n{response.text}\n"
+    except Exception as e:
+        return f"[Video Analysis Error: {str(e)}]"
+
+
 def _parse_citations(raw_citations):
     """Bulletproof parser to ensure citations are ALWAYS a clean list for the frontend."""
     if not raw_citations:
@@ -62,60 +126,118 @@ def structure_aware_chunking(text: str, max_words: int = 500, overlap_words: int
     return chunks
 
 
+def sync_single_test_drive_folder(db: Session, test_id: str):
+    """Scans a specific test's Google Drive folder and indexes new files into test_documents."""
+    test = db.query(Tests.id, Tests.drive_folder_id).filter(Tests.id == test_id).first()
+    if not test or not test.drive_folder_id:
+        return
+
+    drive_manager = DriveManager()
+    files = drive_manager.scan_folder_for_files(test.drive_folder_id)
+
+    for f in files:
+        mod_time = (
+            datetime.strptime(f['modifiedTime'], "%Y-%m-%dT%H:%M:%S.%fZ")
+            if 'modifiedTime' in f else datetime.now()
+        )
+
+        # Categorize doc_type based on mime_type
+        mime = f.get('mimeType', 'unknown')
+        doc_type = 'MANUAL_UPLOAD'
+        if mime.startswith('video/'):
+            doc_type = 'MANUAL_UPLOAD'
+        elif mime.startswith('image/'):
+            doc_type = 'MANUAL_UPLOAD'
+
+        db.execute(text('''
+            INSERT INTO test_documents (id, test_id, drive_file_id, file_name, mime_type, file_url, doc_type, last_modified, synced_at)
+            VALUES (:id, :test_id, :drive_file_id, :file_name, :mime_type, :file_url, :doc_type, :last_modified, CURRENT_TIMESTAMP)
+            ON CONFLICT (drive_file_id) 
+            DO UPDATE SET 
+                file_name = EXCLUDED.file_name,
+                file_url = EXCLUDED.file_url,
+                last_modified = EXCLUDED.last_modified,
+                synced_at = CURRENT_TIMESTAMP
+        '''), {
+            "id": str(uuid.uuid4()),
+            "test_id": test_id,
+            "drive_file_id": f['id'],
+            "file_name": f['name'],
+            "mime_type": mime,
+            "file_url": f.get('webViewLink', ''),
+            "doc_type": doc_type,
+            "last_modified": mod_time
+        })
+    db.commit()
+
+
 def process_test_documents_background(test_id: str, user_id: str, user_role: str):
     db = SessionLocal()
     try:
+        # Step 1: Drive Scan - Ensure test_documents table is populated from Google Drive
         if test_id and test_id != "None":
+            sync_single_test_drive_folder(db, test_id)
             all_documents = db.query(TestDocuments).filter(TestDocuments.test_id == test_id).all()
         else:
-            all_documents = db.query(TestDocuments).filter(TestDocuments.test_id.is_(None),
-                                                           TestDocuments.doc_type == 'KNOWLEDGE_BASE').all()
+            all_documents = db.query(TestDocuments).filter(
+                TestDocuments.test_id.is_(None),
+                TestDocuments.doc_type == 'KNOWLEDGE_BASE'
+            ).all()
 
         if not all_documents:
             log_audit_event(str(user_id), str(user_role), "RAG_NO_DOC_FOUND", "RAG",
                             str(test_id) if test_id else "KNOWLEDGE_BASE", "No documents found to index.")
             return
 
+        # Step 2: Determine which documents need chunking / re-embedding
         docs_to_process = []
         for doc in all_documents:
             last_chunked = db.query(func.max(DocumentChunk.created_at)).filter(
-                DocumentChunk.document_id == str(doc.id)).scalar()
+                DocumentChunk.document_id == str(doc.id)
+            ).scalar()
 
-            if last_chunked and doc.last_modified and doc.last_modified <= last_chunked:
-                continue
-            docs_to_process.append(doc)
+            # If file was modified after the last chunking (or never chunked), process it
+            if not last_chunked or (doc.last_modified and doc.last_modified > last_chunked):
+                docs_to_process.append(doc)
 
         if not docs_to_process:
             log_audit_event(str(user_id), str(user_role), "RAG_NO_UPDATE", "RAG", "Documents",
                             f"[{aware_utcnow()}] Skipping RAG sync: All up to date.")
             return
 
+        # Step 3: Delete old chunks for updated documents
         for doc in docs_to_process:
             db.query(DocumentChunk).filter(DocumentChunk.document_id == str(doc.id)).delete()
 
+        # Step 4: Extract text/multimodal transcripts and generate embeddings
         for doc in docs_to_process:
             chunks = []
 
             if doc.is_virtual:
                 analysis = db.query(TestAnalysis).filter(TestAnalysis.test_id == test_id).first()
                 raw_text = analysis.analysis_text if analysis and analysis.analysis_text else ""
-                if not raw_text.strip(): continue
+                if not raw_text.strip():
+                    continue
                 raw_text = f"# [LLM QUALITY ANALYSIS]\n{raw_text}"
                 chunks = structure_aware_chunking(raw_text)
             else:
                 try:
+                    # Calls document_parser.py (which uses analyze_video_from_disk for videos!)
                     raw_text = extract_text_from_drive_file(doc.drive_file_id, doc.mime_type)
                 except Exception as e:
                     log_audit_event(str(user_id), str(user_role), "EXTRACT_TEXT_FAILED", "RAG", str(doc.id),
                                     f"Failed to parse {doc.file_name}: {e}")
                     continue
-                if not raw_text or not raw_text.strip(): continue
+                if not raw_text or not raw_text.strip():
+                    continue
                 chunks = structure_aware_chunking(raw_text)
 
-            if not chunks: continue
+            if not chunks:
+                continue
 
             taxonomy_string = f"SOURCE TYPE: [{doc.doc_type}] | FILENAME: {doc.file_name}"
-            if doc.folder_path: taxonomy_string += f" | FOLDER PATH: {doc.folder_path}"
+            if doc.folder_path:
+                taxonomy_string += f" | FOLDER PATH: {doc.folder_path}"
             taxonomy_string = f"[{taxonomy_string}]\n\n"
 
             for index, chunk_text_content in enumerate(chunks):
@@ -124,18 +246,23 @@ def process_test_documents_background(test_id: str, user_id: str, user_role: str
 
                 for attempt in range(max_retries):
                     try:
-                        response = client.models.embed_content(model='gemini-embedding-2',
-                                                               contents=contextualized_chunk,
-                                                               config=types.EmbedContentConfig(
-                                                                   output_dimensionality=768))
+                        response = client.models.embed_content(
+                            model='gemini-embedding-2',
+                            contents=contextualized_chunk,
+                            config=types.EmbedContentConfig(output_dimensionality=768)
+                        )
                         vector_str = f"[{','.join(map(str, response.embeddings[0].values))}]"
 
-                        # Change :vec::vector to CAST(:vec AS vector)
                         db.execute(text("""
                             INSERT INTO document_chunks (id, document_id, test_id, chunk_index, text_content, embedding, created_at) 
                             VALUES (gen_random_uuid(), :doc_id, :test_id, :index, :content, CAST(:vec AS vector), CURRENT_TIMESTAMP)
-                        """), {"doc_id": str(doc.id), "test_id": test_id, "index": index, "content": contextualized_chunk, "vec": vector_str})
-
+                        """), {
+                            "doc_id": str(doc.id),
+                            "test_id": test_id,
+                            "index": index,
+                            "content": contextualized_chunk,
+                            "vec": vector_str
+                        })
                         break
                     except Exception as e:
                         error_str = str(e)
@@ -163,6 +290,32 @@ def process_test_documents_background(test_id: str, user_id: str, user_role: str
         db.close()
 
 
+def sync_all_active_tests_background(user_id: str, user_role: str):
+    # 1. Sync global Knowledge Base folder
+    sync_knowledge_base_background(user_id, user_role)
+
+    # 2. Sync all test Drive folders
+    try:
+        DriveManager().run_daily_document_sync()
+    except Exception as e:
+        log_audit_event(user_id, user_role, "SYNC_DRIVE_DOCS_FAILED", "RAG", "ALL TESTS",
+                        f"Drive document sync failed: {e}")
+
+    # 3. Embed all test documents
+    db = SessionLocal()
+    test_rows = db.query(Tests.id).filter(Tests.drive_folder_id.isnot(None)).all()
+    db.close()
+
+    for (t_id,) in test_rows:
+        try:
+            process_test_documents_background(str(t_id), user_id, user_role)
+        except Exception as e:
+            log_audit_event(user_id, user_role, "SYNC_ALL_TEST_TO_RAG_FAILED", "RAG", str(t_id),
+                            f"Nightly sync failed: {e}")
+
+    log_audit_event(user_id, user_role, "SYNC_ALL_TEST_TO_RAG_COMPLETED", "RAG", "ALL TESTS", "Nightly sync complete.")
+
+
 def sync_knowledge_base_background(user_id: str, user_role: str):
     try:
         DriveManager().sync_global_knowledge_base(user_id, user_role)
@@ -174,22 +327,6 @@ def sync_knowledge_base_background(user_id: str, user_role: str):
         log_audit_event(user_id, user_role, "SYNC_KB_RAG_COMPLETED", "RAG", "KNOWLEDGE_BASE", "KB embedded.")
     except Exception as e:
         log_audit_event(user_id, user_role, "SYNC_KB_RAG_FAILED", "RAG", "KNOWLEDGE_BASE", f"Embed failed: {e}")
-
-
-def sync_all_active_tests_background(user_id: str, user_role: str):
-    sync_knowledge_base_background(user_id, user_role)
-
-    db = SessionLocal()
-    test_rows = db.query(Tests.id).filter(Tests.drive_folder_id.isnot(None)).all()
-    db.close()
-
-    for (t_id,) in test_rows:
-        try:
-            process_test_documents_background(str(t_id), user_id, user_role)
-        except Exception as e:
-            log_audit_event(user_id, user_role, "SYNC_ALL_TEST_TO_RAG_FAILED", "RAG", str(t_id),
-                            f"Nightly sync failed: {e}")
-    log_audit_event(user_id, user_role, "SYNC_ALL_TEST_TO_RAG_COMPLETED", "RAG", "ALL TESTS", "Nightly sync complete.")
 
 
 def get_rag_filters(db: Session):
@@ -223,6 +360,10 @@ def get_rag_filters(db: Session):
 def get_rag_stats(db: Session):
     total = db.query(func.count(func.distinct(DocumentChunk.document_id))).scalar()
     return {"total_sources": total or 0}
+
+
+def check_all_chunks(db: Session):
+    return db.query(DocumentChunk).all()
 
 
 def chat_with_documents(db: Session, req, current_user: dict):
