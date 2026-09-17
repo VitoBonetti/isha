@@ -26,6 +26,7 @@ from models.raw_assets import RawAssets
 from models.services import ServiceLanes
 from system_services import test_service
 from utils.timeaware import aware_utcnow
+from utils.memory_cache import invalidate_board_cache
 
 router = APIRouter(prefix="/api/tests", tags=["Tests & Assignments"])
 
@@ -34,6 +35,7 @@ router = APIRouter(prefix="/api/tests", tags=["Tests & Assignments"])
 def create_test(t: TestCreate, background_tasks: BackgroundTasks,
                 current_user: dict = Depends(require_maintainer_or_admin), db: Session = Depends(get_db)):
     res = test_service.create_test(db, t, current_user)
+    invalidate_board_cache()
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
     return res
@@ -53,6 +55,7 @@ def get_test_details(test_id: str, current_user: dict = Depends(get_current_user
 def update_test(test_id: str, t: TestBase, background_tasks: BackgroundTasks,
                 current_user: dict = Depends(require_maintainer_or_admin), db: Session = Depends(get_db)):
     res = test_service.update_test(db, test_id, t, current_user, background_tasks)
+    invalidate_board_cache()
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return res
 
@@ -61,6 +64,7 @@ def update_test(test_id: str, t: TestBase, background_tasks: BackgroundTasks,
 def delete_test(test_id: str, background_tasks: BackgroundTasks,
                 current_user: dict = Depends(require_maintainer_or_admin), db: Session = Depends(get_db)):
     res = test_service.delete_test(db, test_id, current_user, background_tasks)
+    invalidate_board_cache()
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
     return res
@@ -86,6 +90,7 @@ def provision_workspace_manually(test_id: str, background_tasks: BackgroundTasks
 def toggle_tentative(test_id: str, background_tasks: BackgroundTasks,
                      current_user: dict = Depends(require_maintainer_or_admin), db: Session = Depends(get_db)):
     res = test_service.toggle_tentative(db, test_id, current_user)
+    invalidate_board_cache()
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return res
 
@@ -94,6 +99,7 @@ def toggle_tentative(test_id: str, background_tasks: BackgroundTasks,
 def schedule_test(test_id: str, schedule: TestSchedule, background_tasks: BackgroundTasks,
                   current_user: dict = Depends(require_maintainer_or_admin), db: Session = Depends(get_db)):
     res = test_service.schedule_test(db, test_id, schedule, current_user)
+    invalidate_board_cache()
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return res
 
@@ -102,6 +108,7 @@ def schedule_test(test_id: str, schedule: TestSchedule, background_tasks: Backgr
 def unschedule_test(test_id: str, background_tasks: BackgroundTasks,
                     current_user: dict = Depends(require_maintainer_or_admin), db: Session = Depends(get_db)):
     res = test_service.unschedule_test(db, test_id, current_user)
+    invalidate_board_cache()
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return res
 
@@ -110,6 +117,7 @@ def unschedule_test(test_id: str, background_tasks: BackgroundTasks,
 def complete_test(test_id: str, background_tasks: BackgroundTasks,
                   current_user: dict = Depends(require_maintainer_or_admin), db: Session = Depends(get_db)):
     res = test_service.complete_test(db, test_id, current_user)
+    invalidate_board_cache()
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
     return res
@@ -119,6 +127,7 @@ def complete_test(test_id: str, background_tasks: BackgroundTasks,
 def mark_test_unable(test_id: str, background_tasks: BackgroundTasks,
                      current_user: dict = Depends(require_maintainer_or_admin), db: Session = Depends(get_db)):
     res = test_service.mark_test_unable(db, test_id, current_user)
+    invalidate_board_cache()
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return res
 
@@ -127,6 +136,7 @@ def mark_test_unable(test_id: str, background_tasks: BackgroundTasks,
 def unstop_test(test_id: str, background_tasks: BackgroundTasks,
                 current_user: dict = Depends(require_maintainer_or_admin), db: Session = Depends(get_db)):
     res = test_service.unstop_test(db, test_id, current_user)
+    invalidate_board_cache()
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return res
 
@@ -135,6 +145,7 @@ def unstop_test(test_id: str, background_tasks: BackgroundTasks,
 def uncomplete_test(test_id: str, background_tasks: BackgroundTasks,
                     current_user: dict = Depends(require_maintainer_or_admin), db: Session = Depends(get_db)):
     res = test_service.uncomplete_test(db, test_id, current_user)
+    invalidate_board_cache()
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return res
 
@@ -143,6 +154,7 @@ def uncomplete_test(test_id: str, background_tasks: BackgroundTasks,
 def create_assignment(assign: AssignmentCreate, background_tasks: BackgroundTasks,
                       current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
     res = test_service.create_assignment(db, assign, current_user)
+    invalidate_board_cache()
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return res
 
@@ -151,6 +163,7 @@ def create_assignment(assign: AssignmentCreate, background_tasks: BackgroundTask
 def remove_assignment(test_id: str, user_id: str, background_tasks: BackgroundTasks,
                       current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
     res = test_service.remove_assignment(db, test_id, user_id, current_user)
+    invalidate_board_cache()
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return res
 

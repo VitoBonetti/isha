@@ -6,6 +6,7 @@ from routers.auth import get_current_user, require_admin, require_maintainer_or_
 from schema import ServiceLaneBase, PlaceholderResponse, PlaceholderCreate, ServiceLaneTemplatesUpdate
 from websockets_manager import manager
 from system_services import service_lane_service
+from utils.memory_cache import invalidate_board_cache
 
 router = APIRouter(prefix="/api/services", tags=["Services"])
 
@@ -26,6 +27,7 @@ def create_service(s: ServiceLaneBase, year: int = Query(default_factory=lambda:
     Admin Only Endpoint to create a new service
     """
     res = service_lane_service.create_service(db, s, year, current_user)
+    invalidate_board_cache()
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return res
 
@@ -38,6 +40,7 @@ def update_service(service_id: str, s: ServiceLaneBase, year: int = Query(defaul
     Admin Only Endpoint to update a service
     """
     res = service_lane_service.update_service(db, service_id, s, year, current_user)
+    invalidate_board_cache()
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return res
 
@@ -49,6 +52,7 @@ def delete_service(service_id: str, background_tasks: BackgroundTasks,
     Admin Only Endpoint to delete a service
     """
     res = service_lane_service.delete_service(db, service_id, current_user)
+    invalidate_board_cache()
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return res
 
@@ -81,6 +85,7 @@ def create_placeholder(p: PlaceholderCreate, background_tasks: BackgroundTasks,
     Admin Only Endpoint to create a new placeholder
     """
     res = service_lane_service.create_placeholder(db, p, current_user)
+    invalidate_board_cache()
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return res
 
@@ -92,6 +97,7 @@ def delete_placeholder(placeholder_id: str, background_tasks: BackgroundTasks,
     Admin Only Endpoint to Delete a placeholder
     """
     res = service_lane_service.delete_placeholder(db, placeholder_id, current_user)
+    invalidate_board_cache()
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return res
 

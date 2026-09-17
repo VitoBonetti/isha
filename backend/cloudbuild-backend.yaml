@@ -52,6 +52,8 @@ steps:
       - '--no-cpu-throttling'
       - '--min-instances'
       - '1'
+      - '--max-instances'
+      - '1'
       - '--memory'
       - '4Gi'
       - '--cpu'

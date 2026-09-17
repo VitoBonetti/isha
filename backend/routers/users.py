@@ -5,6 +5,7 @@ from routers.auth import get_current_user, require_admin, require_admin_or_read_
 from schema import UserCreate, UserBase, Kiss24KeyUpdate, PublicKeyUpdate
 from websockets_manager import manager
 from system_services import user_service
+from utils.memory_cache import invalidate_board_cache
 
 router = APIRouter(prefix="/api/users", tags=["Users"])
 
@@ -27,6 +28,7 @@ def get_all_users(current_user: dict = Depends(require_admin_or_read_only), db: 
 @router.post("/", summary="[Admin Only]")
 def create_user(u: UserCreate, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
     res = user_service.create_user(db, u, current_user)
+    invalidate_board_cache()
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return res
 
@@ -34,6 +36,7 @@ def create_user(u: UserCreate, background_tasks: BackgroundTasks, current_user: 
 @router.delete("/{user_id}", summary="[Admin Only]")
 def delete_user(user_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
     res = user_service.delete_user(db, user_id, current_user)
+    invalidate_board_cache()
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return res
 
@@ -41,6 +44,7 @@ def delete_user(user_id: str, background_tasks: BackgroundTasks, current_user: d
 @router.put("/{user_id}", summary="[Admin Only]")
 def update_user(user_id: str, u: UserBase, background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
     res = user_service.update_user(db, user_id, u, current_user)
+    invalidate_board_cache()
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return res
 
