@@ -305,24 +305,41 @@ async def process_vuln_analysis_background(test_id: str, kiss24_id: str, user_id
     try:
         payload = await build_payload(kiss24_id)
         if not payload or not payload.get("vulnerabilities"):
-            raise ValueError("No vulnerabilities found.")
+            raise ValueError("No vulnerabilities found on Keep Secure 24 for this test.")
 
         analysis_response = await run_cloud_run_analysis(payload)
-        stitched_markdown = "\n\n---\n\n".join(
-            [r.get("analysis", "") for r in analysis_response.get("results", []) if r.get("status") == "success"])
-        if not stitched_markdown:
-            raise ValueError("Cloud Run returned no valid text.")
+
+        # Support both array results and direct string response structures
+        results = analysis_response.get("results", [])
+        if results:
+            stitched_markdown = "\n\n---\n\n".join(
+                [r.get("analysis", "") for r in results if r.get("status") == "success" or "analysis" in r]
+            )
+        else:
+            stitched_markdown = analysis_response.get("analysis", "")
+
+        if not stitched_markdown or not stitched_markdown.strip():
+            raise ValueError("Cloud Run service returned empty analysis text.")
 
         db = SessionLocal()
         try:
-            # PURE ORM UPDATE (Matches exactly to your model)
+            # 1. ORM Upsert for TestAnalysis
             analysis = db.query(TestAnalysis).filter(TestAnalysis.test_id == test_id).first()
-            if analysis:
+            if not analysis:
+                analysis = TestAnalysis(
+                    test_id=test_id,
+                    status='COMPLETED',
+                    analysis_text=stitched_markdown,
+                    timestamp=aware_utcnow()
+                )
+                db.add(analysis)
+            else:
                 analysis.status = 'COMPLETED'
                 analysis.analysis_text = stitched_markdown
                 analysis.timestamp = aware_utcnow()
 
-            stmt = insert(TestDocuments).values(
+            # 2. Register virtual document for RAG indexing
+            stmt_doc = insert(TestDocuments).values(
                 id=str(uuid.uuid4()), test_id=test_id, drive_file_id=f"analysis_{test_id}",
                 file_name=f"LLM_Vulnerability_Analysis_{test_name}.md",
                 mime_type='text/markdown', file_url=f"{BASE_URL}/tests/{test_id}/analysis", doc_type='LLM_ANALYSIS',
@@ -332,26 +349,39 @@ async def process_vuln_analysis_background(test_id: str, kiss24_id: str, user_id
                 set_={'file_name': f"LLM_Vulnerability_Analysis_{test_name}.md", 'last_modified': aware_utcnow(),
                       'synced_at': aware_utcnow()}
             )
-            db.execute(stmt)
+            db.execute(stmt_doc)
 
+            # 3. Update milestone
             stmt_mile = insert(TestMilestone).values(
                 id=str(uuid.uuid4()), test_id=test_id, step_name='Validate Finding', is_completed=True
-            ).on_conflict_do_update(index_elements=['test_id', 'step_name'], set_={'is_completed': True})
+            ).on_conflict_do_update(
+                index_elements=['test_id', 'step_name'],
+                set_={'is_completed': True}
+            )
             db.execute(stmt_mile)
 
             db.commit()
+            log_audit_event(user_id, "admin", "VULN_ANALYSIS_SUCCESS", "ANALYSIS", test_id,
+                            f"Completed analysis for '{test_name}'.")
         finally:
             db.close()
 
+        # 4. Trigger RAG re-chunking
         try:
             await asyncio.to_thread(process_test_documents_background, test_id, user_id, "admin")
-        except Exception:
-            pass
+        except Exception as rag_err:
+            print(f"[WARNING] RAG index update failed for analysis: {rag_err}")
 
+        # 5. Notify Frontend & WebSockets
         db = SessionLocal()
         try:
-            db.add(Notifications(id=str(uuid.uuid4()), user_id=user_id, message=f"Analysis for '{test_name}' is ready!",
-                                 type="SUCCESS", created_at=aware_utcnow()))
+            db.add(Notifications(
+                id=str(uuid.uuid4()),
+                user_id=user_id,
+                message=f"Analysis for '{test_name}' is ready!",
+                type="SUCCESS",
+                created_at=aware_utcnow()
+            ))
             db.commit()
         finally:
             db.close()
@@ -361,19 +391,31 @@ async def process_vuln_analysis_background(test_id: str, kiss24_id: str, user_id
              "link": f"/tests/{test_id}/analysis"}))
 
     except Exception as e:
+        error_trace = traceback.format_exc()
+        print(f"[ERROR] process_vuln_analysis_background failed for test {test_id}:\n{error_trace}")
+        log_audit_event(user_id, "admin", "VULN_ANALYSIS_FAILED", "ANALYSIS", test_id,
+                        f"Failed: {str(e)}\n{error_trace}")
+
         db = SessionLocal()
         try:
-            # PURE ORM ERROR UPDATE
             analysis_error = db.query(TestAnalysis).filter(TestAnalysis.test_id == test_id).first()
             if analysis_error:
                 analysis_error.status = 'FAILED'
                 analysis_error.timestamp = aware_utcnow()
-                db.commit()
+            db.add(Notifications(
+                id=str(uuid.uuid4()),
+                user_id=user_id,
+                message=f"Vulnerability analysis failed for '{test_name}': {str(e)}",
+                type="ERROR",
+                created_at=aware_utcnow()
+            ))
+            db.commit()
         finally:
             db.close()
 
         await manager.broadcast(
             json.dumps({"action": "REPORT_FAILED", "email": user_email, "message": f"Analysis failed: {str(e)}"}))
+
 
 def process_bulk_tests_background(asset_ids, user_id: str, role: str, service_lane_id: str = None):
     tests_to_provision = []
