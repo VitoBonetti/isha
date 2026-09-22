@@ -206,7 +206,7 @@ def health_check():
     return {"status": "online", "system": "Mario"}
 
 
-@app.get("/api-external/health")
+@app.get("/api-external/health", tags=["Health Check"])
 def check_health(current_user: dict = Depends(get_current_user)):
     return {"status": "online", "system": "Mario"}
 
