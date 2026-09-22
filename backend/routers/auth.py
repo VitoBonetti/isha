@@ -333,7 +333,7 @@ def revoke_api_key(key_id: str, current_user: dict = Depends(get_current_user), 
 
 # --- CRON JOB ENDPOINT FOR ALERTS ---
 @router.post("/system/cron/api-key-alerts", summary="Trigger daily API Key expiration alerts")
-def trigger_api_key_alerts(background_tasks: BackgroundTasks, cursor=Depends(get_db_cursor)):
+def trigger_api_key_alerts(background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
     """
     This endpoint should be hit once a day by GCP Cloud Scheduler or a local cron job.
     It issues warnings for keys expiring in 7 days, and final notices for keys expiring today.

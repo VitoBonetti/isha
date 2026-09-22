@@ -14,11 +14,10 @@ from routers import (
     kiss24, danger, documents, rag, kpi_criteria
 )
 from routers.rag import start_nightly_rag_scheduler
-from routers.auth import require_admin, get_google_public_keys, start_daily_api_key_alert_scheduler
+from routers.auth import require_admin, get_google_public_keys, start_daily_api_key_alert_scheduler, get_current_user
 from database import get_db_connection, run_alembic_migrations
 from websockets_manager import manager
 from audit_logger import log_audit_event, init_audit_log_infrastructure
-
 
 init_audit_log_infrastructure()
 
@@ -43,7 +42,7 @@ async def lifespan(app: FastAPI):
         traceback.print_exc()
         raise e
 
-    # 2. Check Database Connection
+    # 4. Check Database Connection
     conn = get_db_connection()
     if conn:
         print("✅ System normal. Database connected.")
@@ -51,7 +50,7 @@ async def lifespan(app: FastAPI):
     else:
         print("🚨 CRITICAL: Cannot reach Cloud SQL via IAM. Check Service Account permissions.")
 
-    yield # The application runs here!
+    yield
 
 
 app = FastAPI(
@@ -60,21 +59,19 @@ app = FastAPI(
     version="1.5.0",
     swagger_ui_parameters={"defaultModelsExpandDepth": -1},
     lifespan=lifespan,
-    docs_url="/api/docs",
-    openapi_url="/api/openapi.json",
-    redoc_url="/api/redoc"
+    # Swagger & OpenAPI schema now reside strictly under /api-external
+    docs_url="/api-external/docs",
+    openapi_url="/api-external/openapi.json",
+    redoc_url="/api-external/redoc"
 )
 
 env_origins = os.environ.get("ALLOWED_ORIGINS")
 
 if env_origins:
-    # PRODUCTION
     ALLOWED_ORIGINS = [origin.strip() for origin in env_origins.split(",")]
 elif os.environ.get("ENV") == "local":
-    # LOCAL DEV
     ALLOWED_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"]
 else:
-    # Fail safe
     ALLOWED_ORIGINS = []
 
 app.add_middleware(
@@ -106,32 +103,25 @@ async def global_exception_handler(request: Request, exc: Exception):
         content={"detail": "An internal server error occurred. Check the backend logs."}
     )
 
-# Register the routes
-app.include_router(assets.router)
-app.include_router(kpi_criteria.router)
-app.include_router(auth.router)
-app.include_router(board.router)
-app.include_router(contacts.router)
-app.include_router(countries.router)
-app.include_router(documents.router)
-app.include_router(insights.router)
-app.include_router(kiss24.router)
-app.include_router(locations.router)
-app.include_router(logs.router)
-app.include_router(luigi.router)
-app.include_router(rag.router)
-app.include_router(regions.router)
-app.include_router(services.router)
-app.include_router(tests.router)
-app.include_router(users.router)
-app.include_router(danger.router)
+# --- REGISTER ROUTERS ---
+# Helper list to cleanly loop and mount standard vs external routes
+routers_list = [
+    assets.router, kpi_criteria.router, auth.router, board.router,
+    contacts.router, countries.router, documents.router, insights.router,
+    kiss24.router, locations.router, logs.router, luigi.router,
+    rag.router, regions.router, services.router, tests.router,
+    users.router, danger.router
+]
+
+for r in routers_list:
+    # Standard UI Routes (Hidden in Swagger, Protected by IAP)
+    app.include_router(r, include_in_schema=False)
+    # External API Routes (Visible from Swagger, Bypasses IAP via /api-external prefix)
+    app.include_router(r, prefix="/api-external")
 
 
 # --- WEBSOCKET FOR REACTIVE UI ---
-
-# Centralized handler logic
 async def handle_websocket_logic(websocket: WebSocket):
-    # CSRF Protection
     origin = websocket.headers.get("origin")
     if origin not in ALLOWED_ORIGINS and os.environ.get("ENV") != "local":
         await websocket.close(code=1008, reason="Cross-Site Request Blocked")
@@ -139,7 +129,6 @@ async def handle_websocket_logic(websocket: WebSocket):
 
     await websocket.accept()
 
-    # Read the secure JWT header attached by Google IAP
     iap_jwt = websocket.headers.get("x-goog-iap-jwt-assertion")
     if not iap_jwt:
         if os.environ.get("ENV") == "local":
@@ -149,7 +138,6 @@ async def handle_websocket_logic(websocket: WebSocket):
             return
     else:
         try:
-            # Verify the IAP JWT cryptographically
             kid = jwt.get_unverified_header(iap_jwt).get("kid")
             public_keys = get_google_public_keys()
             public_key = public_keys.get(kid)
@@ -168,7 +156,6 @@ async def handle_websocket_logic(websocket: WebSocket):
             await websocket.close(code=1008, reason=f"Unauthorized: {str(e)}")
             return
 
-    # Connect the verified user to the board manager
     await manager.connect(websocket, email)
     try:
         while True:
@@ -176,29 +163,26 @@ async def handle_websocket_logic(websocket: WebSocket):
             try:
                 payload = json.loads(data)
                 if payload.get("action") == "ping":
-                    continue  # Do nothing, just loop back
+                    continue
             except Exception:
                 pass
     except WebSocketDisconnect:
         await manager.disconnect(websocket)
 
 
-# Route 1
 @app.websocket("/ws/board")
 async def websocket_endpoint_legacy(websocket: WebSocket):
     await handle_websocket_logic(websocket)
 
 
-# Route 2 (The one your frontend is actively hitting)
 @app.websocket("/api/ws/board")
 async def websocket_endpoint_api(websocket: WebSocket):
     await handle_websocket_logic(websocket)
 
 
 # --- SYSTEM ENDPOINTS ---
-@app.get("/api/system/ping")
+@app.get("/api/system/ping", include_in_schema=False)
 def ping_database(current_user: dict = Depends(require_admin)):
-    """Measures actual round-trip latency to the PostgreSQL database."""
     start_time = time.time()
     conn = get_db_connection()
     if not conn:
@@ -211,22 +195,24 @@ def ping_database(current_user: dict = Depends(require_admin)):
     except Exception:
         return {"status": "error", "latency_ms": 0}
     finally:
-        # Replaced release_db_connection with conn.close()
         conn.close()
 
     latency = round((time.time() - start_time) * 1000, 2)
     return {"status": "online", "latency_ms": latency}
 
 
-@app.get("/api/health")
+@app.get("/api/health", include_in_schema=False)
 def health_check():
     return {"status": "online", "system": "Mario"}
 
 
-#  Automatically log HTTP errors (400, 401, 403, 404, etc.)
+@app.get("/api-external/health")
+def check_health(current_user: dict = Depends(get_current_user)):
+    return {"status": "online", "system": "Mario"}
+
+
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
-    # We only care about logging client and server errors, not standard redirects
     if exc.status_code >= 400:
         log_audit_event(
             user_id="SYSTEM",
@@ -239,7 +225,6 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
 
 
-#  Automatically log full system crashes (500)
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
     log_audit_event(
