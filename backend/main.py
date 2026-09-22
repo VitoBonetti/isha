@@ -8,6 +8,7 @@ import traceback
 import os
 import time
 import json
+import textwrap
 from jose import jwt, JWTError
 from routers import (
     auth, services, users, regions, countries, assets, tests, board, logs, locations, insights, contacts, luigi,
@@ -55,8 +56,12 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Isha Core API",
-    description="Backend engine for pentest planning and asset management.",
-    version="1.5.0",
+    description=textwrap.dedent("""
+        Backend engine for pentest planning and asset management. 
+        
+        [Switch to ReDoc UI](/api-external/redoc)
+    """),
+    version="2.0",
     swagger_ui_parameters={"defaultModelsExpandDepth": -1},
     lifespan=lifespan,
     # Swagger & OpenAPI schema now reside strictly under /api-external
