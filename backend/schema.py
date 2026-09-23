@@ -346,3 +346,14 @@ class AssetCriteriaResponse(AssetCriteriaBase):
 
 class EvaluateCriteriaRequest(BaseModel):
     raw_asset_ids: Optional[List[UUID4]] = None # If empty, evaluates all assets
+
+# --- LOG SEARCH ---
+class LogSearchRequest(BaseModel):
+    resource_type: Optional[str] = None
+    action: Optional[str] = None
+    user_id_group: Optional[List[str]] = None
+    time_preset: Optional[str] = None
+    start_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None
+    page: int = Field(1, ge=1)
+    limit: int = Field(100, ge=1, le=500)

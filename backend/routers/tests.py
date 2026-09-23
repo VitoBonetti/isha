@@ -1,7 +1,9 @@
-from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException
+from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException, Query
 from database import get_db
 from sqlalchemy.orm import Session
 from sqlalchemy import text
+from datetime import date
+from typing import Optional, List
 from sqlalchemy.dialects.postgresql import insert
 from routers.auth import (
     get_current_user,
@@ -42,8 +44,22 @@ def create_test(t: TestCreate, background_tasks: BackgroundTasks,
 
 
 @router.get("/", summary="Return all tests")
-def get_all_tests(current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
-    return test_service.get_all_tests(db, current_user)
+def get_all_tests(
+    service_lane_name: Optional[str] = Query(None, description="Filter by exact Service Lane name (case-insensitive)"),
+    start_date: Optional[date] = Query(None, description="Start date (YYYY-MM-DD) to filter tests"),
+    end_date: Optional[date] = Query(None, description="End date (YYYY-MM-DD) to filter tests"),
+    pentester_emails: Optional[List[str]] = Query(None, description="Filter by assigned pentester email(s)"),
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    return test_service.get_all_tests(
+        db=db,
+        current_user=current_user,
+        service_lane_name=service_lane_name,
+        start_date=start_date,
+        end_date=end_date,
+        pentester_emails=pentester_emails
+    )
 
 
 @router.get("/{test_id}", summary="Get Full Test Details & Contacts")

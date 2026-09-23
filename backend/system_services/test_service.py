@@ -6,6 +6,8 @@ import traceback
 from datetime import datetime, timedelta, timezone
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
+from typing import Optional, List
+from datetime import date
 from sqlalchemy import func, case, or_, and_, text
 from sqlalchemy.dialects.postgresql import insert
 from models.tests import (
@@ -456,6 +458,7 @@ def process_bulk_tests_background(asset_ids, user_id: str, role: str, service_la
                 stages=TestStages.NOT_PLANNED
             )
             db.add(new_test)
+            db.flush()
             db.add(TestAssets(test_id=new_test_id, asset_id=str(asset_id)))
 
             log_test_history(db, new_test_id, user_id, "GENERATED", f"Test generated from Asset Pool.")
@@ -485,6 +488,7 @@ def create_test(db: Session, t, current_user: dict):
         credits_per_week=t.credits_per_week, duration_weeks=t.duration_weeks, stages=TestStages.NOT_PLANNED
     )
     db.add(new_test)
+    db.flush()
 
     for asset_id in t.asset_ids:
         db.add(TestAssets(test_id=new_test_id, asset_id=str(asset_id)))
@@ -496,7 +500,9 @@ def create_test(db: Session, t, current_user: dict):
     return {"message": "Test created successfully", "id": new_test_id}
 
 
-def get_all_tests(db: Session, current_user: dict):
+def get_all_tests(db: Session, current_user: dict, service_lane_name: Optional[str] = None,
+                  start_date: Optional[date] = None, end_date: Optional[date] = None,
+                  pentester_emails: Optional[List[str]] = None):
     # Scalar Subqueries for aggregate strings and existence checks
     assigned_pentesters_sq = (db.query(func.coalesce(func.string_agg(func.distinct(Users.name), ', '), 'Unassigned'))
                               .join(Assignments, Users.id == Assignments.user_id)
@@ -514,7 +520,7 @@ def get_all_tests(db: Session, current_user: dict):
                 .join(Assets, TestAssets.asset_id == Assets.id)
                 .join(RawAssets, Assets.raw_asset_id == RawAssets.id)
                 .outerjoin(AssetTypes, RawAssets.asset_type_id == AssetTypes.id)
-                .distinct(TestAssets.test_id).subquery())  # Ensures limit 1 per test
+                .distinct(TestAssets.test_id).subquery())
 
     query = (db.query(
         Tests.id, Tests.name, Tests.start_week, Tests.start_year, Tests.duration_weeks,
@@ -529,9 +535,46 @@ def get_all_tests(db: Session, current_user: dict):
              .outerjoin(ServiceCategories, Tests.category_id == ServiceCategories.id)
              .outerjoin(asset_sq, Tests.id == asset_sq.c.test_id))
 
+    # Existing Maintainer Restriction
     if current_user.get('role') == 'maintainer':
         query = query.filter(
             Tests.service_lane_id == str(current_user.get('service_lane_id') or '00000000-0000-0000-0000-000000000000'))
+
+    # --- DYNAMIC OPTIONAL FILTERS ---
+
+    # 1. Service Lane by Name (Case Insensitive)
+    if service_lane_name:
+        query = query.filter(func.lower(ServiceLanes.name) == service_lane_name.lower().strip())
+
+    # 2. Start Date Range (Converted to ISO Year and Week)
+    if start_date:
+        min_y, min_w, _ = start_date.isocalendar()
+        query = query.filter(
+            or_(
+                Tests.start_year > min_y,
+                and_(Tests.start_year == min_y, Tests.start_week >= min_w)
+            )
+        )
+
+    if end_date:
+        max_y, max_w, _ = end_date.isocalendar()
+        query = query.filter(
+            or_(
+                Tests.start_year < max_y,
+                and_(Tests.start_year == max_y, Tests.start_week <= max_w)
+            )
+        )
+
+    # 3. Pentester by Email(s)
+    if pentester_emails:
+        clean_emails = [e.lower().strip() for e in pentester_emails]
+        query = query.filter(
+            Tests.id.in_(
+                db.query(Assignments.test_id)
+                .join(Users, Assignments.user_id == Users.id)
+                .filter(func.lower(Users.email).in_(clean_emails))
+            )
+        )
 
     query = query.order_by(Tests.start_year.desc().nullslast(), Tests.start_week.desc().nullslast(), Tests.name.asc())
     rows = query.all()

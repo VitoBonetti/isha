@@ -345,6 +345,15 @@ def check_test_health(session, headers, testUUID):
         else:
             not_healthy["roles"]["healthy"] = False
             not_healthy["roles"]["reason"] = "No Account Roles marker"
+
+        # --- NEW CHECK: Credential Location ---
+        not_healthy["credential-location"] = {}
+        if "Credential Location:" in cleaned_text:
+            not_healthy["credential-location"]["healthy"] = True
+        else:
+            not_healthy["credential-location"]["healthy"] = False
+            not_healthy["credential-location"]["reason"] = "No Credential Location marker"
+
     except Exception as ex:
         print(ex)
         not_healthy["details"]["healthy"] = False
@@ -413,14 +422,28 @@ def analyze_and_fix(healthy_check, details, session, headers, testUUID):
 
     if not data["roles"]["healthy"]:
         warning_list.append(f"roles set as {data['roles']['reason']}.")
-        test_details_payload += "Account Roles: N/A<br></p>"
+        test_details_payload += "Account Roles: N/A<br>"
     else:
-        match = re.search(r'Account Roles: (.*?) \[MANAGEMENT SUMMARY]', details)
+        # Changed regex to stop at 'Credential Location:' and removed the closing </p>
+        match = re.search(r'Account Roles: (.*?) Credential Location:', details)
         if match:
             ritm_id = match.group(1).strip()
-            test_details_payload += f"Account Roles: {ritm_id}<br></p>"
+            test_details_payload += f"Account Roles: {ritm_id}<br>"
         else:
-            test_details_payload += "Account Roles: N/A<br></p>"
+            test_details_payload += "Account Roles: N/A<br>"
+
+    # --- NEW EXTRACTOR: Credential Location ---
+    if not data["credential-location"]["healthy"]:
+        warning_list.append(f"credential-location set as {data['credential-location']['reason']}.")
+        test_details_payload += "Credential Location: N/A<br></p>"
+    else:
+        # Parses up to the Management Summary and closes the HTML paragraph tag
+        match = re.search(r'Credential Location: (.*?) \[MANAGEMENT SUMMARY]', details)
+        if match:
+            loc_val = match.group(1).strip()
+            test_details_payload += f"Credential Location: {loc_val}<br></p>"
+        else:
+            test_details_payload += "Credential Location: N/A<br></p>"
 
     if not data["summary"]["healthy"]:
         warning_list.append(f"Summary set as {data['summary']['reason']}.")
