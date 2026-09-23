@@ -88,6 +88,40 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def audit_api_usage_middleware(request: Request, call_next):
+    start_time = time.time()
+
+    response = await call_next(request)
+
+    user = getattr(request.state, "user", None)
+
+    if user and user.get("auth_method") == "API_KEY":
+        path = request.url.path
+        user_email = user.get("email", "UNKNOWN_KEY_OWNER")
+        role = user.get("role", "UNKNOWN_ROLE")
+        duration_ms = round((time.time() - start_time) * 1000, 2)
+
+        # Extract real client IP from Google Load Balancer header
+        x_forwarded_for = request.headers.get("X-Forwarded-For")
+        if x_forwarded_for:
+            # The client IP is the first entry in a comma-separated list
+            client_ip = x_forwarded_for.split(",")[0].strip()
+        else:
+            client_ip = request.client.host if request.client else "UNKNOWN"
+
+        log_audit_event(
+            user_id=user_email,
+            role=role,
+            action=f"API_KEY_{request.method}",
+            resource_type="EXTERNAL_API",
+            resource_id=path,
+            details=f"Endpoint: {path} | Status: {response.status_code} | Latency: {duration_ms}ms | Client IP: {client_ip} | Infrastructure IP: {request.client.host}"
+        )
+
+    return response
+
+
 # --- GLOBAL ERROR HANDLER ---
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
@@ -219,13 +253,20 @@ def check_health(current_user: dict = Depends(get_current_user)):
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     if exc.status_code >= 400:
+        # Extract real client IP from Google Load Balancer header
+        x_forwarded_for = request.headers.get("X-Forwarded-For")
+        if x_forwarded_for:
+            client_ip = x_forwarded_for.split(",")[0].strip()
+        else:
+            client_ip = request.client.host if request.client else "UNKNOWN"
+
         log_audit_event(
-            user_id="SYSTEM",
+            user_id="UNAUTHENTICATED",
             role="auto_logger",
             action=f"HTTP_{exc.status_code}",
-            resource_type="API_ERROR",
+            resource_type="API_SECURITY_ALERT" if exc.status_code in [401, 403] else "API_ERROR",
             resource_id=request.url.path,
-            details=f"Method: {request.method} | Error: {str(exc.detail)}"
+            details=f"Method: {request.method} | IP: {client_ip} | Path: {request.url.path} | Error: {str(exc.detail)} | Infrastructure IP: {request.client.host}"
         )
     return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
 

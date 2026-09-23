@@ -78,10 +78,13 @@ def get_current_user(request: Request, api_key: str = Depends(api_key_header), c
         if not user:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid, revoked, or expired API Key")
 
-        return {
-            "id": user[0], "email": user[1], "name": user[2], "role": user[3], "location_id": user[4],
-            "service_lane_id": user[5]
+        user_dict = {
+            "id": user[0], "email": user[1], "name": user[2], "role": user[3],
+            "location_id": user[4], "service_lane_id": user[5], "auth_method": "API_KEY"
         }
+        # Attach user to request state for middleware logging
+        request.state.user = user_dict
+        return user_dict
 
     # METHOD B: GOOGLE IAP HEADER AUTHENTICATION (For the React Frontend)
     iap_jwt = request.headers.get("X-Goog-IAP-JWT-Assertion")
@@ -127,14 +130,13 @@ def get_current_user(request: Request, api_key: str = Depends(api_key_header), c
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
                             detail="User account is authenticated via Google, but has not been invited to this system.")
 
-    return {
-        "id": user[0],
-        "email": user[1],
-        "name": user[2],
-        "role": user[3],
-        "location_id": user[4],
-        "service_lane_id": user[5]
+    user_dict = {
+        "id": user[0], "email": user[1], "name": user[2], "role": user[3],
+        "location_id": user[4], "service_lane_id": user[5], "auth_method": "IAP_SSO"
     }
+    # Attach user to request state for middleware logging
+    request.state.user = user_dict
+    return user_dict
 
 
 def require_admin(current_user: dict = Depends(get_current_user)):
