@@ -7,13 +7,13 @@ from datetime import datetime
 from fastapi import HTTPException, status
 from google.cloud import pubsub_v1, storage
 from sqlalchemy.orm import Session
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, and_
 from sqlalchemy.exc import IntegrityError
 from models.users import Users
 from models.territories import Country
 from models.raw_assets import RawAssets, RawAssetsSnowMetadata
 from models.kiss24 import Kiss24ContextType, Kiss24VulnTypes, kiss24_vuln_context_association, Kiss24ValidatingVulns
-from models.tests import Tests, TestAssets
+from models.tests import Tests, TestAssets, TestStages
 from models.services import ServiceLanes
 from models.assets import Assets
 from audit_logger import log_audit_event
@@ -602,3 +602,116 @@ def bulk_reconcile_assets(db: Session, payload, current_user: dict):
                 "message": f"Linked {push_results['success_count']} assets. {push_results['failed_count']} failed.",
                 "errors": push_results["errors"]}
     return {"status": "Success", "message": f"Successfully linked {push_results['success_count']} assets!"}
+
+
+def get_kiss24_synced_raw_assets_paginated(db: Session, current_user: dict, page: int, limit: int,
+                                       search: str = None, sort_by: str = "name", sort_dir: str = "asc"):
+    offset = (page - 1) * limit
+
+    base_query = db.query(RawAssets)
+    if current_user.get('role') == 'maintainer':
+        lane_id = current_user.get('service_lane_id')
+        base_query = base_query.filter(RawAssets.service_forecast_id == str(lane_id))
+
+    total_assets = base_query.count()
+
+    synced_query = (db.query(
+        RawAssets.id, RawAssets.name, RawAssets.snow_number, RawAssets.kiss24_asset_id, Country.name.label("country_name")
+    ).outerjoin(Country, RawAssets.country_id == Country.id)
+     .filter(and_(RawAssets.kiss24_asset_id.isnot(None), RawAssets.kiss24_asset_id != "")))
+
+    if current_user.get('role') == 'maintainer':
+        lane_id = current_user.get('service_lane_id')
+        synced_query = synced_query.filter(RawAssets.service_forecast_id == str(lane_id))
+
+    # --- Apply Filters ---
+    if search:
+        synced_query = synced_query.filter(
+            or_(
+                RawAssets.name.ilike(f"%{search}%"),
+                Country.name.ilike(f"%{search}%")
+            )
+        )
+
+    total_synced = synced_query.count()
+
+    # --- Apply Sorting ---
+    order_col = Country.name if sort_by == "country" else RawAssets.name
+    order_col = order_col.desc() if sort_dir == "desc" else order_col.asc()
+
+    rows = synced_query.order_by(order_col).offset(offset).limit(limit).all()
+
+    items = [{
+        "id": str(r.id), "name": r.name, "snow_number": r.snow_number,
+        "country_name": r.country_name, "kiss24_asset_id": r.kiss24_asset_id
+    } for r in rows]
+
+    return {
+        "total_assets": total_assets,
+        "total_synced": total_synced,
+        "items": items,
+        "page": page,
+        "limit": limit,
+        "total_pages": (total_synced + limit - 1) // limit
+    }
+
+
+def get_kiss24_synced_tests_paginated(db: Session, current_user: dict, page: int, limit: int,
+                                      search: str = None, service_lane: str = None, status: str = None,
+                                      sort_by: str = "name", sort_dir: str = "asc"):
+    offset = (page - 1) * limit
+
+    base_query = db.query(Tests).join(ServiceLanes, Tests.service_lane_id == ServiceLanes.id).filter(ServiceLanes.auto_provision_workspace == True)
+    if current_user.get('role') == 'maintainer':
+        lane_id = current_user.get('service_lane_id')
+        base_query = base_query.filter(Tests.service_lane_id == str(lane_id))
+
+    total_tests = base_query.count()
+
+    synced_query = (db.query(
+        Tests.id, Tests.name, Tests.stages, Tests.kiss24, ServiceLanes.name.label("service_lane_name")
+    ).join(ServiceLanes, Tests.service_lane_id == ServiceLanes.id)
+     .filter(ServiceLanes.auto_provision_workspace == True, Tests.kiss24.isnot(None)))
+
+    if current_user.get('role') == 'maintainer':
+        lane_id = current_user.get('service_lane_id')
+        synced_query = synced_query.filter(Tests.service_lane_id == str(lane_id))
+
+    # --- Apply Filters ---
+    if search:
+        synced_query = synced_query.filter(Tests.name.ilike(f"%{search}%"))
+    if service_lane:
+        synced_query = synced_query.filter(ServiceLanes.name.ilike(f"%{service_lane}%"))
+    if status:
+        # Match enum by name mapping
+        enum_val = getattr(TestStages, status, None)
+        if enum_val:
+            synced_query = synced_query.filter(Tests.stages == enum_val)
+
+    total_synced = synced_query.count()
+
+    # --- Apply Sorting ---
+    if sort_by == "service_lane":
+        order_col = ServiceLanes.name
+    elif sort_by == "status":
+        order_col = Tests.stages
+    else:
+        order_col = Tests.name
+
+    order_col = order_col.desc() if sort_dir == "desc" else order_col.asc()
+
+    rows = synced_query.order_by(order_col).offset(offset).limit(limit).all()
+
+    items = [{
+        "id": str(r.id), "name": r.name, "stages": r.stages.name if r.stages else None,
+        "service_lane": r.service_lane_name, "kiss24": str(r.kiss24)
+    } for r in rows]
+
+    return {
+        "total_tests": total_tests,
+        "total_synced": total_synced,
+        "items": items,
+        "page": page,
+        "limit": limit,
+        "total_pages": (total_synced + limit - 1) // limit
+    }

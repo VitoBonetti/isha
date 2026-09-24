@@ -92,7 +92,7 @@ async def process_presentation_background(test_id: str, kiss24_id: str, user_id:
                 stmt_doc = insert(TestDocuments).values(
                     id=str(uuid.uuid4()), test_id=test_id, drive_file_id=data.get("fileId"),
                     file_name=data.get("fileName"),
-                    mime_type='application/vnd.openxmlformats-officedocument.presentationml.presentation',
+                    mime_type='application/vnd.google-apps.presentation',
                     file_url=data.get("driveLink", ""), doc_type='PRESENTATION', last_modified=aware_utcnow(),
                     synced_at=aware_utcnow()
                 ).on_conflict_do_update(

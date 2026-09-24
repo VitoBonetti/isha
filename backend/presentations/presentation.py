@@ -173,7 +173,7 @@ def ai_generate_management_summary(data):
            "During our most recent assessment we have identified <TOTAL NUMBER OF FINDINGS> issue(s): <NUMBER OF FINDINGS PER SEVERITY>"  
            Use the 'order' and 'severity_counts' fields in the JSON to produce the correct severity breakdown.  Ignore the one where the 'severity_counts' is 0 (zero).
 
-        2. After that, write a **single-sentence** management summary that describes the main security concerns and their potential impact, based on all the "vulnerabilities" objects provided. The summary must be fluent, natural, and not formatted as a list or use any markdown. Use professional but clear language.
+        2. After that, write a management summary that describes the main security concerns and their potential impact, based on all the "vulnerabilities" objects provided. The summary must be fluent, natural, and not formatted as a list or use any markdown. Use professional but clear language.
 
         3. Conclude the summary with:  
            "Addressing these issues will result in a better security posture."
@@ -515,7 +515,11 @@ def download_drive_file(service, file_id):
 def upload_drive_file(service, folder_id, filename, file_stream):
     """Uploads a file stream to a specific Google Drive folder."""
     try:
-        file_metadata = {'name': filename, 'parents': [folder_id]}
+        file_metadata = {
+            'name': filename,
+            'parents': [folder_id],
+            'mimeType': 'application/vnd.google-apps.presentation'
+        }
         media = MediaIoBaseUpload(
             file_stream,
             mimetype='application/vnd.openxmlformats-officedocument.presentationml.presentation',
@@ -1119,7 +1123,7 @@ def generate_presentation(test_uuid: str, db_drive_folder_id: str, db_service_na
 
     output_filename = (
         f"{test['id']} - Restitution Meeting - "
-        f"{slugify(asset['name'])} - {datetime.now().strftime('%Y-%m')}.pptx"
+        f"{slugify(asset['name'])} - {datetime.now().strftime('%Y-%m')}"
     )
 
     print(f"Uploading '{output_filename}' to Google Drive...")

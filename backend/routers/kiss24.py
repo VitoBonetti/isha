@@ -1,5 +1,6 @@
-from fastapi import APIRouter, Depends, status, BackgroundTasks
+from fastapi import APIRouter, Depends, status, BackgroundTasks, Query
 from database import get_db
+from typing import Optional
 from sqlalchemy.orm import Session
 from routers.auth import get_current_user, require_admin, require_admin_or_pentester
 from schema import ReconcileAssetPayload, BulkReconcileAssetPayload
@@ -92,3 +93,34 @@ def reconcile_asset(payload: ReconcileAssetPayload, current_user: dict = Depends
 @router.post("/reconcile-asset/bulk", summary="[Admin] Bulk Link Mario Assets to KISS24")
 def bulk_reconcile_assets(payload: BulkReconcileAssetPayload, current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
     return kiss24_app_service.bulk_reconcile_assets(db, payload, current_user)
+
+
+@router.get("/raw/synced/", summary="[Admin] Get all raw assets synced with Kiss24")
+def get_kiss24_synced_raw_assets(
+    page: int = Query(1, ge=1),
+    search: Optional[str] = None,
+    sort_by: str = Query("name"),
+    sort_dir: str = Query("asc"),
+    current_user: dict = Depends(require_admin), db: Session = Depends(get_db)
+):
+    """Returns a list of raw assets that have a Kiss24 ID."""
+    return kiss24_app_service.get_kiss24_synced_raw_assets_paginated(
+        db, current_user, page=page, limit=20, search=search, sort_by=sort_by, sort_dir=sort_dir
+    )
+
+
+@router.get("/tests/synced/", summary="[Admin] Get all tests synced with Kiss24")
+def get_kiss24_synced_tests(
+    page: int = Query(1, ge=1),
+    search: Optional[str] = None,
+    service_lane: Optional[str] = None,
+    status: Optional[str] = None,
+    sort_by: str = Query("name"),
+    sort_dir: str = Query("asc"),
+    current_user: dict = Depends(require_admin), db: Session = Depends(get_db)
+):
+    """Returns a list of tests that are mapped to a Kiss24 pentest."""
+    return kiss24_app_service.get_kiss24_synced_tests_paginated(
+        db, current_user, page=page, limit=20, search=search, service_lane=service_lane,
+        status=status, sort_by=sort_by, sort_dir=sort_dir
+    )
