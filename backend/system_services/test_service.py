@@ -44,7 +44,7 @@ from utils.vuln_analysis import build_payload, run_cloud_run_analysis
 from system_services.rag_service import process_test_documents_background
 from presentations.presentation import generate_presentation
 from reports import osrgt_v3, pdf_gen
-from utils.kiss24_service import validate_kiss24_findings, get_vuln_fields_map, fetch_all_kiss24, get_report_type_id
+from utils.kiss24_app_service import validate_kiss24_findings, get_vuln_fields_map, fetch_all_kiss24, get_report_type_id
 from utils.timeaware import aware_utcnow
 
 FRONTEND_TO_DB_STAGES = {

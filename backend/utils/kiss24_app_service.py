@@ -361,6 +361,30 @@ def get_custom_fields_choice_uuid(ouuid: str, field_name: str, choice_text: str)
 
     return None
 
+# edit test details
+def edit_test_details(test_uuid: str, details: str, user_api_key: str = None):
+    endpoint = f"tests/{test_uuid}/edit"
+    url = f"{KISS_24_ENDPOINT}{endpoint}"
+    body = {"details": details}
+
+    key_to_use = user_api_key if user_api_key else api_key()
+
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(body).encode("utf-8"),
+        headers={"x-api-key": key_to_use, "Content-Type": "application/json"},
+        method="PATCH"
+    )
+
+    try:
+        with urllib.request.urlopen(req) as res:
+            return res.status == 200
+    except urllib.error.HTTPError as e:
+        err_body = e.read().decode('utf-8')
+        raise Exception(f"KISS24 Rejected Test Edit (HTTP {e.code}): {err_body}")
+    except Exception as e:
+        raise Exception(f"Connection Error: {str(e)}")
+
 
 # ==========================================
 # ---  3. TEST-VULN CREATION ON KISS24   ---

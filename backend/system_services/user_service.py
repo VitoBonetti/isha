@@ -7,7 +7,7 @@ from models.users import Users
 from models.tests import Assignments
 from models.notifications import Notifications
 from audit_logger import log_audit_event
-from utils.kiss24_service import verify_kiss24_api_key
+from utils.kiss24_app_service import verify_kiss24_api_key
 from utils.security_cipher import get_cipher
 from utils.timeaware import aware_utcnow
 

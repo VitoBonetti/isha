@@ -20,7 +20,7 @@ from audit_logger import log_audit_event
 from utils.secret_manager import get_secret
 from utils.security_cipher import get_cipher
 from utils.timeaware import aware_utcnow
-from utils.kiss24_service import (
+from utils.kiss24_app_service import (
     map_asset_onetrust_custom_field,
     map_organizations,
     create_test,
@@ -34,7 +34,8 @@ from utils.kiss24_service import (
     get_custom_fields_choice_uuid,
     fetch_validating_vulnerabilities,
     fetch_validation_info,
-    get_unmapped_kiss24_assets
+    get_unmapped_kiss24_assets,
+    edit_test_details
 )
 
 KISS_24_TEMP_BUCKET = os.environ.get("KISS_24_TEMP_BUCKET")
@@ -308,6 +309,40 @@ def create_kiss24_test(db: Session, test_id: str, current_user: dict):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def update_kiss24_test_details(db: Session, test_id: str, payload: dict, current_user: dict):
+    try:
+        test = db.query(Tests).filter(Tests.id == test_id).first()
+        if not test:
+            raise HTTPException(status_code=404, detail="Test not found.")
+        if not test.kiss24:
+            raise HTTPException(status_code=400, detail="Test is not linked to Keep Secure 24.")
+
+        check_maintainer_lane_access(current_user, str(test.service_lane_id))
+        user_api_key = get_user_kiss24_key(db, str(current_user["id"]))
+
+        details_text = payload.get("details", "")
+
+        success = edit_test_details(str(test.kiss24), details_text, user_api_key)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to update test details in Keep Secure 24.")
+
+        log_audit_event(
+            str(current_user["id"]),
+            current_user.get("role", "pentester"),
+            "KISS24_TEST_UPDATED",
+            "KISS24",
+            str(test_id),
+            f"Updated Keep Secure 24 Test details for UUID: {test.kiss24}"
+        )
+        return {"status": "Success", "message": "Test details successfully updated in KISS24!"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 def get_kiss24_live_status(db: Session, test_id: str, current_user: dict):
     test = db.query(Tests).filter(Tests.id == test_id).first()
     if not test: raise HTTPException(status_code=404, detail="Test not found.")
@@ -320,7 +355,7 @@ def get_kiss24_live_status(db: Session, test_id: str, current_user: dict):
 
     item = raw_data["items"][0]
     return {
-        "id": item.get("id"), "name": item.get("name"), "state": item.get("state"), "light": item.get("light"),
+        "id": item.get("id"), "name": item.get("name"), "state": item.get("state"), "details": item.get("details"), "light": item.get("light"),
         "scheduled_date": item.get("scheduled_date"), "organisation_name": (item.get("organisation") or {}).get("name"),
         "requested_at": item.get("requested_at"), "requested_by_email": (item.get("requested_by") or {}).get("email"),
         "started_at": item.get("started_at"), "started_by_email": (item.get("started_by") or {}).get("email"),

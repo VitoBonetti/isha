@@ -17,7 +17,7 @@ from database import SessionLocal
 from utils.document_parser import extract_text_from_drive_file
 from utils.secret_manager import get_secret
 from utils.drive_manager import DriveManager
-from utils.kiss24_service import get_test_vulns_info
+from utils.kiss24_app_service import get_test_vulns_info
 from audit_logger import log_audit_event
 from utils.timeaware import aware_utcnow
 

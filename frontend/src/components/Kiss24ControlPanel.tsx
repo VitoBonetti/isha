@@ -3,7 +3,7 @@ import axios from 'axios';
 import toast from 'react-hot-toast';
 import {
   X, Cable, CheckCircle2, AlertCircle, BrainCircuit,
-  Database, Activity, ShieldAlert, Lock, RefreshCw, Send, Check, DownloadCloud, Clock, User, ExternalLink, FingerprintPattern, TestTubeDiagonal, Bug, FileDown
+  Database, Activity, ShieldAlert, Lock, RefreshCw, Send, Check, DownloadCloud, Clock, User, ExternalLink, FingerprintPattern, TestTubeDiagonal, Bug, FileDown, Edit2, Save
 } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
 import Kiss24KeyModal from './Modals/Kiss24KeyModal';
@@ -32,6 +32,11 @@ export default function Kiss24ControlPanel({ isOpen, onClose, test, onRefresh }:
   const [isFetchingVulns, setIsFetchingVulns] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isKeyModalOpen, setIsKeyModalOpen] = useState(false);
+
+  // Edit Details States
+  const [isEditingDetails, setIsEditingDetails] = useState(false);
+  const [editDetailsContent, setEditDetailsContent] = useState("");
+  const [isSavingDetails, setIsSavingDetails] = useState(false);
 
   // Vuln report generation
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
@@ -66,7 +71,7 @@ export default function Kiss24ControlPanel({ isOpen, onClose, test, onRefresh }:
   const testKiss24Uuid = test?.kiss24;
   const serviceLaneName = test?.service_lane_name || 'Unknown Service';
 
-  // 2. Tab Unlocking Logic (Fixed)
+  // 2. Tab Unlocking Logic
   const isKeyReady = currentUser?.has_kiss24_key && isKeyValid !== false;
   const canAccessTests = !!countryKiss24Uuid && !!assetKiss24Id && isKeyReady;
   const canAccessVulns = canAccessTests && !!testKiss24Uuid && isKeyReady;
@@ -184,6 +189,21 @@ export default function Kiss24ControlPanel({ isOpen, onClose, test, onRefresh }:
     }
   };
 
+  const handleSaveDetails = async () => {
+    setIsSavingDetails(true);
+    const toastId = toast.loading("Saving details to Keep Secure 24...");
+    try {
+      await axios.patch(`/api/kiss24/${test.id}/edit-test`, { details: editDetailsContent });
+      toast.success("Details successfully updated!", { id: toastId });
+      setIsEditingDetails(false);
+      handleFetchLiveStatus(); // Refresh the live data to show the new saved details
+    } catch (e: any) {
+      toast.error(e.response?.data?.detail || "Failed to update test details.", { id: toastId });
+    } finally {
+      setIsSavingDetails(false);
+    }
+  };
+
   const handleFetchVulns = async () => {
     setIsFetchingVulns(true);
     const toastId = toast.loading("Fetching vulnerabilities from Keep Secure 24...");
@@ -221,7 +241,7 @@ export default function Kiss24ControlPanel({ isOpen, onClose, test, onRefresh }:
     try {
       await axios.post(`/api/tests/${test.id}/vulnerabilities/report`, { vuln_uuids: uuids });
       toast.success(`${uuids.length} report(s) generation started!`, { id: toastId });
-      setSelectedVulns(new Set()); // Clear selection after successful dispatch
+      setSelectedVulns(new Set());
     } catch (e: any) {
       toast.error(e.response?.data?.detail || "Failed to generate report(s).", { id: toastId });
     } finally {
@@ -235,14 +255,12 @@ export default function Kiss24ControlPanel({ isOpen, onClose, test, onRefresh }:
     setTimeout(() => setIsRefreshing(false), 800);
   };
 
-  // Date Formatting for the Recap
   const generateFormattedDate = () => {
     if (!test?.start_year || !test?.start_week) return "Not Scheduled (Required)";
     const simpleDate = new Date(test.start_year, 0, 1 + (test.start_week - 1) * 7);
     return simpleDate.toISOString().split('T')[0];
   };
 
-  // Helper for Severity Colors
   const getSeverityColor = (sev: string) => {
     switch (sev?.toLowerCase()) {
       case 'critical': return 'bg-purple-100 text-purple-700 dark:bg-purple-500/20 dark:text-purple-400 border-purple-200 dark:border-purple-500/30';
@@ -284,7 +302,7 @@ export default function Kiss24ControlPanel({ isOpen, onClose, test, onRefresh }:
             </button>
           </div>
 
-          {/* TABS - Scrollable horizontally on mobile */}
+          {/* TABS */}
           <div className="flex border-b border-slate-200 dark:border-zinc-800 px-2 sm:px-6 bg-slate-50/50 dark:bg-zinc-900/30 shrink-0 overflow-x-auto no-scrollbar whitespace-nowrap">
             <button onClick={() => handleTabSwitch('identifiers')} className={`py-3 sm:py-4 px-3 sm:px-4 text-xs sm:text-sm font-bold border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'identifiers' ? 'border-blue-600 text-blue-600 dark:text-blue-400' : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-zinc-200'}`}>
               <FingerprintPattern size={16} /> Identifiers
@@ -312,10 +330,7 @@ export default function Kiss24ControlPanel({ isOpen, onClose, test, onRefresh }:
                         You must configure your Keep Secure 24 API key before you can interact with the external platform.
                       </div>
                     </div>
-                    <button
-                      onClick={() => setIsKeyModalOpen(true)}
-                      className="w-full sm:w-auto shrink-0 px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-lg transition-colors shadow-md"
-                    >
+                    <button onClick={() => setIsKeyModalOpen(true)} className="w-full sm:w-auto shrink-0 px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-lg transition-colors shadow-md">
                       Configure Key
                     </button>
                   </div>
@@ -330,10 +345,7 @@ export default function Kiss24ControlPanel({ isOpen, onClose, test, onRefresh }:
                         Your Keep Secure 24 API key was rejected by the server. It may have expired or been revoked.
                       </div>
                     </div>
-                    <button
-                      onClick={() => setIsKeyModalOpen(true)}
-                      className="w-full sm:w-auto shrink-0 px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold rounded-lg transition-colors shadow-md"
-                    >
+                    <button onClick={() => setIsKeyModalOpen(true)} className="w-full sm:w-auto shrink-0 px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold rounded-lg transition-colors shadow-md">
                       Reset Key
                     </button>
                   </div>
@@ -344,108 +356,62 @@ export default function Kiss24ControlPanel({ isOpen, onClose, test, onRefresh }:
                 </div>
 
                 <div className="space-y-4 flex-1">
-                  {/* Country Check */}
+                  {/* Checks omitted for brevity in snippet, keeping intact */}
                   <div className={`p-4 sm:p-5 rounded-xl border flex flex-col md:flex-row items-start md:items-center justify-between gap-3 sm:gap-4 shadow-sm ${countryKiss24Uuid ? 'bg-white dark:bg-zinc-900 border-slate-200 dark:border-zinc-800' : 'bg-red-50 dark:bg-red-900/10 border-red-200 dark:border-red-900/30'}`}>
                     <div className="flex items-start gap-3 sm:gap-4 w-full md:w-auto">
                       {countryKiss24Uuid ? <CheckCircle2 size={24} className="text-emerald-500 shrink-0 mt-0.5" /> : <AlertCircle size={24} className="text-red-500 shrink-0 mt-0.5" />}
                       <div className="flex-1 min-w-0">
                         <span className={`font-bold text-sm sm:text-base block mb-1 ${countryKiss24Uuid ? 'text-slate-900 dark:text-zinc-100' : 'text-red-800 dark:text-red-400'}`}>1. Country KISS24 UUID</span>
-                        <div className="bg-slate-100 dark:bg-zinc-950 p-2 rounded text-[10px] sm:text-xs font-mono text-slate-600 dark:text-zinc-400 break-all border border-slate-200 dark:border-zinc-800">
-                          {countryKiss24Uuid || "MISSING"}
-                        </div>
+                        <div className="bg-slate-100 dark:bg-zinc-950 p-2 rounded text-[10px] sm:text-xs font-mono text-slate-600 dark:text-zinc-400 break-all border border-slate-200 dark:border-zinc-800">{countryKiss24Uuid || "MISSING"}</div>
                       </div>
                     </div>
                   </div>
 
-                  {/* Asset Check */}
                   <div className={`p-4 sm:p-5 rounded-xl border flex flex-col md:flex-row items-start md:items-center justify-between gap-3 sm:gap-4 shadow-sm ${assetKiss24Id ? 'bg-white dark:bg-zinc-900 border-slate-200 dark:border-zinc-800' : 'bg-red-50 dark:bg-red-900/10 border-red-200 dark:border-red-900/30'}`}>
                     <div className="flex items-start gap-3 sm:gap-4 w-full md:w-auto">
                       {assetKiss24Id ? <CheckCircle2 size={24} className="text-emerald-500 shrink-0 mt-0.5" /> : <AlertCircle size={24} className="text-red-500 shrink-0 mt-0.5" />}
                       <div className="flex-1 min-w-0">
                         <span className={`font-bold text-sm sm:text-base block mb-1 ${assetKiss24Id ? 'text-slate-900 dark:text-zinc-100' : 'text-red-800 dark:text-red-400'}`}>2. Raw Asset KISS24 ID</span>
-                        <div className="bg-slate-100 dark:bg-zinc-950 p-2 rounded text-[10px] sm:text-xs font-mono text-slate-600 dark:text-zinc-400 break-all border border-slate-200 dark:border-zinc-800">
-                          {assetKiss24Id || "MISSING"}
-                        </div>
+                        <div className="bg-slate-100 dark:bg-zinc-950 p-2 rounded text-[10px] sm:text-xs font-mono text-slate-600 dark:text-zinc-400 break-all border border-slate-200 dark:border-zinc-800">{assetKiss24Id || "MISSING"}</div>
                       </div>
                     </div>
                   </div>
 
-                  {/* Test Check */}
                   <div className={`p-4 sm:p-5 rounded-xl border flex items-start gap-3 sm:gap-4 shadow-sm ${testKiss24Uuid ? 'bg-white dark:bg-zinc-900 border-slate-200 dark:border-zinc-800' : 'bg-amber-50 dark:bg-amber-900/10 border-amber-200 dark:border-amber-900/30'}`}>
                     {testKiss24Uuid ? <CheckCircle2 size={24} className="text-emerald-500 shrink-0 mt-0.5" /> : <Lock size={24} className="text-amber-500 shrink-0 mt-0.5" />}
                     <div className="flex-1 min-w-0">
                       <span className={`font-bold text-sm sm:text-base block mb-1 ${testKiss24Uuid ? 'text-slate-900 dark:text-zinc-100' : 'text-amber-800 dark:text-amber-400'}`}>3. Test Entity UUID</span>
                       <p className="text-xs sm:text-sm text-slate-500 dark:text-zinc-400 mb-2">Generated by KISS24 upon successful registration.</p>
-                      <div className="bg-slate-100 dark:bg-zinc-950 p-2 rounded text-[10px] sm:text-xs font-mono text-slate-600 dark:text-zinc-400 break-all border border-slate-200 dark:border-zinc-800">
-                        {testKiss24Uuid || "NOT GENERATED YET"}
-                      </div>
+                      <div className="bg-slate-100 dark:bg-zinc-950 p-2 rounded text-[10px] sm:text-xs font-mono text-slate-600 dark:text-zinc-400 break-all border border-slate-200 dark:border-zinc-800">{testKiss24Uuid || "NOT GENERATED YET"}</div>
                     </div>
                   </div>
                 </div>
 
-                {/* ADMIN ACTION PANEL */}
                 {currentUser?.role === 'admin' && (
                   <div className="mt-8 pt-6 border-t border-slate-200 dark:border-zinc-800">
                     <h3 className="text-sm font-bold text-slate-800 dark:text-zinc-200 mb-1 flex items-center gap-2">
                       <Database size={16} className="text-blue-500" /> Global Synchronization
                     </h3>
-                    <p className="text-xs text-slate-500 dark:text-zinc-400 mb-4">
-                      Admin-only actions to batch update Keep Secure 24 mappings across all services.
-                    </p>
-
+                    <p className="text-xs text-slate-500 dark:text-zinc-400 mb-4">Admin-only actions to batch update Keep Secure 24 mappings across all services.</p>
                     <div className="grid grid-cols-1 sm:grid-cols-5 gap-3">
-                      <button
-                        onClick={handleGlobalSyncOrg}
-                        disabled={isSyncingOrg}
-                        className="flex flex-col items-center justify-center gap-3 p-4 bg-slate-50 hover:bg-slate-100 dark:bg-zinc-900 dark:hover:bg-zinc-800/80 border border-slate-200 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 font-bold text-xs rounded-xl transition-all shadow-sm disabled:opacity-50"
-                      >
-                        <div className={`p-2 rounded-lg ${isSyncingOrg ? 'bg-blue-100 text-blue-600 dark:bg-blue-900/30' : 'bg-slate-200 text-slate-600 dark:bg-zinc-800 dark:text-zinc-400'}`}>
-                          <RefreshCw size={18} className={isSyncingOrg ? 'animate-spin' : ''} />
-                        </div>
+                      <button onClick={handleGlobalSyncOrg} disabled={isSyncingOrg} className="flex flex-col items-center justify-center gap-3 p-4 bg-slate-50 hover:bg-slate-100 dark:bg-zinc-900 dark:hover:bg-zinc-800/80 border border-slate-200 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 font-bold text-xs rounded-xl transition-all shadow-sm disabled:opacity-50">
+                        <div className={`p-2 rounded-lg ${isSyncingOrg ? 'bg-blue-100 text-blue-600 dark:bg-blue-900/30' : 'bg-slate-200 text-slate-600 dark:bg-zinc-800 dark:text-zinc-400'}`}><RefreshCw size={18} className={isSyncingOrg ? 'animate-spin' : ''} /></div>
                         Sync Orgs
                       </button>
-
-                      <button
-                        onClick={handleGlobalSyncAsset}
-                        disabled={isSyncingAsset}
-                        className="flex flex-col items-center justify-center gap-3 p-4 bg-slate-50 hover:bg-slate-100 dark:bg-zinc-900 dark:hover:bg-zinc-800/80 border border-slate-200 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 font-bold text-xs rounded-xl transition-all shadow-sm disabled:opacity-50"
-                      >
-                        <div className={`p-2 rounded-lg ${isSyncingAsset ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30' : 'bg-slate-200 text-slate-600 dark:bg-zinc-800 dark:text-zinc-400'}`}>
-                          <RefreshCw size={18} className={isSyncingAsset ? 'animate-spin' : ''} />
-                        </div>
+                      <button onClick={handleGlobalSyncAsset} disabled={isSyncingAsset} className="flex flex-col items-center justify-center gap-3 p-4 bg-slate-50 hover:bg-slate-100 dark:bg-zinc-900 dark:hover:bg-zinc-800/80 border border-slate-200 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 font-bold text-xs rounded-xl transition-all shadow-sm disabled:opacity-50">
+                        <div className={`p-2 rounded-lg ${isSyncingAsset ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30' : 'bg-slate-200 text-slate-600 dark:bg-zinc-800 dark:text-zinc-400'}`}><RefreshCw size={18} className={isSyncingAsset ? 'animate-spin' : ''} /></div>
                         Sync Assets
                       </button>
-
-                      <button
-                        onClick={handleSyncKissSnowID}
-                        disabled={isSyncingSnowID}
-                        className="flex flex-col items-center justify-center gap-3 p-4 bg-slate-50 hover:bg-slate-100 dark:bg-zinc-900 dark:hover:bg-zinc-800/80 border border-slate-200 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 font-bold text-xs rounded-xl transition-all shadow-sm disabled:opacity-50"
-                      >
-                        <div className={`p-2 rounded-lg ${isSyncingSnowID ? 'bg-amber-100 text-amber-600 dark:bg-amber-900/30' : 'bg-slate-200 text-slate-600 dark:bg-zinc-800 dark:text-zinc-400'}`}>
-                          <RefreshCw size={18} className={isSyncingSnowID ? 'animate-spin' : ''} />
-                        </div>
+                      <button onClick={handleSyncKissSnowID} disabled={isSyncingSnowID} className="flex flex-col items-center justify-center gap-3 p-4 bg-slate-50 hover:bg-slate-100 dark:bg-zinc-900 dark:hover:bg-zinc-800/80 border border-slate-200 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 font-bold text-xs rounded-xl transition-all shadow-sm disabled:opacity-50">
+                        <div className={`p-2 rounded-lg ${isSyncingSnowID ? 'bg-amber-100 text-amber-600 dark:bg-amber-900/30' : 'bg-slate-200 text-slate-600 dark:bg-zinc-800 dark:text-zinc-400'}`}><RefreshCw size={18} className={isSyncingSnowID ? 'animate-spin' : ''} /></div>
                         Sync SnowID
                       </button>
-
-                      <button
-                        onClick={handleSyncKissVulnTypesID}
-                        disabled={isSyncingVulnTypesID}
-                        className="flex flex-col items-center justify-center gap-3 p-4 bg-slate-50 hover:bg-slate-100 dark:bg-zinc-900 dark:hover:bg-zinc-800/80 border border-slate-200 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 font-bold text-xs rounded-xl transition-all shadow-sm disabled:opacity-50"
-                      >
-                        <div className={`p-2 rounded-lg ${isSyncingVulnTypesID ? 'bg-amber-100 text-amber-600 dark:bg-amber-900/30' : 'bg-slate-200 text-slate-600 dark:bg-zinc-800 dark:text-zinc-400'}`}>
-                          <RefreshCw size={18} className={isSyncingVulnTypesID ? 'animate-spin' : ''} />
-                        </div>
+                      <button onClick={handleSyncKissVulnTypesID} disabled={isSyncingVulnTypesID} className="flex flex-col items-center justify-center gap-3 p-4 bg-slate-50 hover:bg-slate-100 dark:bg-zinc-900 dark:hover:bg-zinc-800/80 border border-slate-200 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 font-bold text-xs rounded-xl transition-all shadow-sm disabled:opacity-50">
+                        <div className={`p-2 rounded-lg ${isSyncingVulnTypesID ? 'bg-amber-100 text-amber-600 dark:bg-amber-900/30' : 'bg-slate-200 text-slate-600 dark:bg-zinc-800 dark:text-zinc-400'}`}><RefreshCw size={18} className={isSyncingVulnTypesID ? 'animate-spin' : ''} /></div>
                         Sync Types
                       </button>
-
-                      <button
-                        onClick={handleSyncKissUserID}
-                        disabled={isSyncingUserKissID}
-                        className="flex flex-col items-center justify-center gap-3 p-4 bg-slate-50 hover:bg-slate-100 dark:bg-zinc-900 dark:hover:bg-zinc-800/80 border border-slate-200 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 font-bold text-xs rounded-xl transition-all shadow-sm disabled:opacity-50"
-                      >
-                        <div className={`p-2 rounded-lg ${isSyncingUserKissID ? 'bg-amber-100 text-amber-600 dark:bg-amber-900/30' : 'bg-slate-200 text-slate-600 dark:bg-zinc-800 dark:text-zinc-400'}`}>
-                          <RefreshCw size={18} className={isSyncingUserKissID ? 'animate-spin' : ''} />
-                        </div>
+                      <button onClick={handleSyncKissUserID} disabled={isSyncingUserKissID} className="flex flex-col items-center justify-center gap-3 p-4 bg-slate-50 hover:bg-slate-100 dark:bg-zinc-900 dark:hover:bg-zinc-800/80 border border-slate-200 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 font-bold text-xs rounded-xl transition-all shadow-sm disabled:opacity-50">
+                        <div className={`p-2 rounded-lg ${isSyncingUserKissID ? 'bg-amber-100 text-amber-600 dark:bg-amber-900/30' : 'bg-slate-200 text-slate-600 dark:bg-zinc-800 dark:text-zinc-400'}`}><RefreshCw size={18} className={isSyncingUserKissID ? 'animate-spin' : ''} /></div>
                         Sync Users
                       </button>
                     </div>
@@ -557,6 +523,59 @@ export default function Kiss24ControlPanel({ isOpen, onClose, test, onRefresh }:
                             <span className="font-medium text-xs sm:text-sm text-slate-800 dark:text-zinc-200">{liveData.name}</span>
                           </div>
 
+                          {/* EDITABLE DETAILS PAYLOAD RENDERING */}
+                          {liveData.details !== undefined && (
+                            <div className="md:col-span-2 pt-2 border-t border-slate-100 dark:border-zinc-800/50">
+                              <div className="flex items-center justify-between mb-2">
+                                <span className="text-[9px] sm:text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
+                                  Details Payload
+                                </span>
+                                {!isEditingDetails ? (
+                                  <button
+                                    onClick={() => {
+                                      setEditDetailsContent(liveData.details || "");
+                                      setIsEditingDetails(true);
+                                    }}
+                                    className="text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 hover:underline flex items-center gap-1 transition-colors"
+                                  >
+                                    <Edit2 size={12} /> Edit HTML
+                                  </button>
+                                ) : (
+                                  <div className="flex items-center gap-2">
+                                    <button
+                                      onClick={() => setIsEditingDetails(false)}
+                                      disabled={isSavingDetails}
+                                      className="text-xs font-bold text-slate-500 hover:text-slate-700 dark:hover:text-zinc-300 transition-colors"
+                                    >
+                                      Cancel
+                                    </button>
+                                    <button
+                                      onClick={handleSaveDetails}
+                                      disabled={isSavingDetails}
+                                      className="text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white px-2.5 py-1 rounded-md flex items-center gap-1.5 transition-colors shadow-sm disabled:opacity-70"
+                                    >
+                                      {isSavingDetails ? <RefreshCw size={12} className="animate-spin" /> : <Save size={12} />} Save
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+
+                              {isEditingDetails ? (
+                                <textarea
+                                  value={editDetailsContent}
+                                  onChange={(e) => setEditDetailsContent(e.target.value)}
+                                  className="w-full h-48 p-3 text-xs font-mono bg-slate-50 dark:bg-zinc-950 border border-indigo-300 dark:border-indigo-700 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 custom-scrollbar resize-y text-slate-700 dark:text-zinc-300"
+                                  placeholder="<p>Enter raw HTML here...</p>"
+                                />
+                              ) : (
+                                <div
+                                  className="bg-slate-50 dark:bg-zinc-950 p-3.5 rounded-lg text-xs sm:text-sm text-slate-700 dark:text-zinc-300 border border-slate-200 dark:border-zinc-800 max-h-64 overflow-y-auto custom-scrollbar prose prose-sm dark:prose-invert max-w-none"
+                                  dangerouslySetInnerHTML={{ __html: liveData.details || "<span class='text-slate-400 italic'>No details provided.</span>" }}
+                                />
+                              )}
+                            </div>
+                          )}
+
                           <div className="pt-3 border-t border-slate-100 dark:border-zinc-800/50">
                             <span className="text-[9px] sm:text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1 flex items-center gap-1"><Clock size={12}/> Scheduled For</span>
                             <span className="text-xs sm:text-sm text-slate-800 dark:text-zinc-200">{liveData.scheduled_date || '-'}</span>
@@ -661,7 +680,6 @@ export default function Kiss24ControlPanel({ isOpen, onClose, test, onRefresh }:
                         <div className="p-3 sm:p-4 border-b border-slate-100 dark:border-zinc-800/50 flex flex-col sm:flex-row justify-between items-start gap-3 sm:gap-4">
 
                           <div className="flex items-start gap-3 w-full">
-                            {/* Individual Checkbox */}
                             <input
                               type="checkbox"
                               checked={selectedVulns.has(vuln.uuid)}
@@ -686,7 +704,6 @@ export default function Kiss24ControlPanel({ isOpen, onClose, test, onRefresh }:
                             </div>
                           </div>
 
-                          {/* Actions Area */}
                           <div className="flex shrink-0 w-full sm:w-auto gap-2">
                             <button
                               onClick={() => handleGenerateVulnReports([vuln.uuid])}
@@ -727,7 +744,6 @@ export default function Kiss24ControlPanel({ isOpen, onClose, test, onRefresh }:
 
           {/* FOOTER */}
           <div className="p-4 sm:p-5 md:p-6 border-t border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-950 flex justify-between items-center shrink-0">
-            {/* FIXED: Added visual refresh state to footer button */}
             <button
               onClick={handleLocalRefresh}
               disabled={isRefreshing}
@@ -750,7 +766,7 @@ export default function Kiss24ControlPanel({ isOpen, onClose, test, onRefresh }:
         isOpen={isCreateVulnModalOpen}
         testId={test.id}
         onClose={() => setIsCreateVulnModalOpen(false)}
-        onSuccess={handleFetchVulns} // Automatically fetch the new vulns after publishing!
+        onSuccess={handleFetchVulns}
       />
     </div>
   );
