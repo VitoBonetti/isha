@@ -11,6 +11,9 @@ import html2text
 import google.auth
 import json
 import os
+import time
+import httplib2
+from google_auth_httplib2 import AuthorizedHttp
 from pptx import Presentation
 from pptx.util import Inches, Cm, Pt
 from pptx.chart.data import CategoryChartData, ChartData
@@ -477,9 +480,14 @@ def analyze_and_fix(healthy_check, details, session, headers, testUUID):
 
 # --- Google Cloud Helper Functions ---
 def get_drive_service():
-    """Authenticates using default service account credentials and returns a Google Drive service object."""
+    """Authenticates using default service account credentials with an extended 5-minute timeout."""
     credentials, project = google.auth.default(scopes=['https://www.googleapis.com/auth/drive'])
-    return build('drive', 'v3', credentials=credentials)
+
+    # Extend the socket timeout to 300 seconds to wait for Google Slides conversion
+    http = httplib2.Http(timeout=300)
+    authed_http = AuthorizedHttp(credentials, http=http)
+
+    return build('drive', 'v3', http=authed_http)
 
 
 def get_file_id_by_name(service, folder_id, file_name):
@@ -513,22 +521,43 @@ def download_drive_file(service, file_id):
 
 
 def upload_drive_file(service, folder_id, filename, file_stream):
-    """Uploads a file stream to a specific Google Drive folder."""
+    """Uploads a file stream, converts it to Google Slides, and recovers gracefully on timeout."""
     try:
         file_metadata = {
             'name': filename,
             'parents': [folder_id],
             'mimeType': 'application/vnd.google-apps.presentation'
         }
+
         media = MediaIoBaseUpload(
             file_stream,
             mimetype='application/vnd.openxmlformats-officedocument.presentationml.presentation',
             resumable=True
         )
-        file = service.files().create(body=file_metadata, media_body=media, fields='id, webViewLink', supportsAllDrives=True).execute()
+
+        file = service.files().create(body=file_metadata, media_body=media, fields='id, webViewLink',
+                                      supportsAllDrives=True).execute()
         return file.get('id'), file.get('webViewLink')
-    except HttpError as error:
-        print(f"An error occurred while uploading file '{filename}': {error}")
+
+    except Exception as error:
+        error_str = str(error).lower()
+        print(f"An error/timeout occurred while uploading '{filename}': {error}")
+
+        # RECOVERY PROTOCOL: If the Python client timed out, check if Google finished the file anyway!
+        if "time" in error_str or "read operation" in error_str:
+            print(f"[RECOVERY] Drive API timed out. Waiting 5s then searching for '{filename}'...")
+            try:
+                time.sleep(5)  # Give Google a few seconds to index the newly converted file
+                file_id = get_file_id_by_name(service, folder_id, filename)
+                file_info = service.files().get(fileId=file_id, fields='id, webViewLink',
+                                                supportsAllDrives=True).execute()
+                print(f"[RECOVERY SUCCESS] Found converted file ID: {file_id}")
+
+                return file_info.get('id'), file_info.get('webViewLink')
+            except Exception as recovery_error:
+                raise Exception(f"Drive API timed out and recovery search failed: {recovery_error}")
+
+        # If it's a completely different error, raise it normally
         raise
 
 

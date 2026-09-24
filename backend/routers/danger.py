@@ -40,6 +40,16 @@ def wipe_drive_folders(background_tasks: BackgroundTasks, current_user: dict = D
     return res
 
 
+@router.delete("/tests/wipe-orphan-documents", summary="[Admin Only]")
+def wipe_orphan_documents(background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    """
+    Admin-Only endpoint to scan Google Drive and remove orphaned documents (ghost files) from the RAG database.
+    """
+    res = danger_service.wipe_orphan_documents(db, current_user)
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+    return res
+
+
 @router.delete("/tests/wipe-documents", summary="[Admin Only]")
 def wipe_all_documents(background_tasks: BackgroundTasks, current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
     """

@@ -5,6 +5,7 @@ import fitz  # PyMuPDF
 from docx import Document
 from pptx import Presentation
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 import google.auth
 from audit_logger import log_audit_event
 
@@ -31,82 +32,74 @@ def get_drive_service():
 def extract_text_from_drive_file(drive_file_id: str, mime_type: str) -> str:
     """
     Downloads or exports a file from Google Drive and extracts all text.
-    Includes a strict memory cap to prevent OOM panics from oversized blobs.
+    Handles both native Google Workspace files (Google Slides/Docs/Sheets)
+    and standard binary uploads (.pptx, .pdf, .docx).
     """
     service = get_drive_service()
+    real_mime_type = mime_type
 
-    # Enforce 25MB File Size Limit
+    # 1. FETCH LIVE METADATA FROM GOOGLE DRIVE (Size + Real MIME Type)
     try:
-        file_metadata = service.files().get(fileId=drive_file_id, fields="size").execute()
-        # Native Google Docs/Sheets don't return a 'size' field, so we default to 0
+        file_metadata = service.files().get(fileId=drive_file_id, fields="size, mimeType").execute()
         file_size_bytes = int(file_metadata.get('size', 0))
+
+        # Override DB mime_type with the actual MIME type from Google Drive
+        if file_metadata.get('mimeType'):
+            real_mime_type = file_metadata.get('mimeType')
 
         MAX_FILE_SIZE_MB = 25
         if file_size_bytes > (MAX_FILE_SIZE_MB * 1024 * 1024):
             log_audit_event(
-                user_id="SYSTEM",
-                role="SYSTEM",
-                action="DOCUMENT_PARSING_EXTRACT_TEXT_ERROR",
-                resource_type="DOCUMENT_PARSING",
-                resource_id="DOCUMENT_PARSING",
-                details=f"File exceeds maximum allowed ingestion size of {MAX_FILE_SIZE_MB}MB. (Detected: {file_size_bytes / (1024 * 1024):.1f}MB). Parsing aborted to prevent memory exhaustion"
+                user_id="SYSTEM", role="SYSTEM", action="DOCUMENT_PARSING_EXTRACT_TEXT_ERROR",
+                resource_type="DOCUMENT_PARSING", resource_id="DOCUMENT_PARSING",
+                details=f"File exceeds maximum allowed size of {MAX_FILE_SIZE_MB}MB."
             )
-            raise ValueError(
-                f"File exceeds maximum allowed ingestion size of {MAX_FILE_SIZE_MB}MB "
-                f"(Detected: {file_size_bytes / (1024 * 1024):.1f}MB). "
-                f"Parsing aborted to prevent memory exhaustion."
-            )
+            raise ValueError(f"File exceeds maximum allowed ingestion size of {MAX_FILE_SIZE_MB}MB.")
     except ValueError as ve:
-        log_audit_event(
-            user_id="SYSTEM",
-            role="SYSTEM",
-            action="DOCUMENT_PARSING_EXTRACT_VALUE_ERROR",
-            resource_type="DOCUMENT_PARSING",
-            resource_id="DOCUMENT_PARSING",
-            details=f"Document Parsing: Value error: {ve}"
-        )
-        raise ve  # Rethrow our explicit size limit error
+        raise ve
     except Exception as ex:
         log_audit_event(
-            user_id="SYSTEM",
-            role="SYSTEM",
-            action="DOCUMENT_PARSING_EXTRACT_EXCEPTION",
-            resource_type="DOCUMENT_PARSING",
-            resource_id="DOCUMENT_PARSING",
+            user_id="SYSTEM", role="SYSTEM", action="DOCUMENT_PARSING_EXTRACT_EXCEPTION",
+            resource_type="DOCUMENT_PARSING", resource_id="DOCUMENT_PARSING",
             details=f"Ignore standard API fetch errors and proceed to download attempt: {ex}"
         )
-        # Ignore standard API fetch errors and proceed to download attempt
-        pass
 
-    # 1. HANDLE NATIVE GOOGLE WORKSPACE FILES (EXPORT)
-    if mime_type == GOOGLE_MIME_TYPES['doc']:
+    # 2. HANDLE NATIVE GOOGLE WORKSPACE FILES (EXPORT METHOD)
+    if real_mime_type == GOOGLE_MIME_TYPES['doc']:
         request = service.files().export_media(fileId=drive_file_id, mimeType=EXPORT_MIME_TYPES['doc'])
-        return request.execute().decode('utf-8')
+        return request.execute().decode('utf-8', errors='ignore')
 
-    elif mime_type == GOOGLE_MIME_TYPES['sheet']:
+    elif real_mime_type == GOOGLE_MIME_TYPES['sheet']:
         request = service.files().export_media(fileId=drive_file_id, mimeType=EXPORT_MIME_TYPES['sheet'])
-        return request.execute().decode('utf-8')
+        return request.execute().decode('utf-8', errors='ignore')
 
-    elif mime_type == GOOGLE_MIME_TYPES['slide']:
+    elif real_mime_type == GOOGLE_MIME_TYPES['slide']:
         request = service.files().export_media(fileId=drive_file_id, mimeType=EXPORT_MIME_TYPES['slide'])
-        return request.execute().decode('utf-8')
+        return request.execute().decode('utf-8', errors='ignore')
 
-    # 2. HANDLE STANDARD BLOB FILES (DOWNLOAD)
-    request = service.files().get_media(fileId=drive_file_id)
-    file_bytes = request.execute()
+    # 3. HANDLE STANDARD BLOB FILES (DOWNLOAD METHOD WITH FALLBACK)
+    try:
+        request = service.files().get_media(fileId=drive_file_id)
+        file_bytes = request.execute()
+    except HttpError as err:
+        # Fallback: If get_media fails because the file is non-binary, attempt plain text export
+        if "fileNotDownloadable" in str(err) or err.resp.status == 403:
+            request = service.files().export_media(fileId=drive_file_id, mimeType='text/plain')
+            return request.execute().decode('utf-8', errors='ignore')
+        raise err
+
     file_stream = io.BytesIO(file_bytes)
 
-    # 3. PARSE BLOB FILES BASED ON MIME TYPE
-    if mime_type == 'application/pdf':
+    # 4. PARSE BLOB FILES BASED ON REAL MIME TYPE
+    if real_mime_type == 'application/pdf':
         doc = fitz.open(stream=file_bytes, filetype="pdf")
-        text = "\n".join([page.get_text() for page in doc])
-        return text
+        return "\n".join([page.get_text() for page in doc])
 
-    elif mime_type == 'application/vnd.openxmlformats-officedocument.wordprocessingml.document':  # .docx
+    elif real_mime_type == 'application/vnd.openxmlformats-officedocument.wordprocessingml.document':  # .docx
         doc = Document(file_stream)
         return "\n".join([para.text for para in doc.paragraphs])
 
-    elif mime_type == 'application/vnd.openxmlformats-officedocument.presentationml.presentation':  # .pptx
+    elif real_mime_type == 'application/vnd.openxmlformats-officedocument.presentationml.presentation':  # .pptx
         prs = Presentation(file_stream)
         text_runs = []
         for slide in prs.slides:
@@ -117,22 +110,17 @@ def extract_text_from_drive_file(drive_file_id: str, mime_type: str) -> str:
                             text_runs.append(paragraph.text.strip())
         return "\n".join(text_runs)
 
-    elif mime_type == 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':  # .xlsx
+    elif real_mime_type == 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':  # .xlsx
         df = pd.read_excel(file_stream)
-        return df.to_csv(index=False)  # Convert Excel to CSV string for LLM readability
+        return df.to_csv(index=False)
 
-    elif mime_type == 'application/zip':
+    elif real_mime_type == 'application/zip':
         return parse_zip_file(file_stream)
 
-    elif mime_type.startswith('text/') or mime_type in [
-        'application/json',
-        'application/javascript',
-        'application/csv',
-        'text/csv',
-        'text/markdown',
-        'text/x-markdown'
+    elif real_mime_type.startswith('text/') or real_mime_type in [
+        'application/json', 'application/javascript', 'application/csv',
+        'text/csv', 'text/markdown', 'text/x-markdown'
     ]:
-        # Catches .txt, .md, .csv, .json, .py, .js etc.
         return file_bytes.decode('utf-8', errors='ignore')
 
     else:

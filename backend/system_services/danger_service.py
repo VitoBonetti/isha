@@ -1,9 +1,11 @@
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import text
-from models.tests import Tests, TestDocuments
+from googleapiclient.errors import HttpError
+from models.tests import Tests, TestDocuments, DocumentChunk
 from models.raw_assets import RawAssets, AssetCriteria
 from audit_logger import log_audit_event
+from utils.drive_manager import DriveManager
 
 
 def wipe_system_data(db: Session, current_user: dict):
@@ -138,6 +140,51 @@ def wipe_all_test_analyses(db: Session, current_user: dict):
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to wipe test_analyses.")
+
+
+def wipe_orphan_documents(db: Session, current_user: dict):
+    try:
+        drive = DriveManager()
+
+        # Fetch all physical documents (ignore virtual ones like LLM summaries)
+        docs = db.query(TestDocuments).filter(
+            (TestDocuments.is_virtual == False) | (TestDocuments.is_virtual.is_(None))
+        ).all()
+
+        orphans = []
+        for doc in docs:
+            try:
+                # Check if the file still exists in Google Drive
+                drive.drive_service.files().get(
+                    fileId=doc.drive_file_id,
+                    fields="id",
+                    supportsAllDrives=True
+                ).execute()
+            except HttpError as err:
+                # If Google Drive returns 404, flag it for deletion
+                if err.resp.status == 404:
+                    orphans.append(str(doc.id))
+
+        if orphans:
+            # Clean up the vector chunks first to respect foreign keys, then delete the ghost documents
+            db.query(DocumentChunk).filter(DocumentChunk.document_id.in_(orphans)).delete(synchronize_session=False)
+            db.query(TestDocuments).filter(TestDocuments.id.in_(orphans)).delete(synchronize_session=False)
+            db.commit()
+
+        log_audit_event(
+            user_id=str(current_user["id"]),
+            role=current_user["role"],
+            action="WIPE_ORPHAN_DOCUMENTS",
+            resource_type="DATABASE",
+            resource_id="N/A",
+            details=f"Administrator successfully purged {len(orphans)} orphaned ghost documents and their RAG chunks."
+        )
+        return {"message": f"Successfully purged {len(orphans)} ghost document(s) from the database."}
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail=f"Failed to wipe orphan documents: {str(e)}")
 
 
 def reset_asset_kpi_criteria(db: Session, current_user: dict):

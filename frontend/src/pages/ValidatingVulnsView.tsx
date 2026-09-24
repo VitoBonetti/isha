@@ -240,7 +240,28 @@ export default function ValidatingVulnsView() {
   const loadLocalData = async () => {
     try {
       const res = await axios.get('/api/kiss24/validating-vulns');
-      setVulns(res.data);
+
+      setVulns(prevVulns => {
+        // If we have no data yet (initial page load), just set it
+        if (prevVulns.length === 0) return res.data;
+
+        // Otherwise, intelligently merge the new local DB data (like ai_suggestion)
+        // into the existing rich Keep Secure 24 data currently on the screen
+        const merged = prevVulns.map(pv => {
+          const newData = res.data.find((d: any) => d.uuid === pv.uuid);
+          return newData ? { ...pv, ...newData } : pv;
+        });
+
+        // Catch any brand new items that appeared in the DB but weren't on screen
+        res.data.forEach((d: any) => {
+          if (!merged.some(m => m.uuid === d.uuid)) {
+            merged.push(d);
+          }
+        });
+
+        return merged;
+      });
+
     } catch (err) {
       toast.error("Failed to load local validation data");
     } finally {
