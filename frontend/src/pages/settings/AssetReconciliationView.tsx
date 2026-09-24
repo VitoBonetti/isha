@@ -4,9 +4,9 @@ import toast from 'react-hot-toast';
 import {
   GitMerge, RefreshCw, Check, Search, ShieldCheck,
   Building2, ExternalLink, ChevronLeft,
-  ChevronRight, ArrowUpDown, Layers, Database
+  ChevronRight, ArrowUpDown, Layers, Database, EyeOff
 } from 'lucide-react';
-import { useNavigate, Link } from 'react-router-dom'; // Import Link
+import { useNavigate, Link } from 'react-router-dom';
 
 interface Suggestion {
   kiss24_uuid: string;
@@ -46,10 +46,12 @@ export default function AssetReconciliationView() {
 
   const [selectedMatches, setSelectedMatches] = useState<Record<string, string>>({});
   const [linkingState, setLinkingState] = useState<Record<string, boolean>>({});
+  const [archivingState, setArchivingState] = useState<Record<string, boolean>>({});
 
   // --- Bulk Selection States ---
   const [selectedAssets, setSelectedAssets] = useState<Set<string>>(new Set());
   const [isBulkLinking, setIsBulkLinking] = useState(false);
+  const [isBulkArchiving, setIsBulkArchiving] = useState(false);
 
   const toggleAssetSelection = (marioId: string) => {
     const newSet = new Set(selectedAssets);
@@ -64,7 +66,7 @@ export default function AssetReconciliationView() {
     } else {
       const newSet = new Set(selectedAssets);
       paginatedCandidates.forEach(c => {
-        if (c.top_suggestions.length > 0) newSet.add(c.mario_raw_asset_id);
+        newSet.add(c.mario_raw_asset_id);
       });
       setSelectedAssets(newSet);
     }
@@ -84,17 +86,47 @@ export default function AssetReconciliationView() {
       };
     }).filter(a => a.kiss24_uuid);
 
+    if (assetsToLink.length === 0) {
+      toast.error("None of the selected assets have a KISS24 candidate selected.", { id: toastId });
+      setIsBulkLinking(false);
+      return;
+    }
+
     try {
       const res = await axios.post('/api/kiss24/reconcile-asset/bulk', { assets: assetsToLink });
       if (res.data.status === "Partial") toast.error(res.data.message, { id: toastId, duration: 8000 });
       else toast.success(res.data.message, { id: toastId });
 
-      setCandidates(prev => prev.filter(c => !selectedAssets.has(c.mario_raw_asset_id)));
-      setSelectedAssets(new Set());
+      setCandidates(prev => prev.filter(c => !assetsToLink.find(a => a.mario_raw_asset_id === c.mario_raw_asset_id)));
+
+      // Keep un-linked assets selected
+      const remainingSelected = new Set(selectedAssets);
+      assetsToLink.forEach(a => remainingSelected.delete(a.mario_raw_asset_id));
+      setSelectedAssets(remainingSelected);
     } catch (err: any) {
       toast.error(err.response?.data?.detail || "Bulk linking failed.", { id: toastId });
     } finally {
       setIsBulkLinking(false);
+    }
+  };
+
+  const handleBulkArchive = async () => {
+    if (selectedAssets.size === 0) return;
+    setIsBulkArchiving(true);
+    const toastId = toast.loading(`Archiving ${selectedAssets.size} assets...`);
+
+    try {
+      await axios.put('/api/kiss24/reconciliation-candidates/bulk-archive', {
+        raw_asset_ids: Array.from(selectedAssets)
+      });
+      toast.success(`Successfully archived ${selectedAssets.size} assets.`, { id: toastId });
+
+      setCandidates(prev => prev.filter(c => !selectedAssets.has(c.mario_raw_asset_id)));
+      setSelectedAssets(new Set());
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || "Bulk archiving failed.", { id: toastId });
+    } finally {
+      setIsBulkArchiving(false);
     }
   };
 
@@ -198,10 +230,36 @@ export default function AssetReconciliationView() {
 
       toast.success(`Successfully linked ${candidate.snow_number}!`, { id: toastId });
       setCandidates(prev => prev.filter(c => c.mario_raw_asset_id !== candidate.mario_raw_asset_id));
+      setSelectedAssets(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(candidate.mario_raw_asset_id);
+        return newSet;
+      });
     } catch (err: any) {
       toast.error(err.response?.data?.detail || "Linking failed.", { id: toastId });
     } finally {
       setLinkingState(prev => ({ ...prev, [candidate.mario_raw_asset_id]: false }));
+    }
+  };
+
+  const handleArchiveAsset = async (candidate: Candidate) => {
+    setArchivingState(prev => ({ ...prev, [candidate.mario_raw_asset_id]: true }));
+    const toastId = toast.loading(`Archiving ${candidate.snow_number}...`);
+
+    try {
+      await axios.put(`/api/kiss24/reconciliation-candidates/${candidate.mario_raw_asset_id}/archive`);
+
+      toast.success(`Asset archived from reconciliation queue.`, { id: toastId });
+      setCandidates(prev => prev.filter(c => c.mario_raw_asset_id !== candidate.mario_raw_asset_id));
+      setSelectedAssets(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(candidate.mario_raw_asset_id);
+        return newSet;
+      });
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || "Archiving failed.", { id: toastId });
+    } finally {
+      setArchivingState(prev => ({ ...prev, [candidate.mario_raw_asset_id]: false }));
     }
   };
 
@@ -297,7 +355,7 @@ export default function AssetReconciliationView() {
                 <label className="flex items-center gap-3 cursor-pointer group ml-2">
                   <input
                     type="checkbox"
-                    checked={paginatedCandidates.length > 0 && selectedAssets.size === paginatedCandidates.filter(c => c.top_suggestions.length > 0).length}
+                    checked={paginatedCandidates.length > 0 && selectedAssets.size === paginatedCandidates.length}
                     onChange={toggleAllAssets}
                     className="w-4 h-4 rounded text-indigo-600 border-slate-300 focus:ring-indigo-500 cursor-pointer"
                   />
@@ -306,14 +364,24 @@ export default function AssetReconciliationView() {
                   </span>
                 </label>
                 {selectedAssets.size > 0 && (
-                  <button
-                    onClick={handleBulkApprove}
-                    disabled={isBulkLinking}
-                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition-colors flex items-center gap-2 shadow-sm disabled:opacity-50"
-                  >
-                    {isBulkLinking ? <RefreshCw size={14} className="animate-spin" /> : <Layers size={14} />}
-                    Confirm {selectedAssets.size} Matches
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={handleBulkArchive}
+                      disabled={isBulkArchiving || isBulkLinking}
+                      className="px-4 py-2 bg-slate-100 hover:bg-red-50 dark:bg-zinc-800 dark:hover:bg-red-900/20 text-slate-600 hover:text-red-600 dark:text-zinc-400 dark:hover:text-red-400 text-xs font-bold rounded-xl transition-colors flex items-center gap-2 shadow-sm disabled:opacity-50 border border-slate-200 dark:border-zinc-700"
+                    >
+                      {isBulkArchiving ? <RefreshCw size={14} className="animate-spin" /> : <EyeOff size={14} />}
+                      Archive {selectedAssets.size}
+                    </button>
+                    <button
+                      onClick={handleBulkApprove}
+                      disabled={isBulkLinking || isBulkArchiving}
+                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition-colors flex items-center gap-2 shadow-sm disabled:opacity-50"
+                    >
+                      {isBulkLinking ? <RefreshCw size={14} className="animate-spin" /> : <Layers size={14} />}
+                      Confirm {selectedAssets.size} Matches
+                    </button>
+                  </div>
                 )}
               </div>
             )}
@@ -333,6 +401,7 @@ export default function AssetReconciliationView() {
                     const selectedUuid = selectedMatches[candidate.mario_raw_asset_id] || '';
                     const selectedSuggestion = candidate.top_suggestions.find(s => s.kiss24_uuid === selectedUuid);
                     const isLinking = linkingState[candidate.mario_raw_asset_id];
+                    const isArchiving = archivingState[candidate.mario_raw_asset_id];
 
                     return (
                       <tr key={candidate.mario_raw_asset_id} className="hover:bg-slate-50/50 dark:hover:bg-zinc-800/30 transition-colors">
@@ -341,8 +410,7 @@ export default function AssetReconciliationView() {
                             type="checkbox"
                             checked={selectedAssets.has(candidate.mario_raw_asset_id)}
                             onChange={() => toggleAssetSelection(candidate.mario_raw_asset_id)}
-                            disabled={candidate.top_suggestions.length === 0}
-                            className="mt-1 shrink-0 w-4 h-4 rounded text-indigo-600 border-slate-300 focus:ring-indigo-500 cursor-pointer disabled:opacity-30"
+                            className="mt-1 shrink-0 w-4 h-4 rounded text-indigo-600 border-slate-300 focus:ring-indigo-500 cursor-pointer"
                           />
                           <div>
                             <Link
@@ -399,14 +467,24 @@ export default function AssetReconciliationView() {
                           {selectedSuggestion ? getScoreBadge(selectedSuggestion.score) : '-'}
                         </td>
                         <td className="p-4 text-right">
-                          <button
-                            onClick={() => handleApproveMatch(candidate)}
-                            disabled={isLinking || !selectedUuid}
-                            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-sm transition-colors inline-flex items-center gap-1.5 cursor-pointer"
-                          >
-                            {isLinking ? <RefreshCw size={14} className="animate-spin" /> : <Check size={14} />}
-                            Confirm Match
-                          </button>
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              onClick={() => handleArchiveAsset(candidate)}
+                              disabled={isArchiving || isLinking}
+                              title="Hide from reconciliation queue"
+                              className="p-2 bg-slate-100 hover:bg-red-50 dark:bg-zinc-800 dark:hover:bg-red-900/20 text-slate-500 hover:text-red-500 dark:text-zinc-400 dark:hover:text-red-400 rounded-xl transition-colors disabled:opacity-50 border border-slate-200 dark:border-zinc-700"
+                            >
+                              {isArchiving ? <RefreshCw size={14} className="animate-spin" /> : <EyeOff size={14} />}
+                            </button>
+                            <button
+                              onClick={() => handleApproveMatch(candidate)}
+                              disabled={isLinking || isArchiving || !selectedUuid}
+                              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-sm transition-colors inline-flex items-center gap-1.5 cursor-pointer"
+                            >
+                              {isLinking ? <RefreshCw size={14} className="animate-spin" /> : <Check size={14} />}
+                              Confirm Match
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );

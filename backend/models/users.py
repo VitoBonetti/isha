@@ -45,3 +45,4 @@ class ApiKeys(Base):
     created_at = Column(DateTime(timezone=True), default=aware_utcnow)
     expires_at = Column(DateTime(timezone=True), nullable=True)
     is_active = Column(Boolean, default=True)
+    is_read_only = Column(Boolean, default=False, nullable=False)

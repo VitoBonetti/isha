@@ -38,6 +38,7 @@ class RawAssets(Base):
     snow_number = Column(String(100), nullable=True)
     team_note = Column(Text, nullable=True)
     kiss24_asset_id = Column(String, nullable=True)
+    is_reconcilable = Column(Boolean, default=True)
     is_kpi = Column(Boolean, default=False)
     is_critical = Column(Boolean, default=False)
     snow_active = Column(Boolean, default=False)

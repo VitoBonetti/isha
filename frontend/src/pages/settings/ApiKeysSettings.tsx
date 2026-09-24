@@ -101,6 +101,9 @@ export default function ApiKeysSettings() {
               <th className="p-4 font-bold text-slate-600 dark:text-zinc-400 cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800/50 transition-colors" onClick={() => handleSort('key_name')}>
                 Key Name <SortIcon column="key_name" />
               </th>
+              <th className="p-4 font-bold text-slate-600 dark:text-zinc-400">
+                Scope
+              </th>
               <th className="p-4 font-bold text-slate-600 dark:text-zinc-400 cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800/50 transition-colors" onClick={() => handleSort('prefix')}>
                 Prefix <SortIcon column="prefix" />
               </th>
@@ -120,6 +123,14 @@ export default function ApiKeysSettings() {
                     <div className="text-xs text-slate-500">{k.owner_email}</div>
                   </td>
                   <td className={`p-4 font-medium ${expired ? 'text-slate-500 line-through decoration-slate-400' : 'text-slate-700 dark:text-zinc-300'}`}>{k.key_name}</td>
+                  <td className="p-4">
+                    {/* Badge for API Key Scope */}
+                    {k.is_read_only ? (
+                      <span className="text-[10px] font-bold bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400 px-2 py-0.5 rounded uppercase tracking-wider border border-purple-200 dark:border-purple-800">Read-Only</span>
+                    ) : (
+                      <span className="text-[10px] font-bold bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 px-2 py-0.5 rounded uppercase tracking-wider border border-emerald-200 dark:border-emerald-800">Read & Write</span>
+                    )}
+                  </td>
                   <td className="p-4 text-slate-500 dark:text-zinc-400 font-mono text-xs">{k.prefix}••••••••</td>
                   <td className="p-4">
                     {expired ? (
@@ -155,7 +166,15 @@ export default function ApiKeysSettings() {
               <div key={k.id} className={`p-4 flex flex-col gap-3 ${expired ? 'opacity-60 bg-slate-50 dark:bg-zinc-950/50' : ''}`}>
                 <div className="flex justify-between items-start gap-4">
                   <div className="flex-1 min-w-0">
-                    <div className="font-bold text-base text-slate-900 dark:text-zinc-100 truncate">{k.owner_name}</div>
+                    <div className="font-bold text-base text-slate-900 dark:text-zinc-100 truncate flex items-center gap-2">
+                      {k.owner_name}
+                      {/* Mobile Badge */}
+                      {k.is_read_only ? (
+                        <span className="text-[9px] bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400 px-1.5 py-0.5 rounded uppercase font-bold border border-purple-200 dark:border-purple-800">Read-Only</span>
+                      ) : (
+                        <span className="text-[9px] bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 px-1.5 py-0.5 rounded uppercase font-bold border border-emerald-200 dark:border-emerald-800">R/W</span>
+                      )}
+                    </div>
                     <div className="text-xs text-slate-500 dark:text-zinc-400 truncate">{k.owner_email}</div>
                   </div>
                   <button onClick={() => {

@@ -540,7 +540,8 @@ def get_reconciliation_candidates(db: Session, limit: int):
     .filter(
         RawAssets.snow_number.isnot(None), RawAssets.snow_number != '',
         or_(RawAssets.kiss24_asset_id.is_(None), RawAssets.kiss24_asset_id == ''),
-        Country.kiss24_uuid.isnot(None)
+        Country.kiss24_uuid.isnot(None),
+        RawAssets.is_reconcilable == True
     ))
 
     results = []
@@ -559,6 +560,55 @@ def get_reconciliation_candidates(db: Session, limit: int):
         if limit > 0 and len(results) >= limit: break
 
     return results
+
+
+def archive_reconciliation_candidate(db: Session, raw_asset_id: str, current_user: dict):
+    asset = db.query(RawAssets).filter(RawAssets.id == raw_asset_id).first()
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found.")
+
+    asset.is_reconcilable = False
+    asset.update_date = aware_utcnow()
+    db.commit()
+
+    log_audit_event(
+        str(current_user["id"]),
+        current_user["role"],
+        "ASSET_RECONCILIATION_ARCHIVED",
+        "KISS24",
+        raw_asset_id,
+        f"Marked asset {asset.name} as not reconcilable."
+    )
+    return {"status": "Success", "message": "Asset hidden from reconciliation queue."}
+
+
+def bulk_archive_reconciliation_candidates(db: Session, payload, current_user: dict):
+    if not payload.raw_asset_ids:
+        raise HTTPException(status_code=400, detail="No assets provided.")
+
+    # Convert incoming IDs to strings to ensure matching
+    asset_ids = [str(a_id) for a_id in payload.raw_asset_ids]
+
+    assets = db.query(RawAssets).filter(RawAssets.id.in_(asset_ids)).all()
+    updated_count = 0
+
+    for asset in assets:
+        if asset.is_reconcilable:
+            asset.is_reconcilable = False
+            asset.update_date = aware_utcnow()
+            updated_count += 1
+
+    db.commit()
+
+    log_audit_event(
+        str(current_user["id"]),
+        current_user["role"],
+        "ASSET_RECONCILIATION_ARCHIVED_BULK",
+        "KISS24",
+        "BULK",
+        f"Marked {updated_count} assets as not reconcilable."
+    )
+    return {"status": "Success", "message": f"Successfully hidden {updated_count} assets from reconciliation queue."}
 
 
 def reconcile_asset(db: Session, payload, current_user: dict):

@@ -78,11 +78,47 @@ def log_test_history(db: Session, test_id: str, user_id: str, action: str, detai
         db.add(asset_hist)
 
 
+async def ensure_workspace_exists(test_id: str, user_id: str, user_role: str, test_name: str, start_year: int,
+                                  service_name: str, drive_folder_id: str):
+    if drive_folder_id:
+        return drive_folder_id
+
+    await asyncio.to_thread(log_audit_event, user_id, user_role, "AUTO_PROVISION_WORKSPACE", "TESTS", test_id,
+                            "Automated workspace creation triggered during document generation.")
+
+    db = SessionLocal()
+    try:
+        # Fetch country/market to build folder path
+        country_tuple = db.query(Country.name).join(RawAssets, Country.id == RawAssets.country_id).join(Assets,
+                                                                                                        RawAssets.id == Assets.raw_asset_id).join(
+            TestAssets, Assets.id == TestAssets.asset_id).filter(TestAssets.test_id == test_id).first()
+        market = country_tuple[0] if country_tuple and country_tuple[0] else "General"
+    finally:
+        db.close()
+
+    year = start_year or datetime.now().year
+
+    drive_mgr = DriveManager()
+    await asyncio.to_thread(drive_mgr.provision_test_workspace, test_id, year, service_name, market, test_name)
+
+    db = SessionLocal()
+    try:
+        new_folder_id = db.query(Tests.drive_folder_id).filter(Tests.id == test_id).scalar()
+        if not new_folder_id:
+            raise ValueError("Failed to retrieve new Drive folder ID after provisioning.")
+        return new_folder_id
+    finally:
+        db.close()
+
+
 # --- BACKGROUND TASKS ---
 async def process_presentation_background(test_id: str, kiss24_id: str, user_id: str, user_email: str, user_role: str,
                                           test_name: str, drive_folder_id: str, service_name: str, snow_number: str,
                                           start_week: int, start_year: int, duration_weeks: float):
     try:
+        # Dynamic Provisioning Fallback
+        drive_folder_id = await ensure_workspace_exists(test_id, user_id, user_role, test_name, start_year, service_name, drive_folder_id)
+
         data = await asyncio.to_thread(generate_presentation, kiss24_id, drive_folder_id, service_name, snow_number,
                                        start_week, start_year, duration_weeks)
         if data.get("fileId") and data.get("fileName"):
@@ -138,8 +174,11 @@ async def process_presentation_background(test_id: str, kiss24_id: str, user_id:
 
 async def process_report_background(test_id: str, kiss24_id: str, user_id: str, user_email: str, user_role: str,
                                     test_name: str, drive_folder_id: str, display_order: int, start_week: int,
-                                    start_year: int, duration_weeks: float):
+                                    start_year: int, duration_weeks: float, service_name: str):
     try:
+        # Dynamic Provisioning Fallback
+        drive_folder_id = await ensure_workspace_exists(test_id, user_id, user_role, test_name, start_year, service_name, drive_folder_id)
+
         start_date_str = end_date_str = None
         try:
             test_start = datetime.fromisocalendar(start_year, start_week, 1)
@@ -233,8 +272,12 @@ async def process_report_background(test_id: str, kiss24_id: str, user_id: str, 
 
 
 async def process_vuln_report_background(test_id: str, kiss24_id: str, user_id: str, user_email: str, user_role: str,
-                                         test_name: str, drive_folder_id: str, display_order: int, vuln_uuids: list):
+                                         test_name: str, drive_folder_id: str, display_order: int, vuln_uuids: list,
+                                         start_year: int, service_name: str):
     try:
+        # Dynamic Provisioning Fallback
+        drive_folder_id = await ensure_workspace_exists(test_id, user_id, user_role, test_name, start_year, service_name, drive_folder_id)
+
         api_key = (get_secret(os.environ.get("KISS_24_API_KEY_NAME")) or "").strip()
         report_args = {"pentest": kiss24_id, "vuln": vuln_uuids, "type": get_report_type_id(display_order),
                        "api_key": api_key, "action": "generate", "minify": False, "environment": "sec24prd",
@@ -524,7 +567,7 @@ def get_all_tests(db: Session, current_user: dict, service_lane_name: Optional[s
 
     query = (db.query(
         Tests.id, Tests.name, Tests.start_week, Tests.start_year, Tests.duration_weeks,
-        Tests.stages, ServiceLanes.name.label("service_lane_name"),
+        Tests.stages, Tests.is_tentative, ServiceLanes.name.label("service_lane_name"),
         ServiceLanes.is_active.label("is_service_active"), ServiceLanes.auto_provision_workspace,
         ServiceCategories.name.label("category_name"),
         assigned_pentesters_sq.label('assigned_pentesters'),
@@ -582,6 +625,7 @@ def get_all_tests(db: Session, current_user: dict, service_lane_name: Optional[s
     return [{
         "id": str(r.id), "name": r.name, "start_week": r.start_week, "start_year": r.start_year,
         "duration_weeks": r.duration_weeks, "status": r.stages.name if r.stages else None,
+        "is_tentative": r.is_tentative,
         "service_lane_name": r.service_lane_name, "is_service_active": r.is_service_active,
         "auto_provision_workspace": r.auto_provision_workspace, "category_name": r.category_name,
         "assigned_pentesters": r.assigned_pentesters, "has_secret": r.has_secret,

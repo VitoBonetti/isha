@@ -108,6 +108,7 @@ class NotificationResponse(BaseModel):
 
 class ApiKeyCreate(BaseModel):
     name: str
+    is_read_only: bool = False
 
 # --- ASSETS ---
 class AssetBase(BaseModel):
@@ -128,6 +129,7 @@ class RawAssetCreate(AssetBase):
     snow_number: Optional[str] = None
     team_note: Optional[str] = None
     kiss24_asset_id: Optional[str] = None
+    is_reconcilable: bool = True
     is_kpi: bool = False
     is_critical: bool = False
     snow_active: bool = False

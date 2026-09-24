@@ -233,9 +233,8 @@ def trigger_presentation_generation(test_id: str, background_tasks: BackgroundTa
     row = query.first()
     if not row:
         raise HTTPException(status_code=404, detail="Test not found.")
-
-    if not row.kiss24_id: raise HTTPException(status_code=400, detail="Missing kiss24 UUID.")
-    if not row.drive_folder_id: raise HTTPException(status_code=400, detail="Missing Drive Workspace.")
+    if not row.kiss24_id:
+        raise HTTPException(status_code=400, detail="Missing kiss24 UUID.")
 
     background_tasks.add_task(
         test_service.process_presentation_background, test_id, str(row.kiss24_id),
@@ -253,7 +252,8 @@ def trigger_report_generation(test_id: str, background_tasks: BackgroundTasks,
 
     query = db.query(
         Tests.name.label("test_name"), Tests.kiss24.label("kiss24_id"), Tests.drive_folder_id,
-        ServiceLanes.display_order, Tests.start_week, Tests.start_year, Tests.duration_weeks
+        ServiceLanes.display_order, Tests.start_week, Tests.start_year, Tests.duration_weeks,
+        ServiceLanes.name.label("service_name")
     ).outerjoin(ServiceLanes, Tests.service_lane_id == ServiceLanes.id) \
         .filter(Tests.id == test_id)
 
@@ -264,14 +264,14 @@ def trigger_report_generation(test_id: str, background_tasks: BackgroundTasks,
     row = query.first()
     if not row:
         raise HTTPException(status_code=404, detail="Test not found.")
-
-    if not row.kiss24_id: raise HTTPException(status_code=400, detail="Missing kiss24 UUID.")
-    if not row.drive_folder_id: raise HTTPException(status_code=400, detail="Missing Drive Workspace.")
+    if not row.kiss24_id:
+        raise HTTPException(status_code=400, detail="Missing kiss24 UUID.")
 
     background_tasks.add_task(
         test_service.process_report_background, test_id, str(row.kiss24_id), str(current_user["id"]),
         current_user["email"], str(current_user["role"]), row.test_name, row.drive_folder_id,
-        row.display_order if row.display_order is not None else 99, row.start_week, row.start_year, row.duration_weeks
+        row.display_order if row.display_order is not None else 99, row.start_week, row.start_year,
+        row.duration_weeks, row.service_name
     )
     return {"message": "Report generation started in the background."}
 
@@ -288,7 +288,7 @@ def trigger_vuln_reports(test_id: str, payload: dict, background_tasks: Backgrou
 
     query = db.query(
         Tests.name.label("test_name"), Tests.kiss24.label("kiss24_id"), Tests.drive_folder_id,
-        ServiceLanes.display_order
+        ServiceLanes.display_order, ServiceLanes.name.label("service_name"), Tests.start_year
     ).outerjoin(ServiceLanes, Tests.service_lane_id == ServiceLanes.id) \
         .filter(Tests.id == test_id)
 
@@ -299,14 +299,14 @@ def trigger_vuln_reports(test_id: str, payload: dict, background_tasks: Backgrou
     row = query.first()
     if not row:
         raise HTTPException(status_code=404, detail="Test not found.")
-
-    if not row.kiss24_id: raise HTTPException(status_code=400, detail="Missing kiss24 UUID.")
-    if not row.drive_folder_id: raise HTTPException(status_code=400, detail="Missing Drive Workspace.")
+    if not row.kiss24_id:
+        raise HTTPException(status_code=400, detail="Missing kiss24 UUID.")
 
     background_tasks.add_task(
         test_service.process_vuln_report_background, test_id, str(row.kiss24_id),
         str(current_user["id"]), current_user["email"], str(current_user["role"]), row.test_name,
-        row.drive_folder_id, row.display_order if row.display_order is not None else 99, vuln_uuids
+        row.drive_folder_id, row.display_order if row.display_order is not None else 99, vuln_uuids,
+        row.start_year, row.service_name
     )
     return {"message": f"Generating {len(vuln_uuids)} report(s) in the background!"}
 

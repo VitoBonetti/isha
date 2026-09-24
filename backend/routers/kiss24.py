@@ -3,7 +3,7 @@ from database import get_db
 from typing import Optional
 from sqlalchemy.orm import Session
 from routers.auth import get_current_user, require_admin, require_admin_or_pentester
-from schema import ReconcileAssetPayload, BulkReconcileAssetPayload
+from schema import ReconcileAssetPayload, BulkReconcileAssetPayload, BulkAssetRequest
 from system_services import kiss24_app_service
 
 router = APIRouter(prefix="/api/kiss24", tags=["Kiss24"])
@@ -85,6 +85,12 @@ def get_reconciliation_candidates(limit: int = 0, current_user: dict = Depends(r
     return kiss24_app_service.get_reconciliation_candidates(db, limit)
 
 
+@router.put("/reconciliation-candidates/{raw_asset_id}/archive", summary="[Admin] Hide asset from reconciliation")
+def archive_reconciliation_candidate(raw_asset_id: str, current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    """Marks a raw asset as not reconcilable so it no longer appears in the queue."""
+    return kiss24_app_service.archive_reconciliation_candidate(db, raw_asset_id, current_user)
+
+
 @router.post("/reconcile-asset", summary="[Admin] Manually Link Mario Asset to KISS24")
 def reconcile_asset(payload: ReconcileAssetPayload, current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
     return kiss24_app_service.reconcile_asset(db, payload, current_user)
@@ -93,6 +99,12 @@ def reconcile_asset(payload: ReconcileAssetPayload, current_user: dict = Depends
 @router.post("/reconcile-asset/bulk", summary="[Admin] Bulk Link Mario Assets to KISS24")
 def bulk_reconcile_assets(payload: BulkReconcileAssetPayload, current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
     return kiss24_app_service.bulk_reconcile_assets(db, payload, current_user)
+
+
+@router.put("/reconciliation-candidates/bulk-archive", summary="[Admin] Bulk hide assets from reconciliation")
+def bulk_archive_reconciliation_candidates(payload: BulkAssetRequest, current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    """Marks multiple raw assets as not reconcilable so they no longer appear in the queue."""
+    return kiss24_app_service.bulk_archive_reconciliation_candidates(db, payload, current_user)
 
 
 @router.get("/raw/synced/", summary="[Admin] Get all raw assets synced with Kiss24")

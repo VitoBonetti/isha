@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { X, Key, Trash2, Plus, AlertCircle, Copy, BookOpen, Clock } from 'lucide-react';
+import { X, Key, Trash2, Plus, AlertCircle, Copy, BookOpen, Clock, Shield } from 'lucide-react';
 import axios from 'axios';
 import toast from 'react-hot-toast';
 
 export default function ApiKeysModal({ isOpen, onClose }: { isOpen: boolean, onClose: () => void }) {
   const [keys, setKeys] = useState<any[]>([]);
   const [newKeyName, setNewKeyName] = useState("");
+  const [isReadOnly, setIsReadOnly] = useState(false); // <-- New state for the dropdown
   const [generatedKey, setGeneratedKey] = useState<string | null>(null);
 
   useEffect(() => {
@@ -22,9 +23,11 @@ export default function ApiKeysModal({ isOpen, onClose }: { isOpen: boolean, onC
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const res = await axios.post('/api/auth/keys', { name: newKeyName });
+      // Include the is_read_only flag in the payload
+      const res = await axios.post('/api/auth/keys', { name: newKeyName, is_read_only: isReadOnly });
       setGeneratedKey(res.data.raw_key);
       setNewKeyName("");
+      setIsReadOnly(false); // Reset to default
       fetchKeys();
       toast.success("API Key generated!");
       window.dispatchEvent(new CustomEvent('refresh_api_keys'));
@@ -57,7 +60,7 @@ export default function ApiKeysModal({ isOpen, onClose }: { isOpen: boolean, onC
       onClick={onClose}
     >
       <div
-        className="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-2xl p-4 sm:p-6 w-[95%] sm:w-full max-w-2xl shadow-2xl flex flex-col my-4 sm:my-8 flex-shrink-0"
+        className="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-2xl p-4 sm:p-6 w-[95%] sm:w-full max-w-4xl shadow-2xl flex flex-col my-4 sm:my-8 flex-shrink-0"
         onClick={e => e.stopPropagation()}
       >
         <div className="flex justify-between items-center mb-4 sm:mb-6 border-b border-slate-100 dark:border-zinc-800 pb-4 shrink-0">
@@ -104,8 +107,31 @@ export default function ApiKeysModal({ isOpen, onClose }: { isOpen: boolean, onC
         )}
 
         <form onSubmit={handleCreate} className="flex flex-col sm:flex-row gap-3 mb-6 shrink-0">
-          <input required type="text" placeholder="New Key Name (e.g. CI/CD Pipeline)" value={newKeyName} onChange={e => setNewKeyName(e.target.value)} className="flex-1 p-2.5 border border-slate-300 dark:border-zinc-700 rounded-lg bg-slate-50 dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 focus:ring-2 focus:ring-blue-500 outline-none text-sm" />
-          <button type="submit" className="w-full sm:w-auto px-4 py-2.5 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors flex justify-center items-center gap-2 text-sm"><Plus size={16}/> Generate Key</button>
+          <input
+            required
+            type="text"
+            placeholder="New Key Name (e.g. CI/CD Pipeline)"
+            value={newKeyName}
+            onChange={e => setNewKeyName(e.target.value)}
+            className="flex-1 p-2.5 border border-slate-300 dark:border-zinc-700 rounded-lg bg-slate-50 dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+          />
+          {/* New dropdown for Scope selection */}
+          <div className="relative w-full sm:w-48">
+            <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none text-slate-400">
+              <Shield size={16} />
+            </div>
+            <select
+              value={isReadOnly ? "true" : "false"}
+              onChange={e => setIsReadOnly(e.target.value === "true")}
+              className="w-full p-2.5 pl-9 border border-slate-300 dark:border-zinc-700 rounded-lg bg-slate-50 dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 focus:ring-2 focus:ring-blue-500 outline-none text-sm appearance-none font-medium cursor-pointer"
+            >
+              <option value="false">Read & Write</option>
+              <option value="true">Read-Only</option>
+            </select>
+          </div>
+          <button type="submit" className="w-full sm:w-auto px-4 py-2.5 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors flex justify-center items-center gap-2 text-sm">
+            <Plus size={16}/> Generate Key
+          </button>
         </form>
 
         <div className="flex-1 overflow-y-auto border border-slate-200 dark:border-zinc-800 rounded-xl bg-white dark:bg-zinc-900 custom-scrollbar">
@@ -115,6 +141,7 @@ export default function ApiKeysModal({ isOpen, onClose }: { isOpen: boolean, onC
             <thead className="bg-slate-50 dark:bg-zinc-800/50 border-b border-slate-200 dark:border-zinc-700">
               <tr>
                 <th className="p-3 font-semibold text-slate-500">Name</th>
+                <th className="p-3 font-semibold text-slate-500">Scope</th>
                 <th className="p-3 font-semibold text-slate-500">Prefix</th>
                 <th className="p-3 font-semibold text-slate-500">Expires</th>
                 <th className="p-3 font-semibold text-slate-500 text-right">Action</th>
@@ -127,6 +154,14 @@ export default function ApiKeysModal({ isOpen, onClose }: { isOpen: boolean, onC
                   <tr key={k.id} className={`transition-colors ${expired ? 'bg-slate-50 dark:bg-zinc-950/50 opacity-60' : 'hover:bg-slate-50 dark:hover:bg-zinc-800/30'}`}>
                     <td className={`p-3 font-bold ${expired ? 'text-slate-500 line-through decoration-slate-400' : 'text-slate-900 dark:text-zinc-100'}`}>
                       {k.key_name}
+                    </td>
+                    <td className="p-3">
+                      {/* Badge for API Key Scope */}
+                      {k.is_read_only ? (
+                        <span className="text-[10px] font-bold bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400 px-2 py-0.5 rounded uppercase tracking-wider border border-purple-200 dark:border-purple-800">Read-Only</span>
+                      ) : (
+                        <span className="text-[10px] font-bold bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 px-2 py-0.5 rounded uppercase tracking-wider border border-emerald-200 dark:border-emerald-800">Read & Write</span>
+                      )}
                     </td>
                     <td className="p-3 font-mono text-slate-500 dark:text-zinc-400 text-xs">{k.prefix}••••••••</td>
                     <td className="p-3">
@@ -146,7 +181,7 @@ export default function ApiKeysModal({ isOpen, onClose }: { isOpen: boolean, onC
                   </tr>
                 );
               })}
-              {keys.length === 0 && <tr><td colSpan={4} className="p-8 text-center text-slate-500">No API keys generated yet.</td></tr>}
+              {keys.length === 0 && <tr><td colSpan={5} className="p-8 text-center text-slate-500">No API keys generated yet.</td></tr>}
             </tbody>
           </table>
 
@@ -157,8 +192,14 @@ export default function ApiKeysModal({ isOpen, onClose }: { isOpen: boolean, onC
                return (
                   <div key={k.id} className={`p-4 flex flex-col gap-3 ${expired ? 'opacity-60 bg-slate-50 dark:bg-zinc-950/50' : ''}`}>
                      <div className="flex justify-between items-start gap-4">
-                        <div className={`font-bold truncate text-sm ${expired ? 'text-slate-500 line-through' : 'text-slate-900 dark:text-zinc-100'}`}>
+                        <div className={`font-bold truncate text-sm flex items-center gap-2 ${expired ? 'text-slate-500 line-through' : 'text-slate-900 dark:text-zinc-100'}`}>
                           {k.key_name}
+                          {/* Mobile Badge */}
+                          {k.is_read_only ? (
+                            <span className="text-[9px] bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400 px-1.5 py-0.5 rounded uppercase font-bold border border-purple-200 dark:border-purple-800">Read-Only</span>
+                          ) : (
+                            <span className="text-[9px] bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 px-1.5 py-0.5 rounded uppercase font-bold border border-emerald-200 dark:border-emerald-800">R/W</span>
+                          )}
                         </div>
                         <button onClick={() => handleRevoke(k.id)} className="text-red-500 bg-red-50 dark:bg-red-900/30 p-2 rounded-lg shrink-0"><Trash2 size={16}/></button>
                      </div>
