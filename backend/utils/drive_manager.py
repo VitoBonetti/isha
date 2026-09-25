@@ -216,45 +216,74 @@ class DriveManager:
             print(f"Error scanning folder {folder_id}: {e}")
             return []
 
-    def run_daily_document_sync(self):
-        """Finds all provisioned test folders and indexes their files into the database."""
-        print("Starting Daily Drive Document Sync...")
+    def run_daily_document_sync(self, specific_test_id: str = None):
+        """Finds provisioned test folders, scans all files (including subfolders), and indexes them."""
+        print(f"Starting Drive Document Sync{' for test ' + specific_test_id if specific_test_id else ''}...")
 
         with db_cursor_context() as cursor:
-            # 1. Get all tests that have a Google Drive folder
-            cursor.execute("SELECT id, drive_folder_id FROM tests WHERE drive_folder_id IS NOT NULL")
-            tests_with_folders = cursor.fetchall()
+            # 1. Get test(s) that have a Google Drive folder
+            if specific_test_id:
+                cursor.execute("SELECT id, drive_folder_id FROM tests WHERE id = %s AND drive_folder_id IS NOT NULL",
+                               (specific_test_id,))
+            else:
+                cursor.execute("SELECT id, drive_folder_id FROM tests WHERE drive_folder_id IS NOT NULL")
 
+            tests_with_folders = cursor.fetchall()
             success_count = 0
 
             for test_id, folder_id in tests_with_folders:
-                files = self.scan_folder_for_files(folder_id)
+                # Use recursive scan to catch files inside subfolders too!
+                files = self.scan_folder_recursive(folder_id)
+                current_drive_ids = []
 
                 for f in files:
-                    # Convert Google's ISO time string to standard timestamp
                     mod_time = datetime.strptime(f['modifiedTime'],
                                                  "%Y-%m-%dT%H:%M:%S.%fZ") if 'modifiedTime' in f else datetime.now()
+                    current_drive_ids.append(f['id'])
 
-                    # 2. UPSERT into the database
+                    # UPSERT into database
                     cursor.execute('''
-                        INSERT INTO test_documents (id, test_id, drive_file_id, file_name, mime_type, file_url, last_modified, synced_at)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                        INSERT INTO test_documents (id, test_id, drive_file_id, file_name, mime_type, file_url, folder_path, last_modified, synced_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
                         ON CONFLICT (drive_file_id) 
                         DO UPDATE SET 
                             file_name = EXCLUDED.file_name,
                             file_url = EXCLUDED.file_url,
+                            folder_path = EXCLUDED.folder_path,
                             last_modified = EXCLUDED.last_modified,
                             synced_at = CURRENT_TIMESTAMP
                     ''', (
                         str(uuid.uuid4()), test_id, f['id'], f['name'],
-                        f.get('mimeType', 'unknown'), f.get('webViewLink', ''), mod_time
+                        f.get('mimeType', 'unknown'), f.get('webViewLink', ''),
+                        f.get('folder_path', ''), mod_time
                     ))
                     success_count += 1
 
-            # Optional: Delete records in the DB if they were removed from Google Drive
-            # (By deleting rows where synced_at is older than the start of this sync job)
+                # Clean up orphaned files deleted from Google Drive
+                if current_drive_ids:
+                    format_strings = ','.join(['%s'] * len(current_drive_ids))
+                    cursor.execute(f"""
+                        DELETE FROM document_chunks 
+                        WHERE document_id IN (
+                            SELECT id FROM test_documents 
+                            WHERE test_id = %s 
+                              AND doc_type != 'KNOWLEDGE_BASE' 
+                              AND is_virtual = FALSE 
+                              AND drive_file_id NOT IN ({format_strings})
+                        )
+                    """, (test_id, *current_drive_ids))
 
+                    cursor.execute(f"""
+                        DELETE FROM test_documents 
+                        WHERE test_id = %s 
+                          AND doc_type != 'KNOWLEDGE_BASE' 
+                          AND is_virtual = FALSE 
+                          AND drive_file_id NOT IN ({format_strings})
+                    """, (test_id, *current_drive_ids))
+
+            cursor.connection.commit()
             print(f"✅ Document Sync Complete. Indexed/Updated {success_count} files.")
+
 
     def relocate_test_workspace(self, folder_id: str, new_year: int, new_service_name: str, new_market: str,
                                 new_test_name: str):

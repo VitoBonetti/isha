@@ -63,6 +63,12 @@ def structure_aware_chunking(text: str, max_words: int = 500, overlap_words: int
 
 
 def process_test_documents_background(test_id: str, user_id: str, user_role: str):
+    if test_id and test_id != "None":
+        try:
+            DriveManager().run_daily_document_sync(specific_test_id=test_id)
+        except Exception as e:
+            log_audit_event(str(user_id), str(user_role), "DRIVE_TEST_SYNC_FAILED", "RAG", str(test_id),
+                            f"Failed scanning Drive: {e}")
     db = SessionLocal()
     try:
         if test_id and test_id != "None":
@@ -178,6 +184,11 @@ def sync_knowledge_base_background(user_id: str, user_role: str):
 
 def sync_all_active_tests_background(user_id: str, user_role: str):
     sync_knowledge_base_background(user_id, user_role)
+
+    try:
+        DriveManager().run_daily_document_sync()
+    except Exception as e:
+        log_audit_event(user_id, user_role, "SYNC_ALL_TEST_DRIVE_FAILED", "RAG", "ALL TESTS", f"Drive scan failed: {e}")
 
     db = SessionLocal()
     test_rows = db.query(Tests.id).filter(Tests.drive_folder_id.isnot(None)).all()

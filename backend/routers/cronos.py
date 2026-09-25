@@ -6,7 +6,7 @@ from routers.auth import get_google_public_keys
 from websockets_manager import manager
 from database import db_cursor_context
 from audit_logger import log_audit_event
-from system_services import asset_service  # Imported for ServiceNow sync
+from system_services import asset_service, rag_service
 
 router = APIRouter(prefix="/api/cronos", tags=["Google CronJobs"])
 
@@ -150,3 +150,30 @@ def gcp_trigger_servicenow_sync(
     )
 
     return {"message": "Weekly ServiceNow sync queued successfully."}
+
+
+@router.post("/rag-sync", summary="GCP Scheduler trigger for daily RAG knowledge base sync")
+def gcp_trigger_rag_sync(
+    background_tasks: BackgroundTasks,
+    authenticated: bool = Depends(verify_cron_caller)
+):
+    """
+    Daily background sync for RAG Knowledge Base and Test Documents.
+    Runs asynchronously at 05:00 UTC.
+    """
+    background_tasks.add_task(
+        rag_service.sync_all_active_tests_background,
+        "SYSTEM_CRON",
+        "scheduler"
+    )
+
+    log_audit_event(
+        user_id="SYSTEM_CRON",
+        role="scheduler",
+        action="CRON_RAG_SYNC_STARTED",
+        resource_type="INTEGRATION",
+        resource_id="rag_knowledge_base",
+        details="Daily scheduled RAG sync initiated by Cloud Scheduler."
+    )
+
+    return {"message": "Daily RAG sync queued successfully."}
