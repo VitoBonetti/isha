@@ -1,29 +1,66 @@
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, Depends, HTTPException, APIRouter
+from fastapi import APIRouter, Request, Depends, HTTPException, BackgroundTasks, status
 from jose import jwt
 import os
 import uuid
 from routers.auth import get_google_public_keys
 from websockets_manager import manager
-from database import get_db_cursor, db_cursor_context
+from database import db_cursor_context
 from audit_logger import log_audit_event
-
+from system_services import asset_service  # Imported for ServiceNow sync
 
 router = APIRouter(prefix="/api/cronos", tags=["Google CronJobs"])
 
 
 # ---------------------------------------------------------
-# --- API KEY EXPIRATION SCHEDULER & LOGIC ---
+# --- SECURITY DEPENDENCY FOR CRON ENDPOINTS ---
+# ---------------------------------------------------------
+
+def verify_cron_caller(request: Request) -> bool:
+    """
+    Ensures the caller is strictly Google Cloud Scheduler passing through IAP
+    using the authorized Service Account.
+    """
+    if os.environ.get("ENV") != "local":
+        iap_jwt = request.headers.get("x-goog-iap-jwt-assertion")
+        if not iap_jwt:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing IAP JWT. Request bypassed IAP.")
+
+        try:
+            kid = jwt.get_unverified_header(iap_jwt).get("kid")
+            public_keys = get_google_public_keys()
+            public_key = public_keys.get(kid)
+            if not public_key:
+                raise ValueError("Invalid IAP Token Header Key ID")
+
+            payload = jwt.decode(
+                iap_jwt,
+                public_key,
+                algorithms=["ES256"],
+                audience=os.environ.get("IAP_AUDIENCE")
+            )
+
+            email = payload.get("email")
+            expected_sa = os.environ.get("IAM_SA_EMAIL")
+
+            # Verify the email matches the authorized system Service Account
+            if email != f"accounts.google.com:{expected_sa}" and email != expected_sa:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Unauthorized caller: {email}")
+
+        except Exception as e:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"IAP Validation Failed: {str(e)}")
+
+    return True
+
+
+# ---------------------------------------------------------
+# --- API KEY EXPIRATION SCHEDULER LOGIC ---
 # ---------------------------------------------------------
 
 async def run_api_key_expiration_check():
-    """
-    Core logic: Scans for expiring/expired API keys and issues notifications.
-    """
     with db_cursor_context() as cursor:
         if not cursor:
             return
 
-        # 1. Warn users whose keys expire in exactly 7 days
         cursor.execute("""
             SELECT ak.id, ak.name, ak.user_id 
             FROM api_keys ak
@@ -40,7 +77,6 @@ async def run_api_key_expiration_check():
                 VALUES (%s, %s, %s, 'WARNING', CURRENT_TIMESTAMP)
             """, (notif_id, str(user_id), msg))
 
-        # 2. Alert users whose keys expired today & deactivate them
         cursor.execute("""
             SELECT ak.id, ak.name, ak.user_id 
             FROM api_keys ak
@@ -57,52 +93,23 @@ async def run_api_key_expiration_check():
                 VALUES (%s, %s, %s, 'ERROR', CURRENT_TIMESTAMP)
             """, (notif_id, str(user_id), msg))
 
-            # Force it inactive
             cursor.execute("UPDATE api_keys SET is_active = FALSE WHERE id = %s", (key_id,))
 
         cursor.connection.commit()
 
-        # If any alerts were generated, broadcast to frontend
         if expiring_soon or expired_today:
             await manager.broadcast('{"action": "REFRESH_BOARD"}')
 
 
-
+# ---------------------------------------------------------
 # --- GOOGLE SCHEDULER ENDPOINTS ---
+# ---------------------------------------------------------
+
 @router.post("/api-key-alerts", summary="GCP Scheduler trigger for daily API Key expiration alerts")
-async def gcp_trigger_api_key_alerts(request: Request):
-    if os.environ.get("ENV") != "local":
-        iap_jwt = request.headers.get("x-goog-iap-jwt-assertion")
-        if not iap_jwt:
-            raise HTTPException(status_code=401, detail="Missing IAP JWT. Request bypassed IAP.")
-
-        try:
-            # Reusing your existing websocket IAP validation logic
-            kid = jwt.get_unverified_header(iap_jwt).get("kid")
-            public_keys = get_google_public_keys()
-            public_key = public_keys.get(kid)
-            if not public_key:
-                raise ValueError("Invalid IAP Token Header Key ID")
-
-            payload = jwt.decode(
-                iap_jwt,
-                public_key,
-                algorithms=["ES256"],
-                audience=os.environ.get("IAP_AUDIENCE")
-            )
-
-            # Verify the request is coming strictly from your allowed Service Account
-            email = payload.get("email")
-            expected_sa = os.environ.get("IAM_SA_EMAIL")
-
-            # IAP prefixes service account emails with "accounts.google.com:"
-            if email != f"accounts.google.com:{expected_sa}" and email != expected_sa:
-                raise HTTPException(status_code=403, detail=f"Unauthorized Service Account: {email}")
-
-        except Exception as e:
-            raise HTTPException(status_code=403, detail=f"IAP Validation Failed: {str(e)}")
-
-    # Execute the core logic
+async def gcp_trigger_api_key_alerts(
+    request: Request,
+    authenticated: bool = Depends(verify_cron_caller)
+):
     print("🔔 GCP Scheduler triggered daily API key expiration check.")
     await run_api_key_expiration_check()
 
@@ -116,3 +123,30 @@ async def gcp_trigger_api_key_alerts(request: Request):
     )
 
     return {"message": "API key expiration check executed successfully."}
+
+
+@router.post("/servicenow-sync", summary="GCP Scheduler trigger for weekly ServiceNow CMDB sync")
+def gcp_trigger_servicenow_sync(
+    background_tasks: BackgroundTasks,
+    authenticated: bool = Depends(verify_cron_caller)
+):
+    """
+    Weekly background sync with ServiceNow CMDB.
+    Runs asynchronously using FastAPI BackgroundTasks.
+    """
+    background_tasks.add_task(
+        asset_service.full_background_sync_wrapper,
+        "SYSTEM_CRON",
+        "scheduler"
+    )
+
+    log_audit_event(
+        user_id="SYSTEM_CRON",
+        role="scheduler",
+        action="CRON_SNOW_SYNC_STARTED",
+        resource_type="INTEGRATION",
+        resource_id="servicenow_cmdb",
+        details="Weekly scheduled ServiceNow CMDB sync initiated by Cloud Scheduler."
+    )
+
+    return {"message": "Weekly ServiceNow sync queued successfully."}

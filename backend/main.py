@@ -144,7 +144,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 # Helper list to cleanly loop and mount standard vs external routes
 routers_list = [
     assets.router, kpi_criteria.router, auth.router, board.router,
-    contacts.router, countries.router, cronos.router, documents.router, insights.router,
+    contacts.router, countries.router, documents.router, cronos.router, insights.router,
     kiss24.router, locations.router, logs.router, luigi.router,
     rag.router, regions.router, services.router, tests.router,
     users.router, danger.router
