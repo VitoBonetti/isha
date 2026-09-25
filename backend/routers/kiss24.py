@@ -10,27 +10,55 @@ router = APIRouter(prefix="/api/kiss24", tags=["Kiss24"])
 
 @router.post("/sync-org-ids", status_code=status.HTTP_200_OK, summary="[Admin Only]")
 def sync_kiss24_org_ids(current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    """
+    Admin only endpoint: Sync the Keep secure organization with the Mario Country
+    """
     return kiss24_service.sync_kiss24_org_ids(db, current_user)
 
 
 @router.post("/sync-asset-ids", status_code=status.HTTP_200_OK, summary="[Admin Only]")
 def sync_kiss24_asset_ids(current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    """
+    Admin only endpoint: Sync the Keep secure Asset with the Mario Asset. Utilize the Onetrust ID as reference.
+    """
     return kiss24_service.sync_kiss24_asset_ids(db, current_user)
+
+
+@router.get("/assets/total-count", summary="Get total KISS24 asset count")
+def get_kiss24_asset_count(current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    """
+    Admin only endpoint: Get total KISS24 asset count
+    """
+    return kiss24_service.get_kiss24_asset_count(db, current_user)
 
 
 @router.post("/sync-update-kiss24-snowid", status_code=status.HTTP_200_OK, summary="[Admin Only]")
 def sync_update_kiss24_snowid(current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    """
+    Admin only endpoint: Sync the Keep secure Asset with the Service Now ID
+    """
     return kiss24_service.sync_update_kiss24_snowid(db, current_user)
 
 
 @router.post("/sync-vuln-types", status_code=status.HTTP_200_OK, summary="[Admin Only]")
 def sync_kiss24_vulnerability_types(current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    """
+    Admin only endpoint: Sync the Keep secure VulnType with the Mario
+    """
     return kiss24_service.sync_kiss24_vulnerability_types(db, current_user)
 
 
 @router.post("/sync-user-kiss24-uuid", status_code=status.HTTP_200_OK, summary="[Admin Only]")
 def sync_user_kiss24_uuid(current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    """
+    Admin only endpoint: Sync the Keep secure user with the Mario user
+    """
     return kiss24_service.sync_user_kiss24_uuid(db, current_user)
+
+
+@router.get("/vuln-types", status_code=status.HTTP_200_OK, summary="[Service Endpoint]")
+def get_kiss24_vuln_types_for_dropdown(current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    return kiss24_service.get_kiss24_vuln_types_for_dropdown(db)
 
 
 @router.post("/{test_id}/create-test", status_code=status.HTTP_200_OK)
@@ -53,14 +81,19 @@ def get_kiss24_vulnerabilities(test_id: str, current_user: dict = Depends(get_cu
     return kiss24_service.get_kiss24_vulnerabilities(db, test_id, current_user)
 
 
-@router.get("/vuln-types", status_code=status.HTTP_200_OK, summary="[Service Endpoint]")
-def get_kiss24_vuln_types_for_dropdown(current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
-    return kiss24_service.get_kiss24_vuln_types_for_dropdown(db)
-
-
 @router.post("/{test_id}/vulnerabilities/publish", status_code=status.HTTP_200_OK)
 def publish_vulnerability(test_id: str, payload: dict, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
     return kiss24_service.publish_vulnerability(db, test_id, payload, current_user)
+
+
+@router.post("/{test_id}/vulnerabilities/{vuln_uuid}/change-state", status_code=status.HTTP_200_OK)
+def change_vuln_state(test_id: str, vuln_uuid: str, payload: dict, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    return kiss24_service.change_vuln_state(db, test_id, vuln_uuid, payload.get("state"), current_user)
+
+
+@router.post("/{test_id}/vulnerabilities/bulk-change-state", status_code=status.HTTP_200_OK)
+def bulk_change_vuln_state(test_id: str, payload: dict, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    return kiss24_service.bulk_change_vuln_state(db, test_id, payload.get("vuln_uuids", []), payload.get("state"), current_user)
 
 
 @router.get("/validating-vulns", summary="Get Cached Validating Vulns (Instant)")
@@ -124,6 +157,8 @@ def get_kiss24_synced_raw_assets(
     return kiss24_service.get_kiss24_synced_raw_assets_paginated(
         db, current_user, page=page, limit=20, search=search, sort_by=sort_by, sort_dir=sort_dir
     )
+
+
 
 
 @router.get("/tests/synced/", summary="[Admin] Get all tests synced with Kiss24")

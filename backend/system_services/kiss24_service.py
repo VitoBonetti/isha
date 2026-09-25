@@ -20,23 +20,7 @@ from audit_logger import log_audit_event
 from utils.secret_manager import get_secret
 from utils.security_cipher import get_cipher
 from utils.timeaware import aware_utcnow
-from utils.kiss24_app_service import (
-    map_asset_onetrust_custom_field,
-    map_organizations,
-    create_test,
-    get_test_info,
-    get_test_vulns_info,
-    add_snowid_to_kiss24asset,
-    sync_vuln_type_kiss24,
-    map_mario_user_kiss24_uuid,
-    create_vulnerability,
-    upload_vulnerability_attachment,
-    get_custom_fields_choice_uuid,
-    fetch_validating_vulnerabilities,
-    fetch_validation_info,
-    get_unmapped_kiss24_assets,
-    edit_test_details
-)
+from utils import kiss24_app_service
 
 KISS_24_TEMP_BUCKET = os.environ.get("KISS_24_TEMP_BUCKET")
 PUBSUB_TOPIC_PATH = os.environ.get("PUBSUB_TOPIC_PATH")
@@ -86,7 +70,7 @@ def calculate_similarity(a: str, b: str) -> int:
 # --- SYNC ENDPOINTS ---
 def sync_kiss24_org_ids(db: Session, current_user: dict):
     try:
-        orgs_map = map_organizations()
+        orgs_map = kiss24_app_service.map_organizations()
         if not orgs_map:
             return {"status": "Success", "message": "No Organization mappings found in KISS24.",
                     "total_kiss24_mapped": 0, "total_countries_updated": 0}
@@ -116,7 +100,7 @@ def sync_kiss24_org_ids(db: Session, current_user: dict):
 
 def sync_kiss24_asset_ids(db: Session, current_user: dict):
     try:
-        onetrust_map = map_asset_onetrust_custom_field()
+        onetrust_map = kiss24_app_service.map_asset_onetrust_custom_field()
         if not onetrust_map:
             return {"status": "Success", "message": "No OneTrust asset mappings found in KISS24.",
                     "total_kiss24_mapped": 0, "total_raw_assets_updated": 0}
@@ -165,7 +149,7 @@ def sync_update_kiss24_snowid(db: Session, current_user: dict):
 
     asset_dict_payload = {a.kiss24_asset_id: a.snow_number for a in assets}
     try:
-        sync_results = add_snowid_to_kiss24asset(asset_dict_payload)
+        sync_results = kiss24_app_service.add_snowid_to_kiss24asset(asset_dict_payload)
         log_audit_event(str(current_user["id"]), current_user.get("role", "admin"), "KISS24_SNOW_ID_SYNC", "KISS24",
                         "N/A",
                         f"Pushed ServiceNow IDs to KISS24. Success: {sync_results['success_count']}, Failed: {sync_results['failed_count']}.")
@@ -177,7 +161,7 @@ def sync_update_kiss24_snowid(db: Session, current_user: dict):
 
 def sync_kiss24_vulnerability_types(db: Session, current_user: dict):
     try:
-        map_type, map_context = sync_vuln_type_kiss24()
+        map_type, map_context = kiss24_app_service.sync_vuln_type_kiss24()
 
         # Update Contexts
         existing_contexts = {str(c.id): c for c in db.query(Kiss24ContextType).all()}
@@ -236,7 +220,7 @@ def sync_user_kiss24_uuid(db: Session, current_user: dict):
         email_list = [u.email for u in users]
         if not email_list: return {"message": "No active users found to sync.", "updated_count": 0}
 
-        sync_dat = map_mario_user_kiss24_uuid(email_list)
+        sync_dat = kiss24_app_service.map_mario_user_kiss24_uuid(email_list)
         if not sync_dat: return {"message": "No matching users found in Keep Secure 24.", "updated_count": 0}
 
         updated_count = 0
@@ -292,7 +276,7 @@ def create_kiss24_test(db: Session, test_id: str, current_user: dict):
 
         payload = {"details": "to do", "scheduled_start": start_date_str, "auto_start": True, "private": False,
                    "light": False, "assets": [str(asset_uuid)], "name": full_test_name}
-        new_test_uuid = create_test(str(country_uuid), payload, user_api_key)
+        new_test_uuid = kiss24_app_service.create_test(str(country_uuid), payload, user_api_key)
 
         if not new_test_uuid: raise HTTPException(status_code=500,
                                                   detail="KISS24 API did not return a valid Test UUID.")
@@ -322,7 +306,7 @@ def update_kiss24_test_details(db: Session, test_id: str, payload: dict, current
 
         details_text = payload.get("details", "")
 
-        success = edit_test_details(str(test.kiss24), details_text, user_api_key)
+        success = kiss24_app_service.edit_test_details(str(test.kiss24), details_text, user_api_key)
         if not success:
             raise HTTPException(status_code=500, detail="Failed to update test details in Keep Secure 24.")
 
@@ -349,7 +333,7 @@ def get_kiss24_live_status(db: Session, test_id: str, current_user: dict):
     if not test.kiss24: raise HTTPException(status_code=404, detail="Not linked to Keep Secure 24.")
 
     check_maintainer_lane_access(current_user, str(test.service_lane_id))
-    raw_data = get_test_info(str(test.kiss24))
+    raw_data = kiss24_app_service.get_test_info(str(test.kiss24))
     if not raw_data or not raw_data.get("items"): raise HTTPException(status_code=404,
                                                                       detail="Test missing from KISS24 API.")
 
@@ -368,7 +352,7 @@ def get_kiss24_vulnerabilities(db: Session, test_id: str, current_user: dict):
     if not test or not test.kiss24: raise HTTPException(status_code=404, detail="Not linked to Keep Secure 24.")
 
     check_maintainer_lane_access(current_user, str(test.service_lane_id))
-    raw_data = get_test_vulns_info(str(test.kiss24))
+    raw_data = kiss24_app_service.get_test_vulns_info(str(test.kiss24))
     if not raw_data or not raw_data.get("items"): return []
 
     return [{
@@ -435,7 +419,7 @@ def publish_vulnerability(db: Session, test_id: str, payload: dict, current_user
         safe_html = re.sub(r'<p>\s*(?:&nbsp;|<br\s*/?>)*\s*</p>', '', safe_html, flags=re.IGNORECASE)
         safe_html = re.sub(r'<li>\s*(?:&nbsp;|<br\s*/?>)*\s*</li>', '', safe_html, flags=re.IGNORECASE)
 
-        remediation_uuid = get_custom_fields_choice_uuid(str(country_uuid), "Remediation Effort",
+        remediation_uuid = kiss24_app_service.get_custom_fields_choice_uuid(str(country_uuid), "Remediation Effort",
                                                          payload.get("remediation_effort", "Minimal"))
         custom_fields = [{"parent": "MITRE ID", "text": payload.get("mitre_id", "")}]
         if remediation_uuid: custom_fields.append({"parent": "Remediation Effort", "choices": remediation_uuid})
@@ -449,14 +433,59 @@ def publish_vulnerability(db: Session, test_id: str, payload: dict, current_user
             "custom_fields": custom_fields
         }
 
-        new_vuln_uuid = create_vulnerability(str(country_uuid), create_payload, user_api_key)
+        new_vuln_uuid = kiss24_app_service.create_vulnerability(str(country_uuid), create_payload, user_api_key)
         if not new_vuln_uuid: raise HTTPException(status_code=500, detail="Failed to create vulnerability.")
 
         uploaded_count = sum(1 for img in payload.get("images", []) if
-                             upload_vulnerability_attachment(new_vuln_uuid, img["base64"], img["name"], user_api_key))
+                             kiss24_app_service.upload_vulnerability_attachment(new_vuln_uuid, img["base64"], img["name"], user_api_key))
         log_audit_event(str(current_user["id"]), current_user.get("role", "pentester"), "KISS24_VULN_PUBLISHED",
                         "KISS24", new_vuln_uuid, f"Published {severity_key}. Images: {uploaded_count}")
         return {"status": "Success", "message": "Vulnerability Published!", "vuln_uuid": new_vuln_uuid}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def change_vuln_state(db: Session, test_id: str, vuln_uuid: str, state: str, current_user: dict):
+    try:
+        test = db.query(Tests).filter(Tests.id == test_id).first()
+        if not test: raise HTTPException(status_code=404, detail="Test not found.")
+        check_maintainer_lane_access(current_user, str(test.service_lane_id))
+
+        user_api_key = get_user_kiss24_key(db, str(current_user["id"]))
+        success = kiss24_app_service.change_vulnerability_state(vuln_uuid, state, user_api_key)
+
+        if not success: raise HTTPException(status_code=500, detail="Failed to change state.")
+
+        log_audit_event(str(current_user["id"]), current_user.get("role", "pentester"), "KISS24_VULN_STATE_CHANGED",
+                        "KISS24", vuln_uuid, f"Changed vulnerability state to {state}")
+        return {"status": "Success", "message": f"Vulnerability state changed to {state}."}
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def bulk_change_vuln_state(db: Session, test_id: str, vuln_uuids: list, state: str, current_user: dict):
+    try:
+        if not vuln_uuids: raise HTTPException(status_code=400, detail="No vulnerabilities provided.")
+
+        test = db.query(Tests).filter(Tests.id == test_id).first()
+        if not test: raise HTTPException(status_code=404, detail="Test not found.")
+        check_maintainer_lane_access(current_user, str(test.service_lane_id))
+
+        user_api_key = get_user_kiss24_key(db, str(current_user["id"]))
+        success = kiss24_app_service.change_vulnerability_state_bulk(vuln_uuids, state, user_api_key)
+
+        if not success: raise HTTPException(status_code=500, detail="Failed to change states in bulk.")
+
+        log_audit_event(str(current_user["id"]), current_user.get("role", "pentester"),
+                        "KISS24_BULK_VULN_STATE_CHANGED", "KISS24", "BULK",
+                        f"Changed {len(vuln_uuids)} vulnerabilities to state {state}")
+        return {"status": "Success", "message": f"{len(vuln_uuids)} vulnerabilities changed to {state}."}
+    except HTTPException:
+        raise
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
@@ -475,7 +504,7 @@ def get_validating_vulns(db: Session):
 
 def sync_validating_vulns(db: Session, current_user: dict):
     user_api_key = get_user_kiss24_key(db, str(current_user["id"]))
-    live_vulns = fetch_validating_vulnerabilities(user_api_key)
+    live_vulns = kiss24_app_service.fetch_validating_vulnerabilities(user_api_key)
     live_uuids = {str(v["uuid"]): v for v in live_vulns}
 
     existing_vulns = {str(v.id): v for v in db.query(Kiss24ValidatingVulns).all()}
@@ -544,7 +573,7 @@ def upload_attachment_to_gcs(att_uuid: str, file_name: str, vuln_uuid: str, buck
 
 def trigger_luigi_verification_pipeline(vuln_uuid: str, user_api_key: str):
     try:
-        vuln_data = fetch_validation_info(vuln_uuid, user_api_key)
+        vuln_data = kiss24_app_service.fetch_validation_info(vuln_uuid, user_api_key)
         if not vuln_data: return
 
         bucket = storage.Client().bucket(KISS_24_TEMP_BUCKET)
@@ -568,7 +597,7 @@ def trigger_luigi_verification_pipeline(vuln_uuid: str, user_api_key: str):
 
 # --- RECONCILIATION ---
 def get_reconciliation_candidates(db: Session, limit: int):
-    kiss24_unmapped_by_org = get_unmapped_kiss24_assets(get_secret(KISS_24_API_KEY_NAME))
+    kiss24_unmapped_by_org = kiss24_app_service.get_unmapped_kiss24_assets(get_secret(KISS_24_API_KEY_NAME))
 
     query = (db.query(RawAssets, Country.kiss24_uuid.label("org_uuid"), Country.name.label("country_name"))
     .join(Country, RawAssets.country_id == Country.id)
@@ -650,7 +679,7 @@ def reconcile_asset(db: Session, payload, current_user: dict):
     if not payload.mario_raw_asset_id or not payload.kiss24_uuid or not payload.snow_number:
         raise HTTPException(status_code=400, detail="Missing required fields.")
 
-    push_results = add_snowid_to_kiss24asset({payload.kiss24_uuid: payload.snow_number})
+    push_results = kiss24_app_service.add_snowid_to_kiss24asset({payload.kiss24_uuid: payload.snow_number})
     if push_results["failed_count"] > 0:
         raise HTTPException(status_code=500, detail=f"Keep Secure 24 rejected the update: {push_results['errors']}")
 
@@ -669,7 +698,7 @@ def reconcile_asset(db: Session, payload, current_user: dict):
 def bulk_reconcile_assets(db: Session, payload, current_user: dict):
     if not payload.assets: raise HTTPException(status_code=400, detail="No assets provided.")
 
-    push_results = add_snowid_to_kiss24asset({item.kiss24_uuid: item.snow_number for item in payload.assets})
+    push_results = kiss24_app_service.add_snowid_to_kiss24asset({item.kiss24_uuid: item.snow_number for item in payload.assets})
 
     for item in payload.assets:
         asset = db.query(RawAssets).filter(RawAssets.id == item.mario_raw_asset_id).first()
@@ -800,3 +829,10 @@ def get_kiss24_synced_tests_paginated(db: Session, current_user: dict, page: int
         "limit": limit,
         "total_pages": (total_synced + limit - 1) // limit
     }
+
+
+# --- ASSETS ---
+def get_kiss24_asset_count(db: Session, current_user: dict):
+    user_api_key = get_user_kiss24_key(db, str(current_user["id"]))
+    total = kiss24_app_service.get_total_kiss24_assets(user_api_key)
+    return {"total_assets": total}

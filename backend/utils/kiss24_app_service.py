@@ -361,6 +361,7 @@ def get_custom_fields_choice_uuid(ouuid: str, field_name: str, choice_text: str)
 
     return None
 
+
 # edit test details
 def edit_test_details(test_uuid: str, details: str, user_api_key: str = None):
     endpoint = f"tests/{test_uuid}/edit"
@@ -479,6 +480,50 @@ def upload_vulnerability_attachment(vuln_uuid: str, base64_data: str, filename: 
         print(f"Failed to upload attachment: {e}")
         return False
 
+
+# change vulnerability state
+def change_vulnerability_state(vuln_uuid: str, state: str, user_api_key: str = None):
+    endpoint = f"vulnerabilities/{vuln_uuid}/change-state"
+    url = f"{KISS_24_ENDPOINT}{endpoint}"
+    body = {"state": state}
+
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(body).encode("utf-8"),
+        headers={"x-api-key": user_api_key, "Content-Type": "application/json"},
+        method="POST"
+    )
+
+    try:
+        with urllib.request.urlopen(req) as res:
+            return res.status == 200
+    except urllib.error.HTTPError as e:
+        err_body = e.read().decode('utf-8')
+        raise Exception(f"KISS24 Rejected Vulnerability State Change (HTTP {e.code}): {err_body}")
+    except Exception as e:
+        raise Exception(f"Connection Error: {str(e)}")
+
+
+def change_vulnerability_state_bulk(vuln_uuids: [str], state: str, user_api_key: str = None):
+    endpoint = f"vulnerabilities/bulk-action/change-state"
+    url = f"{KISS_24_ENDPOINT}{endpoint}"
+    body = {"vulnerabilities": vuln_uuids, "state": state}
+
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(body).encode("utf-8"),
+        headers={"x-api-key": user_api_key, "Content-Type": "application/json"},
+        method="POST"
+    )
+
+    try:
+        with urllib.request.urlopen(req) as res:
+            return res.status == 200
+    except urllib.error.HTTPError as e:
+        err_body = e.read().decode('utf-8')
+        raise Exception(f"KISS24 Rejected Vulnerability State Change (HTTP {e.code}): {err_body}")
+    except Exception as e:
+        raise Exception(f"Connection Error: {str(e)}")
 
 # ==========================================
 # ---  4. VALIDATIONS                    ---
@@ -771,3 +816,19 @@ def verify_kiss24_api_key(test_key: str):
 
 
 
+# ==========================================
+# --- 7. ASSETS                          ---
+# ==========================================
+def get_total_kiss24_assets(user_api_key: str = None) -> int:
+    """
+    Hits the assets endpoint and returns only the total count of assets in Keep Secure 24.
+    """
+    try:
+        resp = post("assets", user_api_key=user_api_key)
+
+        # Extract and return just the total integer
+        return resp.get("total", 0)
+
+    except Exception as e:
+        print(f"Failed to fetch total assets from KISS24: {e}")
+        return 0

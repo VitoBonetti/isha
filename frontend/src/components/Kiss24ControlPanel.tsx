@@ -3,7 +3,7 @@ import axios from 'axios';
 import toast from 'react-hot-toast';
 import {
   X, Cable, CheckCircle2, AlertCircle, BrainCircuit,
-  Database, Activity, ShieldAlert, Lock, RefreshCw, Send, Check, DownloadCloud, Clock, User, ExternalLink, FingerprintPattern, TestTubeDiagonal, Bug, FileDown, Edit2, Save
+  Database, Activity, ShieldAlert, Lock, RefreshCw, Send, Check, DownloadCloud, Clock, User, ExternalLink, FingerprintPattern, TestTubeDiagonal, Bug, FileDown, Edit2, Save, SendHorizonal
 } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
 import Kiss24KeyModal from './Modals/Kiss24KeyModal';
@@ -38,15 +38,16 @@ export default function Kiss24ControlPanel({ isOpen, onClose, test, onRefresh }:
   const [editDetailsContent, setEditDetailsContent] = useState("");
   const [isSavingDetails, setIsSavingDetails] = useState(false);
 
-  // Vuln report generation
+  // Vuln States
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
+  const [isPublishingVulns, setIsPublishingVulns] = useState(false);
   const [selectedVulns, setSelectedVulns] = useState<Set<string>>(new Set());
 
   // kiss24 key State
   const [isKeyValid, setIsKeyValid] = useState<boolean | null>(null);
   const [isValidatingKey, setIsValidatingKey] = useState(false);
 
-  // Vulns state
+  // Modals state
   const [isCreateVulnModalOpen, setIsCreateVulnModalOpen] = useState(false);
 
   // Data States
@@ -249,6 +250,28 @@ export default function Kiss24ControlPanel({ isOpen, onClose, test, onRefresh }:
     }
   };
 
+  const handlePublishStateChange = async (uuids: string[]) => {
+    if (uuids.length === 0) return;
+    setIsPublishingVulns(true);
+    const isBulk = uuids.length > 1;
+    const toastId = toast.loading(isBulk ? `Publishing ${uuids.length} vulnerabilities...` : "Publishing vulnerability...");
+
+    try {
+      if (isBulk) {
+        await axios.post(`/api/kiss24/${test.id}/vulnerabilities/bulk-change-state`, { vuln_uuids: uuids, state: "publish" });
+      } else {
+        await axios.post(`/api/kiss24/${test.id}/vulnerabilities/${uuids[0]}/change-state`, { state: "publish" });
+      }
+      toast.success(isBulk ? `${uuids.length} vulnerabilities published!` : "Vulnerability published!", { id: toastId });
+      setSelectedVulns(new Set()); // clear selection
+      handleFetchVulns(); // refresh data
+    } catch (e: any) {
+      toast.error(e.response?.data?.detail || "Failed to publish.", { id: toastId });
+    } finally {
+      setIsPublishingVulns(false);
+    }
+  };
+
   const handleLocalRefresh = () => {
     setIsRefreshing(true);
     onRefresh();
@@ -270,6 +293,12 @@ export default function Kiss24ControlPanel({ isOpen, onClose, test, onRefresh }:
       default: return 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-400 border-blue-200 dark:border-blue-500/30';
     }
   };
+
+  // Extract only the selected vulnerabilities that are actually ready to publish
+  const selectedReadyToPublish = Array.from(selectedVulns).filter(uuid => {
+    const v = vulnsData?.find(x => x.uuid === uuid);
+    return v?.state === "Ready To Publish";
+  });
 
   return (
     <div
@@ -356,7 +385,6 @@ export default function Kiss24ControlPanel({ isOpen, onClose, test, onRefresh }:
                 </div>
 
                 <div className="space-y-4 flex-1">
-                  {/* Checks omitted for brevity in snippet, keeping intact */}
                   <div className={`p-4 sm:p-5 rounded-xl border flex flex-col md:flex-row items-start md:items-center justify-between gap-3 sm:gap-4 shadow-sm ${countryKiss24Uuid ? 'bg-white dark:bg-zinc-900 border-slate-200 dark:border-zinc-800' : 'bg-red-50 dark:bg-red-900/10 border-red-200 dark:border-red-900/30'}`}>
                     <div className="flex items-start gap-3 sm:gap-4 w-full md:w-auto">
                       {countryKiss24Uuid ? <CheckCircle2 size={24} className="text-emerald-500 shrink-0 mt-0.5" /> : <AlertCircle size={24} className="text-red-500 shrink-0 mt-0.5" />}
@@ -642,15 +670,27 @@ export default function Kiss24ControlPanel({ isOpen, onClose, test, onRefresh }:
                         Select All
                       </span>
                     </label>
-                    {selectedVulns.size > 0 && (
-                      <button
-                        onClick={() => handleGenerateVulnReports(Array.from(selectedVulns))}
-                        disabled={isGeneratingReport}
-                        className="px-3 py-1.5 bg-indigo-100 hover:bg-indigo-200 dark:bg-indigo-900/30 dark:hover:bg-indigo-900/50 text-indigo-700 dark:text-indigo-400 text-xs font-bold rounded-lg transition-colors flex items-center gap-2"
-                      >
-                        <FileDown size={14} /> Generate {selectedVulns.size} Report(s)
-                      </button>
-                    )}
+
+                    <div className="flex items-center gap-2">
+                      {selectedReadyToPublish.length > 0 && (
+                        <button
+                          onClick={() => handlePublishStateChange(selectedReadyToPublish)}
+                          disabled={isPublishingVulns}
+                          className="px-3 py-1.5 bg-emerald-100 hover:bg-emerald-200 dark:bg-emerald-900/30 dark:hover:bg-emerald-900/50 text-emerald-700 dark:text-emerald-400 text-xs font-bold rounded-lg transition-colors flex items-center gap-2 shadow-sm"
+                        >
+                          <SendHorizonal size={14} /> Publish {selectedReadyToPublish.length} Finding(s)
+                        </button>
+                      )}
+                      {selectedVulns.size > 0 && (
+                        <button
+                          onClick={() => handleGenerateVulnReports(Array.from(selectedVulns))}
+                          disabled={isGeneratingReport}
+                          className="px-3 py-1.5 bg-indigo-100 hover:bg-indigo-200 dark:bg-indigo-900/30 dark:hover:bg-indigo-900/50 text-indigo-700 dark:text-indigo-400 text-xs font-bold rounded-lg transition-colors flex items-center gap-2"
+                        >
+                          <FileDown size={14} /> Generate {selectedVulns.size} Report(s)
+                        </button>
+                      )}
+                    </div>
                   </div>
                 )}
 
@@ -705,6 +745,16 @@ export default function Kiss24ControlPanel({ isOpen, onClose, test, onRefresh }:
                           </div>
 
                           <div className="flex shrink-0 w-full sm:w-auto gap-2">
+                            {vuln.state === "Ready To Publish" && (
+                              <button
+                                onClick={() => handlePublishStateChange([vuln.uuid])}
+                                disabled={isPublishingVulns}
+                                className="flex-1 sm:flex-none flex justify-center p-2 text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 rounded-lg transition-colors"
+                                title="Publish Vulnerability"
+                              >
+                                <SendHorizonal size={16} /> <span className="sm:hidden ml-2 text-xs font-bold">Publish</span>
+                              </button>
+                            )}
                             <button
                               onClick={() => handleGenerateVulnReports([vuln.uuid])}
                               disabled={isGeneratingReport}

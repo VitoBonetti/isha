@@ -17,6 +17,9 @@ export default function Kiss24SyncSettings() {
   const [isSyncingVulnTypesID, setIsSyncingVulnTypesID] = useState(false);
   const [isSyncingUserKissID, setIsSyncingUserKissID] = useState(false);
 
+  // --- METRICS STATE ---
+  const [totalKiss24Assets, setTotalKiss24Assets] = useState<number | null>(null);
+
   // --- ASSETS STATE ---
   const [assetData, setAssetData] = useState<any>(null);
   const [assetPage, setAssetPage] = useState(1);
@@ -49,6 +52,15 @@ export default function Kiss24SyncSettings() {
   }, [testSearch]);
 
   // --- FETCHERS ---
+  const fetchKiss24Metrics = async () => {
+    try {
+      const res = await axios.get('/api/kiss24/assets/total-count');
+      setTotalKiss24Assets(res.data.total_assets);
+    } catch (e) {
+      console.error("Failed to fetch total KISS24 assets metric.");
+    }
+  };
+
   const fetchAssets = async () => {
     setIsFetchingAssets(true);
     try {
@@ -84,6 +96,11 @@ export default function Kiss24SyncSettings() {
       toast.error("Failed to fetch synced tests.");
     } finally { setIsFetchingTests(false); }
   };
+
+  // Fetch metrics once on mount
+  useEffect(() => {
+    fetchKiss24Metrics();
+  }, []);
 
   // Trigger Fetching when Tabs or Parameters change
   useEffect(() => {
@@ -266,7 +283,11 @@ export default function Kiss24SyncSettings() {
             <div>
               <h2 className="font-bold text-slate-800 dark:text-zinc-100 text-base">Synced Assets Inventory</h2>
               <p className="text-xs text-slate-500 mt-0.5">
-                <span className="font-bold text-emerald-600">{assetData.total_synced}</span> of {assetData.total_assets} total raw assets are synchronized.
+                <span className="font-bold text-emerald-600">
+                  {totalKiss24Assets && totalKiss24Assets > 0
+                    ? `${Math.round((assetData.total_synced / totalKiss24Assets) * 100)}%`
+                    : '0%'}
+                </span> of Keep Secure 24 assets are synchronized. ({assetData.total_synced} mapped / {totalKiss24Assets || '?'} total KISS24 assets)
               </p>
             </div>
             <div className="flex items-center gap-3">
