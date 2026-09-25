@@ -1,7 +1,9 @@
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, Depends
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from google.auth.transport import requests
+from google.oauth2 import id_token
 from contextlib import asynccontextmanager
 import asyncio
 import traceback
@@ -12,10 +14,10 @@ import textwrap
 from jose import jwt, JWTError
 from routers import (
     auth, services, users, regions, countries, assets, tests, board, logs, locations, insights, contacts, luigi,
-    kiss24, danger, documents, rag, kpi_criteria
+    kiss24, danger, documents, rag, kpi_criteria, cronos
 )
 from routers.rag import start_nightly_rag_scheduler
-from routers.auth import require_admin, get_google_public_keys, start_daily_api_key_alert_scheduler, get_current_user
+from routers.auth import require_admin, get_google_public_keys, get_current_user
 from database import get_db_connection, run_alembic_migrations
 from websockets_manager import manager
 from audit_logger import log_audit_event, init_audit_log_infrastructure
@@ -29,11 +31,7 @@ async def lifespan(app: FastAPI):
     scheduler_task = asyncio.create_task(start_nightly_rag_scheduler())
     print("⏰ Nightly RAG sync scheduler initialized.")
 
-    # 2. Start the API Key alert scheduler
-    api_key_alert_task = asyncio.create_task(start_daily_api_key_alert_scheduler())
-    print("⏰ Daily 8:00 AM API Key alert scheduler initialized.")
-
-    # 3. Run Alembic migrations automatically on startup
+    # 2. Run Alembic migrations automatically on startup
     try:
         print("Starting up and checking database migrations...")
         run_alembic_migrations()
@@ -43,7 +41,7 @@ async def lifespan(app: FastAPI):
         traceback.print_exc()
         raise e
 
-    # 4. Check Database Connection
+    # 3. Check Database Connection
     conn = get_db_connection()
     if conn:
         print("✅ System normal. Database connected.")
@@ -146,7 +144,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 # Helper list to cleanly loop and mount standard vs external routes
 routers_list = [
     assets.router, kpi_criteria.router, auth.router, board.router,
-    contacts.router, countries.router, documents.router, insights.router,
+    contacts.router, countries.router, cronos.router, documents.router, insights.router,
     kiss24.router, locations.router, logs.router, luigi.router,
     rag.router, regions.router, services.router, tests.router,
     users.router, danger.router
@@ -249,7 +247,7 @@ def health_check():
 def check_health(current_user: dict = Depends(get_current_user)):
     return {"status": "online", "system": "Mario"}
 
-
+# --- EXCEPTION HANDLER ---
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     if exc.status_code >= 400:
