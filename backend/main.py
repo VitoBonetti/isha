@@ -54,12 +54,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Isha Core API",
-    description=textwrap.dedent("""
-        Backend engine for pentest planning and asset management. 
-        
-        [Switch to ReDoc UI](/api-external/redoc)
-    """),
-    version="2.0",
+    description=textwrap.dedent("""Isha Backend engine. - [Switch to ReDoc UI](/api-external/redoc)"""),
+    version="2.1",
     swagger_ui_parameters={"defaultModelsExpandDepth": -1},
     lifespan=lifespan,
     # Swagger & OpenAPI schema now reside strictly under /api-external
