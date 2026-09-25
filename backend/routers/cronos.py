@@ -6,7 +6,7 @@ from routers.auth import get_google_public_keys
 from websockets_manager import manager
 from database import db_cursor_context
 from audit_logger import log_audit_event
-from system_services import asset_service, rag_service
+from system_services import asset_service, rag_service, kiss24_service
 
 router = APIRouter(prefix="/api/cronos", tags=["Google CronJobs"])
 
@@ -177,3 +177,30 @@ def gcp_trigger_rag_sync(
     )
 
     return {"message": "Daily RAG sync queued successfully."}
+
+
+@router.post("/kiss24-weekly-provision", summary="GCP Scheduler trigger for weekly KISS24 test provisioning")
+def gcp_trigger_kiss24_provision(
+    background_tasks: BackgroundTasks,
+    authenticated: bool = Depends(verify_cron_caller)
+):
+    """
+    Weekly background task that auto-provisions tests in Keep Secure 24
+    for the current week. Runs asynchronously at 00:00 UTC on Mondays.
+    """
+    background_tasks.add_task(
+        kiss24_service.auto_provision_weekly_tests_background,
+        "SYSTEM_CRON",
+        "scheduler"
+    )
+
+    log_audit_event(
+        user_id="SYSTEM_CRON",
+        role="scheduler",
+        action="CRON_KISS24_PROVISION_STARTED",
+        resource_type="INTEGRATION",
+        resource_id="kiss24",
+        details="Weekly scheduled Keep Secure 24 test auto-provisioning initiated by Cloud Scheduler."
+    )
+
+    return {"message": "Weekly KISS24 auto-provisioning queued successfully."}

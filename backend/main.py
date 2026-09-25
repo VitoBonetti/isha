@@ -1,9 +1,7 @@
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, Depends, HTTPException
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from google.auth.transport import requests
-from google.oauth2 import id_token
 from contextlib import asynccontextmanager
 import asyncio
 import traceback
@@ -11,12 +9,11 @@ import os
 import time
 import json
 import textwrap
-from jose import jwt, JWTError
+from jose import jwt
 from routers import (
     auth, services, users, regions, countries, assets, tests, board, logs, locations, insights, contacts, luigi,
     kiss24, danger, documents, rag, kpi_criteria, cronos
 )
-from routers.rag import start_nightly_rag_scheduler
 from routers.auth import require_admin, get_google_public_keys, get_current_user
 from database import get_db_connection, run_alembic_migrations
 from websockets_manager import manager
@@ -27,11 +24,7 @@ init_audit_log_infrastructure()
 # --- LIFESPAN MANAGER (Runs on Cloud Run Boot) ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 1. Start the nightly 24-hour RAG sync scheduler
-    scheduler_task = asyncio.create_task(start_nightly_rag_scheduler())
-    print("⏰ Nightly RAG sync scheduler initialized.")
-
-    # 2. Run Alembic migrations automatically on startup
+    # 1. Run Alembic migrations automatically on startup
     try:
         print("Starting up and checking database migrations...")
         run_alembic_migrations()
@@ -41,7 +34,7 @@ async def lifespan(app: FastAPI):
         traceback.print_exc()
         raise e
 
-    # 3. Check Database Connection
+    # 2. Check Database Connection
     conn = get_db_connection()
     if conn:
         print("✅ System normal. Database connected.")

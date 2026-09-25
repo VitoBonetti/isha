@@ -16,11 +16,14 @@ from models.kiss24 import Kiss24ContextType, Kiss24VulnTypes, kiss24_vuln_contex
 from models.tests import Tests, TestAssets, TestStages
 from models.services import ServiceLanes
 from models.assets import Assets
+from database import SessionLocal
 from audit_logger import log_audit_event
 from utils.secret_manager import get_secret
 from utils.security_cipher import get_cipher
 from utils.timeaware import aware_utcnow
 from utils import kiss24_app_service
+from utils.kiss24_app_service import create_test, api_key as get_system_kiss24_key
+
 
 KISS_24_TEMP_BUCKET = os.environ.get("KISS_24_TEMP_BUCKET")
 PUBSUB_TOPIC_PATH = os.environ.get("PUBSUB_TOPIC_PATH")
@@ -291,6 +294,127 @@ def create_kiss24_test(db: Session, test_id: str, current_user: dict):
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
+
+
+def auto_provision_weekly_tests_background(user_id: str, user_role: str):
+    """
+    Background worker that finds tests scheduled for the CURRENT week,
+    on active service lanes with auto-provisioning enabled, and pushes
+    missing ones to Keep Secure 24 using the System API Key.
+    """
+    db = SessionLocal()
+    try:
+        # Get the current ISO year and week (Handles 52/53 week years perfectly)
+        now = aware_utcnow()
+        current_year, current_week, _ = now.isocalendar()
+
+        # 1. Query for ALL eligible tests for this week (we will filter the existing ones in Python)
+        all_weekly_tests = (db.query(Tests)
+                            .join(ServiceLanes, Tests.service_lane_id == ServiceLanes.id)
+                            .filter(
+            ServiceLanes.is_active == True,
+            ServiceLanes.auto_provision_workspace == True,
+            Tests.start_year == current_year,
+            Tests.start_week == current_week
+        ).all())
+
+        total_found = len(all_weekly_tests)
+
+        if total_found == 0:
+            log_audit_event(user_id, user_role, "KISS24_AUTO_PROVISION", "KISS24", "SYSTEM",
+                            f"No tests found for auto-provisioning in Week {current_week}, {current_year}.")
+            return
+
+        # Initialize Recap Counters
+        already_provisioned = 0
+        successfully_created = 0
+        skipped_missing_data = 0
+        failed = 0
+
+        system_api_key = get_system_kiss24_key()
+
+        # 2. Iterate and Provision
+        for test in all_weekly_tests:
+            # Check if it's already there!
+            if test.kiss24:
+                already_provisioned += 1
+                continue
+
+            try:
+                # Traverse relationships safely
+                country_uuid = None
+                asset_uuid = None
+
+                first_asset = (db.query(RawAssets, Country)
+                               .join(Assets, RawAssets.id == Assets.raw_asset_id)
+                               .join(TestAssets, Assets.id == TestAssets.asset_id)
+                               .join(Country, RawAssets.country_id == Country.id)
+                               .filter(TestAssets.test_id == str(test.id)).first())
+
+                if first_asset:
+                    country_uuid = first_asset.Country.kiss24_uuid
+                    asset_uuid = first_asset.RawAssets.kiss24_asset_id
+
+                if not country_uuid or not asset_uuid:
+                    skipped_missing_data += 1
+                    log_audit_event(user_id, user_role, "KISS24_AUTO_PROVISION_SKIP", "KISS24", str(test.id),
+                                    "Skipped: Missing Country UUID or Asset ID.")
+                    continue
+
+                start_date_str = datetime.fromisocalendar(test.start_year, test.start_week, 1).strftime("%Y-%m-%d")
+                service_name = test.services_lanes.name if test.services_lanes else 'Unknown Service'
+                full_test_name = f"{test.name} - {service_name} {test.start_year}"
+
+                payload = {
+                    "details": "Automatically provisioned by Gost Planner",
+                    "scheduled_start": start_date_str,
+                    "auto_start": True,
+                    "private": False,
+                    "light": False,
+                    "assets": [str(asset_uuid)],
+                    "name": full_test_name
+                }
+
+                # Push to Keep Secure 24 using the SYSTEM API key
+                new_test_uuid = create_test(str(country_uuid), payload, system_api_key)
+
+                if new_test_uuid:
+                    test.kiss24 = new_test_uuid
+                    successfully_created += 1
+                    log_audit_event(user_id, user_role, "KISS24_TEST_AUTO_CREATED", "KISS24", str(test.id),
+                                    f"Auto-Created Test: {new_test_uuid}")
+                else:
+                    failed += 1
+                    log_audit_event(user_id, user_role, "KISS24_TEST_AUTO_CREATE_FAIL", "KISS24", str(test.id),
+                                    "API returned empty UUID.")
+
+            except Exception as item_error:
+                failed += 1
+                log_audit_event(user_id, user_role, "KISS24_TEST_AUTO_CREATE_FAIL", "KISS24", str(test.id),
+                                f"Error: {str(item_error)}")
+                continue
+
+        db.commit()
+
+        # 3. Write the Recap Log!
+        recap_message = (
+            f"Weekly Provision Recap (Wk {current_week}, {current_year}): "
+            f"Total Target Tests: {total_found} | "
+            f"Successfully Created: {successfully_created} | "
+            f"Already Provisioned: {already_provisioned} | "
+            f"Skipped (Missing UUIDs): {skipped_missing_data} | "
+            f"Failed: {failed}"
+        )
+
+        # We log the recap as its own distinct action so you can easily query it in BigQuery
+        log_audit_event(user_id, user_role, "KISS24_AUTO_PROVISION_RECAP", "KISS24", "SYSTEM", recap_message)
+
+    except Exception as e:
+        db.rollback()
+        log_audit_event(user_id, user_role, "KISS24_AUTO_PROVISION_CRASH", "KISS24", "SYSTEM",
+                        f"Critical Failure: {str(e)}")
+    finally:
+        db.close()
 
 
 def update_kiss24_test_details(db: Session, test_id: str, payload: dict, current_user: dict):
