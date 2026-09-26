@@ -1,6 +1,6 @@
 import uuid
 import enum
-from sqlalchemy import Column, String, Integer, ForeignKey, REAL, Enum, DateTime, Boolean, Text, UniqueConstraint
+from sqlalchemy import Column, String, Integer, ForeignKey, REAL, Enum, DateTime, Boolean, Text, UniqueConstraint, Date
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 from pgvector.sqlalchemy import Vector
@@ -34,6 +34,7 @@ class Tests(Base):
     drive_folder_id = Column(String(255), nullable=True)
     drive_folder_url = Column(String(1000), nullable=True)
     kiss24 = Column(UUID(as_uuid=True), nullable=True)
+    ritm_matched = Column(Boolean, default=False)
 
     # relationship
     services_lanes = relationship("ServiceLanes", back_populates="tests")
@@ -151,3 +152,28 @@ class TestMilestone(Base):
     __table_args__ = (
         UniqueConstraint('test_id', 'step_name', name='uq_test_milestone_step'),
     )
+
+
+class TestRitms(Base):
+    __tablename__ = "test_ritms"
+
+    id = Column(String, primary_key=True, unique=True)
+    stage = Column(String, nullable=False)
+    description = Column(Text, nullable=False)
+    requested_by = Column(String, nullable=False)
+    company = Column(String, nullable=False)
+    created = Column(DateTime, nullable=False)
+    onetrust_id = Column(String, nullable=True)
+    name_app = Column(String, nullable=False)
+    estimated_date = Column(Date, nullable=True)
+    state = Column(String, nullable=False)
+    closed = Column(DateTime, nullable=True)
+    closed_by = Column(String, nullable=True)
+    service_requested = Column(String, nullable=True)
+
+
+class RitmsAndTests(Base):
+    __tablename__ = "ritms_and_tests"
+
+    ritm_id = Column(String, ForeignKey('test_ritms.id', ondelete='CASCADE'), primary_key=True)
+    test_id = Column(UUID(as_uuid=True), ForeignKey('tests.id', ondelete='CASCADE'), primary_key=True)
