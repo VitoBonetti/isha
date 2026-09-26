@@ -38,25 +38,3 @@ def downgrade() -> None:
 
     if 'ritm_matched' in existing_columns:
         op.drop_column('tests', 'ritm_matched')
-
-
-def upgrade() -> None:
-    """Upgrade schema safely by checking if column exists first."""
-    conn = op.get_bind()
-    inspector = Inspector.from_engine(conn)
-
-    # Get a list of all existing columns in the table
-    existing_columns = [col['name'] for col in inspector.get_columns('raw_assets')]
-
-    # Only add it if it's missing
-    if 'is_country_override' not in existing_columns:
-        op.add_column('raw_assets', sa.Column('is_country_override', sa.Boolean(), server_default='false', nullable=False))
-
-def downgrade() -> None:
-    """Downgrade schema safely."""
-    conn = op.get_bind()
-    inspector = Inspector.from_engine(conn)
-    existing_columns = [col['name'] for col in inspector.get_columns('raw_assets')]
-
-    if 'is_country_override' in existing_columns:
-        op.drop_column('raw_assets', 'is_country_override')

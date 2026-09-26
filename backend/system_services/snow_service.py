@@ -2,13 +2,16 @@ import os
 import io
 import pandas as pd
 import math
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from google.cloud import storage
 from sqlalchemy.orm import Session
+from sqlalchemy import func, or_, and_
 from sqlalchemy.dialects.postgresql import insert
 from fastapi import HTTPException
 from database import SessionLocal
-from models.tests import TestRitms
+from models.tests import Tests, TestAssets, TestStages, TestRitms, RitmsAndTests
+from models.assets import Assets
+from models.raw_assets import RawAssets, RawAssetsSnowMetadata
 from audit_logger import log_audit_event, get_bq_client, TABLE_REF
 from utils.timeaware import aware_utcnow
 
@@ -165,6 +168,19 @@ def process_ritm_sync_background(user_id: str, user_role: str):
             log_audit_event(user_id, user_role, "RITM_SYNC_SUCCESS", "SNOW_RITMS", latest_blob.name,
                             f"Successfully upserted {len(records_to_upsert)} RITMs.")
 
+            match_results = match_tests_with_ritms(db)
+            auto_matched_count = match_results["summary"]["total_tests_set_ritm"]
+
+            if auto_matched_count > 0:
+                log_audit_event(
+                    user_id=user_id,
+                    role=user_role,
+                    action="RITM_AUTO_MATCH",
+                    resource_type="SNOW_RITMS",
+                    resource_id="SYSTEM",
+                    details=f"Background sync automatically linked {auto_matched_count} tests to RITMs."
+                )
+
         except Exception as e:
             db.rollback()
             log_audit_event(user_id, user_role, "RITM_SYNC_DB_ERROR", "SNOW_RITMS", latest_blob.name,
@@ -202,3 +218,237 @@ def get_last_ritm_sync_date():
         return {"last_sync": None}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch last sync from BigQuery: {str(e)}")
+
+
+def get_filtered_ritms_current_year(
+        db: Session,
+        page: int = 1,
+        limit: int = 100,
+        search_id: str = None,
+        stage: str = None,
+        company: str = None,
+        name_app: str = None,
+        created_exact: date = None,
+        created_from: date = None,
+        created_to: date = None,
+        estimated_exact: date = None,
+        estimated_from: date = None,
+        estimated_to: date = None,
+        current_year: int = None
+):
+
+    query = db.query(TestRitms)
+
+    # --- 1. APPLY YEAR FILTER (IF PROVIDED) ---
+    # a) Keep if estimated_date is in the current year.
+    # b) Keep if estimated_date is NULL AND created is in the current year.
+    # (This naturally filters out items created this year but pushed to next year).
+    if current_year is not None:
+        query = query.filter(
+            or_(
+                func.extract('year', TestRitms.estimated_date) == current_year,
+                and_(
+                    TestRitms.estimated_date.is_(None),
+                    func.extract('year', TestRitms.created) == current_year
+                )
+            )
+        )
+
+    # c) Exclude Cancelled Stages
+    query = query.filter(func.lower(TestRitms.stage) != 'request cancelled')
+
+    # --- 2. APPLY OPTIONAL TEXT FILTERS (ILIKE for partial matches) ---
+    if search_id:
+        query = query.filter(TestRitms.id.ilike(f"%{search_id}%"))
+    if stage:
+        query = query.filter(TestRitms.stage.ilike(f"%{stage}%"))
+    if company:
+        query = query.filter(TestRitms.company.ilike(f"%{company}%"))
+    if name_app:
+        query = query.filter(TestRitms.name_app.ilike(f"%{name_app}%"))
+
+    # --- 3. APPLY OPTIONAL DATE FILTERS ---
+    # Created Date (which is a DateTime in DB, so we cast to date for comparison)
+    if created_exact:
+        query = query.filter(func.date(TestRitms.created) == created_exact)
+    if created_from:
+        query = query.filter(func.date(TestRitms.created) >= created_from)
+    if created_to:
+        query = query.filter(func.date(TestRitms.created) <= created_to)
+
+    # Estimated Date (already a Date in DB)
+    if estimated_exact:
+        query = query.filter(TestRitms.estimated_date == estimated_exact)
+    if estimated_from:
+        query = query.filter(TestRitms.estimated_date >= estimated_from)
+    if estimated_to:
+        query = query.filter(TestRitms.estimated_date <= estimated_to)
+
+    # --- 4. CALCULATE METRICS & PAGINATE ---
+    total_items = query.count()
+    total_pages = math.ceil(total_items / limit) if limit > 0 else 0
+
+    # Order by newest first, apply pagination
+    results = query.order_by(TestRitms.created.desc()).offset((page - 1) * limit).limit(limit).all()
+
+    # Format the payload for the frontend
+    items = [{
+        "id": r.id,
+        "stage": r.stage,
+        "description": r.description,
+        "requested_by": r.requested_by,
+        "company": r.company,
+        "created": r.created.isoformat() if r.created else None,
+        "onetrust_id": r.onetrust_id,
+        "name_app": r.name_app,
+        "estimated_date": r.estimated_date.isoformat() if r.estimated_date else None,
+        "state": r.state,
+        "closed": r.closed.isoformat() if r.closed else None,
+        "closed_by": r.closed_by,
+        "service_requested": r.service_requested
+    } for r in results]
+
+    return {
+        "items": items,
+        "total_items": total_items,
+        "total_pages": total_pages,
+        "page": page,
+        "limit": limit
+    }
+
+
+def match_tests_with_ritms(db: Session):
+    current_year = datetime.now(timezone.utc).year
+
+    # 1. Fetch current-year active tests linked to assets with a valid snow_number
+    query_assets_tests = (
+        db.query(
+            RawAssets.id.label("raw_asset_id"),
+            RawAssets.name.label("raw_asset_name"),
+            RawAssetsSnowMetadata.snow_data['u_onetrust_number'].astext.label("onetrust_id"),
+            Tests.id.label("test_id"),
+            Tests.name.label("test_name")
+        )
+        .join(Assets, RawAssets.id == Assets.raw_asset_id)
+        .join(TestAssets, Assets.id == TestAssets.asset_id)
+        .join(Tests, TestAssets.test_id == Tests.id)
+        .outerjoin(RawAssetsSnowMetadata, RawAssets.id == RawAssetsSnowMetadata.correlation_id)
+        .filter(
+            Tests.start_year == current_year,
+            Tests.stages != TestStages.STOPPED,
+            Tests.ritm_matched.isnot(True),  # ONLY unmatched tests
+            RawAssets.snow_number.isnot(None),
+            RawAssets.snow_number != ''
+        )
+        .all()
+    )
+
+    # 2. Build the asset-to-tests map
+    asset_map = {}
+    for row in query_assets_tests:
+        raw_id_str = str(row.raw_asset_id)
+        onetrust_str = str(row.onetrust_id).strip() if row.onetrust_id else None
+
+        if raw_id_str not in asset_map:
+            asset_map[raw_id_str] = {
+                "name": row.raw_asset_name,
+                "uuid": raw_id_str,
+                "onetrust_id": onetrust_str,
+                "tests": [],
+                "ritms": []
+            }
+
+        # Deduplicate tests per asset
+        existing_test_ids = {t["uuid"] for t in asset_map[raw_id_str]["tests"]}
+        if str(row.test_id) not in existing_test_ids:
+            asset_map[raw_id_str]["tests"].append({
+                "name": row.test_name,
+                "uuid": str(row.test_id)
+            })
+
+    # 3. Fetch current-year RITMs (excluding cancelled)
+    current_year_ritms = db.query(TestRitms).filter(
+        or_(
+            func.extract('year', TestRitms.estimated_date) == current_year,
+            and_(
+                TestRitms.estimated_date.is_(None),
+                func.extract('year', TestRitms.created) == current_year
+            )
+        ),
+        func.lower(TestRitms.stage) != 'request cancelled'
+    ).all()
+
+    # Group RITMs by onetrust_id for O(1) lookup
+    ritm_by_onetrust = {}
+    for r in current_year_ritms:
+        if r.onetrust_id:
+            clean_ot_id = str(r.onetrust_id).strip()
+            if clean_ot_id not in ritm_by_onetrust:
+                ritm_by_onetrust[clean_ot_id] = []
+            ritm_by_onetrust[clean_ot_id].append(r.id)
+
+    # 4. Perform the matching and track matched RITMs
+    matched_ritm_ids = set()
+
+    for asset in asset_map.values():
+        ot_id = asset["onetrust_id"]
+        if ot_id and ot_id in ritm_by_onetrust:
+            matching_ritms = ritm_by_onetrust[ot_id]
+            asset["ritms"] = matching_ritms
+            matched_ritm_ids.update(matching_ritms)
+
+    # 5. Process matches (Auto-Link 1:1) and separate matched/unmatched
+    matched_assets = []
+    unmatched_tests = []
+    total_tests_set_ritm = 0
+
+    for asset in asset_map.values():
+        if asset["ritms"]:
+            matched_assets.append(asset)
+
+            # --- AUTO-LINKING LOGIC ---
+            if len(asset["tests"]) == 1 and len(asset["ritms"]) == 1:
+                test_id = asset["tests"][0]["uuid"]
+                ritm_id = asset["ritms"][0]
+
+                # Check if it's already linked just in case
+                existing_link = db.query(RitmsAndTests).filter_by(ritm_id=ritm_id, test_id=test_id).first()
+                if not existing_link:
+                    db.add(RitmsAndTests(ritm_id=ritm_id, test_id=test_id))
+
+                    # Update the test flag
+                    test_obj = db.query(Tests).filter(Tests.id == test_id).first()
+                    if test_obj:
+                        test_obj.ritm_matched = True
+
+                    total_tests_set_ritm += 1
+        else:
+            unmatched_tests.append(asset)
+
+    # Commit any newly created links and flag updates
+    if total_tests_set_ritm > 0:
+        db.commit()
+
+    # 6. Find RITMs that did not match any asset
+    unmatched_ritms = [
+        {
+            "id": r.id,
+            "onetrust_id": str(r.onetrust_id).strip() if r.onetrust_id else None,
+            "name_app": str(r.name_app).strip() if r.name_app else None,
+            "description": str(r.description).strip() if r.description else None,
+        }
+        for r in current_year_ritms
+        if r.id not in matched_ritm_ids
+    ]
+
+    return {
+        "matched": matched_assets,
+        "unmatched_tests": unmatched_tests,
+        "unmatched_ritms": unmatched_ritms,
+        "summary": {
+            "total_matched_assets": len(matched_assets),
+            "total_unmatched_tests": len(unmatched_tests),
+            "total_unmatched_ritms": len(unmatched_ritms),
+            "total_tests_set_ritm": total_tests_set_ritm
+        }
+    }

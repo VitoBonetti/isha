@@ -6,7 +6,8 @@ from routers.auth import get_current_user, require_admin, require_admin_or_pente
 from schema import ReconcileAssetPayload, BulkReconcileAssetPayload, BulkAssetRequest
 from system_services import kiss24_service
 
-router = APIRouter(prefix="/api/kiss24", tags=["Kiss24"])
+router = APIRouter(prefix="/api/kiss24", tags=["Kiss24 Tools"])
+
 
 @router.post("/sync-org-ids", status_code=status.HTTP_200_OK, summary="[Admin Only]")
 def sync_kiss24_org_ids(current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
