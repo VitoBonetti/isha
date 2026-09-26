@@ -24,12 +24,17 @@ def sync_kiss24_asset_ids(current_user: dict = Depends(require_admin), db: Sessi
     return kiss24_service.sync_kiss24_asset_ids(db, current_user)
 
 
-@router.get("/assets/total-count", summary="Get total KISS24 asset count")
+@router.get("/assets/total-count", summary="[Admin Only] Get total KISS24 asset count")
 def get_kiss24_asset_count(current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
     """
     Admin only endpoint: Get total KISS24 asset count
     """
     return kiss24_service.get_kiss24_asset_count(db, current_user)
+
+
+@router.post("/assets/{raw_asset_id}/create", status_code=status.HTTP_200_OK, summary="[Admin Only] Provision Raw Asset in KISS24")
+def create_kiss24_asset_endpoint(raw_asset_id: str, current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    return kiss24_service.create_kiss24_asset(db, raw_asset_id, current_user)
 
 
 @router.post("/sync-update-kiss24-snowid", status_code=status.HTTP_200_OK, summary="[Admin Only]")

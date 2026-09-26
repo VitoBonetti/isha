@@ -4,7 +4,7 @@ from utils.secret_manager import get_secret
 from audit_logger import log_audit_event
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy import func
+from sqlalchemy import func, case
 import uuid
 from models.raw_assets import RawAssets, RawAssetsSnowMetadata, AssetTypes
 from models.territories import Country
@@ -270,7 +270,10 @@ def process_and_sync_snow_data(db: Session, snow_records: list, user_id: str, us
                 'integrity_rating': raw_asset_stmt.excluded.integrity_rating,
                 'availability_rating': raw_asset_stmt.excluded.availability_rating,
                 'facing_internet': raw_asset_stmt.excluded.facing_internet,
-                'country_id': raw_asset_stmt.excluded.country_id,
+                'country_id': case(
+                    (RawAssets.is_country_override == True, RawAssets.country_id),
+                    else_=raw_asset_stmt.excluded.country_id
+                ),
                 'snow_number': raw_asset_stmt.excluded.snow_number,
                 'snow_active': raw_asset_stmt.excluded.snow_active
             }

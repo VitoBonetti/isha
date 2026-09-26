@@ -3,7 +3,7 @@ import { useParams, useNavigate, useLocation } from "react-router-dom";
 import axios from "axios";
 import ConfirmModal from "../components/Modals/ConfirmModal";
 import toast, { Toaster } from "react-hot-toast";
-import { ChevronLeft, Save, Trash2, ShieldAlert, FileText, Edit2, X, History, ChevronDown, ChevronRight, Clock, CheckCircle, HelpCircle, Database, RefreshCw, Shield, Code, MapPin, Server, ExternalLink, Activity, AlertTriangle } from "lucide-react";
+import { ChevronLeft, Cable, Save, Trash2, ShieldAlert, FileText, Edit2, X, History, ChevronDown, ChevronRight, Clock, CheckCircle, HelpCircle, Database, RefreshCw, Shield, Code, MapPin, Server, ExternalLink, Activity, AlertTriangle } from "lucide-react";
 import { useAppContext } from "../context/AppContext";
 
 export default function AssetDetailView() {
@@ -148,6 +148,23 @@ export default function AssetDetailView() {
   const handleCancel = () => {
     setAsset(originalAsset);
     setIsEditing(false);
+  };
+
+  const handleCreateKiss24Asset = async () => {
+    const toastId = toast.loading("Creating Keep Secure 24 test...");
+    try {
+      const res = await axios.post(`/api/kiss24/assets/${id}/create`);
+      toast.dismiss(toastId);
+      toast.success(res.data.message || "Asset successfully created in KISS24!");
+      setAsset(prev => ({ ...prev, kiss24_asset_id: res.data.kiss24_asset_id }));
+      const resAsset = await axios.get(`/api/assets/raw/${id}`);
+      setAsset(resAsset.data);
+      setOriginalAsset(resAsset.data);
+
+    } catch (error) {
+      toast.dismiss(toastId);
+      toast.error(error.response?.data?.detail || "Failed to create Keep Secure 24 Asset.");
+    }
   };
 
   const formatDate = (dateString: string) => {
@@ -335,10 +352,23 @@ export default function AssetDetailView() {
 
               {/* Kiss24 UUID Row */}
               <div className="sm:col-span-2">
-                <div className="flex items-center gap-1.5 mb-1">
-                  <label className="text-sm font-bold text-slate-700 dark:text-zinc-300">Kiss24 UUID</label>
+                <label className="text-sm font-bold text-slate-700 dark:text-zinc-300 flex items-center gap-1.5">
+                  Kiss24 UUID
+                  {isAdmin && <span className="text-[10px] bg-slate-100 dark:bg-zinc-800 text-slate-500 px-2 py-0.5 rounded-full font-normal">(Required for Report Generation)</span>}
+                </label>
+                <div className="flex gap-2 items-center mt-1">
+                  <input disabled={!isEditing} className={inputClasses} placeholder="123a45bc-6d7e-..." value={asset.kiss24_asset_id || ""} onChange={e => setAsset({...asset, kiss24_asset_id: e.target.value})} />
+                  {!asset.kiss24_asset_id && isAdmin && (
+                    <button
+                      type="button"
+                      onClick={handleCreateKiss24Asset}
+                      className="shrink-0 flex items-center justify-center p-2.5 bg-emerald-50 dark:bg-emerald-900/20 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400 rounded-lg border border-emerald-200 dark:border-emerald-900/50 shadow-sm transition-colors mt-0"
+                      title="Auto-Provision in Keep Secure 24"
+                    >
+                      <Cable size={20} />
+                    </button>
+                  )}
                 </div>
-                <input disabled={!isEditing} className={inputClasses} placeholder="123a45bc-6d7e-..." value={asset.kiss24_asset_id || ""} onChange={e => setAsset({...asset, kiss24_asset_id: e.target.value})} />
               </div>
             </div>
 

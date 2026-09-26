@@ -832,3 +832,42 @@ def get_total_kiss24_assets(user_api_key: str = None) -> int:
     except Exception as e:
         print(f"Failed to fetch total assets from KISS24: {e}")
         return 0
+
+
+def create_kiss24_assets(ouuid: str, body: dict, user_api_key: str = None) -> dict:
+    endpoint = f"provider/assets/{ouuid}/create"
+    url = f"{KISS_24_ENDPOINT}{endpoint}"
+
+    # json.dumps automatically escapes any inner quotes in string variables into \"
+    json_data = json.dumps(body).encode("utf-8")
+
+    log_audit_event(
+        user_id="SYSTEM",
+        role="SYSTEM",
+        action="KISS24_ASSET_PAYLOAD",
+        resource_type="KISS24",
+        resource_id="CHECKING_PAYLOAD",
+        details=f"Vuln payload: {json_data}"
+    )
+
+    req = urllib.request.Request(
+        url,
+        data=json_data,
+        headers={"x-api-key": user_api_key, "Content-Type": "application/json"}
+    )
+    try:
+        with urllib.request.urlopen(req) as res:
+            if res.status == 200:
+                response_data = json.loads(res.read())
+                response_str = str(response_data)
+                uuid_pattern = r'[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
+                match = re.search(uuid_pattern, response_str)
+                if match:
+                    return match.group(0)
+        return None
+    except urllib.error.HTTPError as e:
+        # This explicitly reads the 400 error message from Keep Secure 24 and throws it!
+        err_body = e.read().decode('utf-8')
+        raise Exception(f"KISS24 Rejected Payload (HTTP {e.code}): {err_body}")
+    except Exception as e:
+        raise Exception(f"Connection Error: {str(e)}")

@@ -159,7 +159,14 @@ export default function TestDetailsView() {
 
     const checkAnalysis = () => {
       axios.get(`/api/tests/${id}/analysis`)
-        .then(() => setHasAnalysis(true))
+        .then((res) => {
+          // Explicitly verify the payload contains actual data (like the timestamp)
+          if (res.data && res.data.timestamp) {
+            setHasAnalysis(true);
+          } else {
+            setHasAnalysis(false);
+          }
+        })
         .catch(() => setHasAnalysis(false));
     };
     checkAnalysis();

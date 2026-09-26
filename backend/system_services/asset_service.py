@@ -445,7 +445,9 @@ def update_raw_asset(db: Session, raw_id: str, asset: RawAssetCreate, current_us
 
         if old_name != asset.name: changes.append(f"Name: '{old_name}' ➔ '{asset.name}'")
         if old_type != new_type: changes.append(f"Type: '{old_type}' ➔ '{new_type}'")
-        if old_country != new_country: changes.append(f"Country: '{old_country}' ➔ '{new_country}'")
+        if old_country != new_country:
+            changes.append(f"Country: '{old_country}' -> '{new_country}'")
+            r_asset.is_country_override = True
         if old_service != new_service: changes.append(f"Service: '{old_service}' ➔ '{new_service}'")
         if old_category != new_category: changes.append(f"Category: '{old_category}' ➔ '{new_category}'")
         if old_internet != asset.facing_internet: changes.append(f"Internet Facing: {old_internet} ➔ {asset.facing_internet}")

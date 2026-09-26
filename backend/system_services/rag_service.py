@@ -323,8 +323,10 @@ def chat_with_documents(db: Session, req, current_user: dict):
                     full_answer += chunk.text
                     yield json.dumps({"text": chunk.text}) + "\n"
 
-            confirmed_citations = [citations_map[cid] for cid in set(re.findall(r'#cite-([a-f0-9\-]{36})', full_answer))
-                                   if cid in citations_map]
+            extracted_uuids = set(re.findall(r'#cite-([a-f0-9\-]{36})', full_answer, re.IGNORECASE))
+            confirmed_citations = [citations_map[cid.lower()] for cid in extracted_uuids if
+                                   cid.lower() in citations_map]
+
             new_log_id = str(uuid.uuid4())
             yield json.dumps({"citations": confirmed_citations, "log_id": new_log_id}) + "\n"
 

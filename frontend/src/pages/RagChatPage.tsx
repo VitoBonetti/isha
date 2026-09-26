@@ -382,6 +382,7 @@ export default function RagChatPage() {
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let assistantMessage = '';
+      let streamBuffer = '';
 
       setMessages((prev) => [
         ...prev,
@@ -399,11 +400,17 @@ export default function RagChatPage() {
         const { done, value } = await reader.read();
         if (done) break;
 
-        const chunkText = decoder.decode(value, { stream: true });
-        const lines = chunkText.split('\n');
+        // Append new data to the buffer
+        streamBuffer += decoder.decode(value, { stream: true });
 
-        for (const line of lines) {
-          if (!line.trim()) continue;
+        // Process all complete lines in the buffer
+        let newlineIndex;
+        while ((newlineIndex = streamBuffer.indexOf('\n')) >= 0) {
+          const line = streamBuffer.slice(0, newlineIndex).trim();
+          streamBuffer = streamBuffer.slice(newlineIndex + 1);
+
+          if (!line) continue;
+
           try {
             const data = JSON.parse(line);
             if (data.error) throw new Error(data.error);
@@ -429,6 +436,23 @@ export default function RagChatPage() {
             console.error("Error parsing stream line:", line, err);
           }
         }
+      }
+
+      // Process any remaining data in the buffer after the stream ends
+      if (streamBuffer.trim()) {
+          try {
+              const data = JSON.parse(streamBuffer.trim());
+              if (data.citations) {
+                  setMessages((prev) => {
+                    const updated = [...prev];
+                    updated[updated.length - 1].citations = data.citations;
+                    if (data.log_id) updated[updated.length - 1].log_id = data.log_id;
+                    return updated;
+                  });
+              }
+          } catch(err) {
+              console.error("Failed to parse final buffer content", err);
+          }
       }
 
       loadSessions();
@@ -832,6 +856,7 @@ export default function RagChatPage() {
                                   <SyntaxHighlighter
                                     {...rest}
                                     children={codeString}
+                                    children={codeString}
                                     style={vscDarkPlus}
                                     language={match?.[1] || 'text'}
                                     PreTag="div"
@@ -842,8 +867,8 @@ export default function RagChatPage() {
                             },
                             a: ({ node, href, children, ...props }) => {
                               if (href?.startsWith('#cite-')) {
-                                const citeIdStr = href.replace('#cite-', '').trim();
-                                const citationData = msg.citations?.find(c => String(c.id) === citeIdStr);
+                                const citeIdStr = href.replace('#cite-', '').replace(/[^a-zA-Z0-9-]/g, '').trim().toLowerCase();
+                                const citationData = msg.citations?.find(c => String(c.id).toLowerCase() === citeIdStr);
 
                                 return (
                                   <span

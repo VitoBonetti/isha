@@ -42,6 +42,7 @@ class RawAssets(Base):
     is_kpi = Column(Boolean, default=False)
     is_critical = Column(Boolean, default=False)
     snow_active = Column(Boolean, default=False)
+    is_country_override = Column(Boolean, default=False, nullable=False)
 
     # relashionship
     asset_types = relationship("AssetTypes", back_populates="raw_assets")

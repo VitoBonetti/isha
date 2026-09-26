@@ -133,6 +133,7 @@ class RawAssetCreate(AssetBase):
     is_kpi: bool = False
     is_critical: bool = False
     snow_active: bool = False
+    is_country_override: bool = False
 
 class AssetResponse(AssetBase):
     id: UUID4

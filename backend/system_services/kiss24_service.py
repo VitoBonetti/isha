@@ -22,7 +22,7 @@ from utils.secret_manager import get_secret
 from utils.security_cipher import get_cipher
 from utils.timeaware import aware_utcnow
 from utils import kiss24_app_service
-from utils.kiss24_app_service import create_test, api_key as get_system_kiss24_key
+from utils.kiss24_app_service import create_test, api_key as get_system_kiss24_key, create_kiss24_assets
 
 
 KISS_24_TEMP_BUCKET = os.environ.get("KISS_24_TEMP_BUCKET")
@@ -960,3 +960,76 @@ def get_kiss24_asset_count(db: Session, current_user: dict):
     user_api_key = get_user_kiss24_key(db, str(current_user["id"]))
     total = kiss24_app_service.get_total_kiss24_assets(user_api_key)
     return {"total_assets": total}
+
+
+def create_kiss24_asset(db: Session, raw_asset_id: str, current_user: dict):
+    try:
+        # 1. Fetch RawAsset and check for existing integration
+        raw_asset = db.query(RawAssets).filter(RawAssets.id == raw_asset_id).first()
+        if not raw_asset:
+            raise HTTPException(status_code=404, detail="Raw Asset not found.")
+
+        if raw_asset.kiss24_asset_id:
+            raise HTTPException(status_code=409, detail="Asset is already registered in Keep Secure 24.")
+
+        # 2. Retrieve Country OUUID
+        if not raw_asset.country_id:
+            raise HTTPException(status_code=400,
+                                detail="Asset must be linked to a Country to determine Keep Secure 24 OUUID.")
+
+        country = db.query(Country).filter(Country.id == raw_asset.country_id).first()
+        if not country or not country.kiss24_uuid:
+            raise HTTPException(status_code=400,
+                                detail="Linked Country does not have a valid Keep Secure 24 UUID configured.")
+
+        ouuid = str(country.kiss24_uuid)
+
+        # 3. Retrieve User Credentials
+        user_api_key = get_user_kiss24_key(db, str(current_user["id"]))
+        if not user_api_key:
+            raise HTTPException(status_code=403, detail="Missing Keep Secure 24 API Key for the current user.")
+
+        # 4. Build the exact payload
+        payload = {
+            "name": raw_asset.name,
+            "observations": raw_asset.description if raw_asset.description else "No observations provided.",
+            "type": "Web App",
+            "custom_fields": []
+        }
+
+        if raw_asset.snow_number:
+            payload["custom_fields"].append({
+                "parent": "Service Now ID",
+                "text": raw_asset.snow_number
+            })
+
+        # 5. Fire API Request
+        new_asset_uuid = create_kiss24_assets(ouuid, payload, user_api_key)
+
+        if not new_asset_uuid:
+            raise HTTPException(status_code=500, detail="KISS24 API did not return a valid Asset UUID.")
+
+        # 6. Save UUID and Audit
+        raw_asset.kiss24_asset_id = new_asset_uuid
+        db.commit()
+
+        log_audit_event(
+            user_id=str(current_user["id"]),
+            role=current_user.get("role", "admin"),
+            action="KISS24_ASSET_CREATED",
+            resource_type="KISS24",
+            resource_id=str(raw_asset_id),
+            details=f"Created Keep Secure 24 Asset: {new_asset_uuid}"
+        )
+
+        return {
+            "status": "Success",
+            "kiss24_asset_id": new_asset_uuid,
+            "message": "Asset successfully created and linked in KISS24!"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
