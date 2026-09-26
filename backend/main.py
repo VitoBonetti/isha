@@ -12,7 +12,7 @@ import textwrap
 from jose import jwt
 from routers import (
     auth, services, users, regions, countries, assets, tests, board, logs, locations, insights, contacts, luigi,
-    kiss24, danger, documents, rag, kpi_criteria, cronos
+    kiss24, danger, documents, rag, kpi_criteria, cronos,snow
 )
 from routers.auth import require_admin, get_google_public_keys, get_current_user
 from database import get_db_connection, run_alembic_migrations
@@ -135,7 +135,7 @@ routers_list = [
     assets.router, kpi_criteria.router, auth.router, board.router,
     contacts.router, countries.router, documents.router, cronos.router, insights.router,
     kiss24.router, locations.router, logs.router, luigi.router,
-    rag.router, regions.router, services.router, tests.router,
+    rag.router, regions.router, services.router, snow.router, tests.router,
     users.router, danger.router
 ]
 
