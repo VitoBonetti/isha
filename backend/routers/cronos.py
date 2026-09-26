@@ -6,7 +6,7 @@ from routers.auth import get_google_public_keys
 from websockets_manager import manager
 from database import db_cursor_context
 from audit_logger import log_audit_event
-from system_services import asset_service, rag_service, kiss24_service
+from system_services import asset_service, rag_service, kiss24_service, snow_service
 
 router = APIRouter(prefix="/api/cronos", tags=["Google CronJobs"])
 
@@ -204,3 +204,33 @@ def gcp_trigger_kiss24_provision(
     )
 
     return {"message": "Weekly KISS24 auto-provisioning queued successfully."}
+
+
+@router.post("/servicenow-ritm-sync", summary="GCP Scheduler trigger for daily sync for RITM fro ServiceNow")
+def gcp_trigger_snow_ritm_sync(
+    background_tasks: BackgroundTasks,
+    authenticated: bool = Depends(verify_cron_caller)
+):
+    """
+    Daily background task that sync database for RITM from ServiceNow.
+    Runs asynchronously at 08:15 CTE.
+    """
+    background_tasks.add_task(
+        snow_service.process_ritm_sync_background,
+        "SYSTEM_CRON",
+        "scheduler"
+    )
+
+    log_audit_event(
+        user_id="SYSTEM_CRON",
+        role="scheduler",
+        action="CRON_SNOW_RITM_SYNC_STARTED",
+        resource_type="INTEGRATION",
+        resource_id="servicenow_ritm",
+        details="Daily scheduled database sync for RITM from ServiceNow initiated by Cloud Scheduler."
+    )
+
+    return {"message": "Daily sync for RITM from ServiceNow  queued successfully."}
+
+
+
