@@ -1,10 +1,10 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import axios from "axios";
-import ConfirmModal from "../components/Modals/ConfirmModal";
+import ConfirmModal from "../../components/Modals/ConfirmModal";
 import toast, { Toaster } from "react-hot-toast";
 import { ChevronLeft, Cable, Save, Trash2, ShieldAlert, FileText, Edit2, X, History, ChevronDown, ChevronRight, Clock, CheckCircle, HelpCircle, Database, RefreshCw, Shield, Code, MapPin, Server, ExternalLink, Activity, AlertTriangle } from "lucide-react";
-import { useAppContext } from "../context/AppContext";
+import { useAppContext } from "../../context/AppContext";
 
 export default function AssetDetailView() {
   const { id } = useParams();

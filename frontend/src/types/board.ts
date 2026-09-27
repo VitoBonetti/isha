@@ -146,3 +146,30 @@ export interface TestRagChatDrawerProps {
   assetId?: string;
   assetName?: string;
 }
+
+export interface Suggestion {
+  kiss24_uuid: string;
+  kiss24_name: string;
+  score: number;
+}
+
+export interface Candidate {
+  mario_raw_asset_id: string;
+  mario_name: string;
+  snow_number: string;
+  country_name: string;
+  org_uuid: string;
+  top_suggestions: Suggestion[];
+}
+
+export interface RawAsset {
+  id: string;
+  name: string;
+  asset_type_name?: string;
+  facing_internet: boolean;
+  country_code?: string;
+  service_name?: string;
+  category_name?: string;
+  business_critical: number;
+  is_promoted: boolean;
+}

@@ -2,26 +2,12 @@ import React, { useState, useMemo } from 'react';
 import axios from 'axios';
 import toast from 'react-hot-toast';
 import {
-  GitMerge, RefreshCw, Check, Search, ShieldCheck,
+  Unplug, RefreshCw, Check, Search, ShieldCheck,
   Building2, ExternalLink, ChevronLeft,
   ChevronRight, ArrowUpDown, Layers, Database, EyeOff
 } from 'lucide-react';
 import { useNavigate, Link } from 'react-router-dom';
-
-interface Suggestion {
-  kiss24_uuid: string;
-  kiss24_name: string;
-  score: number;
-}
-
-interface Candidate {
-  mario_raw_asset_id: string;
-  mario_name: string;
-  snow_number: string;
-  country_name: string;
-  org_uuid: string;
-  top_suggestions: Suggestion[];
-}
+import type { Suggestion, Candidate } from '../../types/board'
 
 type CandidateStatusFilter = 'ALL' | 'HAS_CANDIDATES' | 'NO_CANDIDATES' | 'HIGH_CONFIDENCE' | 'LOW_CONFIDENCE';
 type SortOption = 'SCORE_DESC' | 'SCORE_ASC' | 'NAME_ASC' | 'NAME_DESC' | 'COUNTRY_ASC';
@@ -275,7 +261,7 @@ export default function AssetReconciliationView() {
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
         <div>
           <h1 className="text-2xl font-black flex items-center gap-2 text-slate-900 dark:text-zinc-100">
-            <GitMerge className="text-indigo-500" /> Asset Reconciliation Hub
+            <Unplug className="text-indigo-500" /> Asset Reconciliation Hub
           </h1>
           <p className="text-sm text-slate-500 mt-0.5">
             Reconcile ServiceNow-synced Mario raw assets with Keep Secure 24 assets within the same country.

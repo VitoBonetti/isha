@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 import axios from "axios";
-import ConfirmModal from "../components/Modals/ConfirmModal";
-import { useAppContext } from "../context/AppContext";
+import ConfirmModal from "../../components/Modals/ConfirmModal";
+import { useAppContext } from "../../context/AppContext";
 import toast, { Toaster } from "react-hot-toast";
 import { Search, ArrowBigRightDash, Server, ChevronDown, Activity, Layers, ChevronsUpDown, ChevronUp, RefreshCw, Link2, Filter } from "lucide-react";
 

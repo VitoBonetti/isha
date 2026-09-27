@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 import axios from "axios";
 import TopNav from "../components/TopNav";
@@ -24,6 +24,9 @@ export default function TestsView() {
   const [filterIsKpi, setFilterIsKpi] = useState<"All" | "true" | "false">("All");
   const [filterIsCritical, setFilterIsCritical] = useState<"All" | "true" | "false">("All");
   const [filterPentester, setFilterPentester] = useState<string>("All");
+  
+  // NEW: RITM Status Filter (Sent to backend)
+  const [filterRitm, setFilterRitm] = useState<string>("All");
 
   const [showFilters, setShowFilters] = useState(false);
   const filterRef = useRef<HTMLDivElement>(null);
@@ -41,8 +44,8 @@ export default function TestsView() {
   const [secretTarget, setSecretTarget] = useState<Test | null>(null);
   const [secretConfirmOpen, setSecretConfirmOpen] = useState<Test | null>(null);
 
+  // 1. Initial Mount Effect
   useEffect(() => {
-    fetchTests();
     axios.get('/api/assets/types').then(res => setAssetTypes(res.data)).catch(console.error);
 
     const handleClickOutside = (e: MouseEvent) => {
@@ -54,15 +57,27 @@ export default function TestsView() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Reset to page 1 whenever any filter or sort order changes
+  // 2. Refetch when RITM filter changes (because this filter is handled by the backend)
+  useEffect(() => {
+    fetchTests();
+  }, [filterRitm]);
+
+  // 3. Reset to page 1 whenever ANY filter or sort order changes
   useEffect(() => {
     setPage(1);
-  }, [searchTerm, filterYear, filterService, filterStatus, filterAssetType, filterIsKpi, filterIsCritical, filterPentester, sortBy, sortDir]);
+  }, [searchTerm, filterYear, filterService, filterStatus, filterAssetType, filterIsKpi, filterIsCritical, filterPentester, filterRitm, sortBy, sortDir]);
 
   const fetchTests = async () => {
     try {
       setLoading(true);
-      const res = await axios.get("/api/tests/");
+      const params = new URLSearchParams();
+      
+      // Pass the RITM filter to the backend if it's active
+      if (filterRitm !== "All") {
+        params.append("ritm_status", filterRitm);
+      }
+
+      const res = await axios.get(`/api/tests/?${params.toString()}`);
       setTests(res.data);
     } catch (error) {
       toast.error("Failed to load tests.");
@@ -102,7 +117,7 @@ export default function TestsView() {
   const uniqueYears = Array.from(new Set(tests.map(t => t.start_year).filter(Boolean))).sort((a, b) => Number(b) - Number(a));
   const uniquePentesters = Array.from(new Set(tests.flatMap(t => (t.assigned_pentesters || "Unassigned").split(", ")))).filter(p => p !== "Unassigned").sort();
 
-  // 1. Filter
+  // 1. Client-Side Filters
   const filteredTests = tests.filter(test => {
     // Text Search
     const matchesSearch = test.name.toLowerCase().includes(searchTerm.toLowerCase());
@@ -295,11 +310,23 @@ export default function TestsView() {
                 </div>
               </div>
 
+              {/* NEW RITM LINK FILTER */}
+              <div className="space-y-4">
+                <div>
+                  <label className="text-xs font-bold text-slate-500 uppercase mb-1 block">RITM Link</label>
+                  <select className={selectStyles} value={filterRitm} onChange={e => setFilterRitm(e.target.value)}>
+                    <option value="All">Any</option>
+                    <option value="matched">Linked</option>
+                    <option value="unmatched">Orphaned (Unlinked)</option>
+                  </select>
+                </div>
+              </div>
+
               <div className="sm:col-span-2 lg:col-span-4 flex justify-end mt-2 pt-4 border-t border-slate-100 dark:border-zinc-800">
                 <button onClick={() => {
                   setFilterStatus("All"); setFilterService("All"); setFilterYear("All");
                   setFilterAssetType("All"); setFilterIsKpi("All"); setFilterIsCritical("All");
-                  setFilterPentester("All"); setPage(1);
+                  setFilterPentester("All"); setFilterRitm("All"); setPage(1);
                 }} className="text-sm text-indigo-500 font-bold hover:text-indigo-600 p-2 transition-colors">
                   Clear All Filters
                 </button>
@@ -312,7 +339,7 @@ export default function TestsView() {
           {loading ? (
             <div className="p-12 text-center text-slate-500 text-sm">Loading tests...</div>
           ) : (
-            <>
+            <React.Fragment>
               {/* DESKTOP VIEW: Standard Table */}
               <table className="hidden md:table w-full text-left text-sm">
                 <thead className="bg-slate-50 dark:bg-zinc-800/50 border-b border-slate-200 dark:border-zinc-700 select-none">
@@ -540,7 +567,7 @@ export default function TestsView() {
                 </div>
               ))}
               </div>
-            </>
+            </React.Fragment>
           )}
 
           {filteredTests.length === 0 && !loading && (

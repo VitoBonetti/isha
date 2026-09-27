@@ -18,7 +18,8 @@ from models.tests import (
     TestMilestone,
     TestRequirement,
     Assignments,
-    TestAnalysis
+    TestAnalysis,
+    RitmsAndTests
 )
 from models.secret_notes import SecretNotes, SecretNoteAccess
 from models.histories import TestHistory, AssetHistory
@@ -545,7 +546,8 @@ def create_test(db: Session, t, current_user: dict):
 
 def get_all_tests(db: Session, current_user: dict, service_lane_name: Optional[str] = None,
                   start_date: Optional[date] = None, end_date: Optional[date] = None,
-                  pentester_emails: Optional[List[str]] = None):
+                  pentester_emails: Optional[List[str]] = None,
+                  ritm_status: Optional[str] = None):
     # Scalar Subqueries for aggregate strings and existence checks
     assigned_pentesters_sq = (db.query(func.coalesce(func.string_agg(func.distinct(Users.name), ', '), 'Unassigned'))
                               .join(Assignments, Users.id == Assignments.user_id)
@@ -584,12 +586,9 @@ def get_all_tests(db: Session, current_user: dict, service_lane_name: Optional[s
             Tests.service_lane_id == str(current_user.get('service_lane_id') or '00000000-0000-0000-0000-000000000000'))
 
     # --- DYNAMIC OPTIONAL FILTERS ---
-
-    # 1. Service Lane by Name (Case Insensitive)
     if service_lane_name:
         query = query.filter(func.lower(ServiceLanes.name) == service_lane_name.lower().strip())
 
-    # 2. Start Date Range (Converted to ISO Year and Week)
     if start_date:
         min_y, min_w, _ = start_date.isocalendar()
         query = query.filter(
@@ -608,7 +607,6 @@ def get_all_tests(db: Session, current_user: dict, service_lane_name: Optional[s
             )
         )
 
-    # 3. Pentester by Email(s)
     if pentester_emails:
         clean_emails = [e.lower().strip() for e in pentester_emails]
         query = query.filter(
@@ -618,6 +616,12 @@ def get_all_tests(db: Session, current_user: dict, service_lane_name: Optional[s
                 .filter(func.lower(Users.email).in_(clean_emails))
             )
         )
+
+    # --- NEW: RITM MATCHING FILTER ---
+    if ritm_status == 'matched':
+        query = query.filter(Tests.ritm_matched == True)
+    elif ritm_status == 'unmatched':
+        query = query.filter(or_(Tests.ritm_matched == False, Tests.ritm_matched.is_(None)))
 
     query = query.order_by(Tests.start_year.desc().nullslast(), Tests.start_week.desc().nullslast(), Tests.name.asc())
     rows = query.all()
@@ -642,19 +646,24 @@ def get_test_details(db: Session, test_id: str, current_user: dict):
 
     has_secret_sq = db.query(SecretNotes.test_id).filter(SecretNotes.test_id == Tests.id).exists()
 
+    # NOTE: Tests.ritm_matched and RitmsAndTests.ritm_id added to SELECT to prevent KeyErrors
     query = (db.query(
         Tests.id, Tests.name, Tests.service_lane_id, Tests.credits_per_week, Tests.duration_weeks,
         Tests.stages, Tests.start_week, Tests.start_year, Tests.is_tentative, Tests.kiss24,
-        Tests.drive_folder_id, Tests.drive_folder_url, ServiceLanes.name.label("service_lane_name"),
+        Tests.drive_folder_id, Tests.drive_folder_url,
+        Tests.ritm_matched,
+        ServiceLanes.name.label("service_lane_name"),
         ServiceLanes.auto_provision_workspace, Country.kiss24_uuid.label("country_kiss24_uuid"),
         has_secret_sq.label('has_secret'), assigned_pentesters_sq.label('assigned_pentesters'),
-        RawAssets.category_id, ServiceCategories.name.label("category_name"))
+        RawAssets.category_id, ServiceCategories.name.label("category_name"),
+        RitmsAndTests.ritm_id.label("ritm_id"))
              .outerjoin(ServiceLanes, Tests.service_lane_id == ServiceLanes.id)
              .outerjoin(TestAssets, Tests.id == TestAssets.test_id)
              .outerjoin(Assets, TestAssets.asset_id == Assets.id)
              .outerjoin(RawAssets, Assets.raw_asset_id == RawAssets.id)
              .outerjoin(ServiceCategories, RawAssets.category_id == ServiceCategories.id)
              .outerjoin(Country, RawAssets.country_id == Country.id)
+             .outerjoin(RitmsAndTests, Tests.id == RitmsAndTests.test_id)
              .filter(Tests.id == test_id))
 
     if current_user.get('role') == 'maintainer':
@@ -674,7 +683,9 @@ def get_test_details(db: Session, test_id: str, current_user: dict):
         "country_kiss24_uuid": test_row.country_kiss24_uuid, "has_secret": test_row.has_secret,
         "assigned_pentesters": test_row.assigned_pentesters,
         "category_id": str(test_row.category_id) if test_row.category_id else None,
-        "category_name": test_row.category_name
+        "category_name": test_row.category_name,
+        "ritm_matched": test_row.ritm_matched,
+        "ritm_id": test_row.ritm_id
     }
 
     # Assets
@@ -697,7 +708,8 @@ def get_test_details(db: Session, test_id: str, current_user: dict):
     # Contacts
     test_data["asset_contacts"] = []
     if raw_asset_ids:
-        rac = (db.query(Contacts.id.label("contact_id"), Contacts.email, Contacts.full_name, RawAssetContacts.is_stakeholder, RawAssetContacts.is_developer)
+        rac = (db.query(Contacts.id.label("contact_id"), Contacts.email, Contacts.full_name,
+                        RawAssetContacts.is_stakeholder, RawAssetContacts.is_developer)
                .join(RawAssetContacts, Contacts.id == RawAssetContacts.contact_id)
                .filter(RawAssetContacts.raw_asset_id.in_(raw_asset_ids))
                .distinct()
@@ -708,7 +720,8 @@ def get_test_details(db: Session, test_id: str, current_user: dict):
 
     test_data["country_contacts"] = []
     if country_ids:
-        cc = (db.query(Contacts.id.label("contact_id"), Contacts.email, Contacts.full_name, CountryContacts.is_stakeholder, CountryContacts.is_developer)
+        cc = (db.query(Contacts.id.label("contact_id"), Contacts.email, Contacts.full_name,
+                       CountryContacts.is_stakeholder, CountryContacts.is_developer)
               .join(CountryContacts, Contacts.id == CountryContacts.contact_id)
               .filter(CountryContacts.country_id.in_(country_ids)).distinct().order_by(Contacts.email.asc()).all())
         test_data["country_contacts"] = [{"contact_id": str(c.contact_id), "email": c.email, "full_name": c.full_name,
@@ -716,7 +729,8 @@ def get_test_details(db: Session, test_id: str, current_user: dict):
                                          cc]
 
     # History
-    hist = (db.query(TestHistory.id, TestHistory.action, TestHistory.details, TestHistory.timestamp, Users.name.label("user_name"))
+    hist = (db.query(TestHistory.id, TestHistory.action, TestHistory.details, TestHistory.timestamp,
+                     Users.name.label("user_name"))
             .outerjoin(Users, TestHistory.user_id == Users.id)
             .filter(TestHistory.test_id == test_id).order_by(TestHistory.timestamp.desc()).all())
     test_data["history"] = [

@@ -12,6 +12,8 @@ from database import SessionLocal
 from models.tests import Tests, TestAssets, TestStages, TestRitms, RitmsAndTests
 from models.assets import Assets
 from models.raw_assets import RawAssets, RawAssetsSnowMetadata
+from models.territories import Country
+from models.services import ServiceLanes
 from audit_logger import log_audit_event, get_bq_client, TABLE_REF
 from utils.timeaware import aware_utcnow
 
@@ -234,7 +236,9 @@ def get_filtered_ritms_current_year(
         estimated_exact: date = None,
         estimated_from: date = None,
         estimated_to: date = None,
-        current_year: int = None
+        current_year: int = None,
+        global_search: str = None,
+        sort_by: str = "created"
 ):
 
     query = db.query(TestRitms)
@@ -267,6 +271,17 @@ def get_filtered_ritms_current_year(
     if name_app:
         query = query.filter(TestRitms.name_app.ilike(f"%{name_app}%"))
 
+    if global_search:
+        search_term = f"%{global_search}%"
+        query = query.filter(
+            or_(
+                TestRitms.id.ilike(search_term),
+                TestRitms.name_app.ilike(search_term),
+                TestRitms.company.ilike(search_term),
+                TestRitms.onetrust_id.ilike(search_term)
+            )
+        )
+
     # --- 3. APPLY OPTIONAL DATE FILTERS ---
     # Created Date (which is a DateTime in DB, so we cast to date for comparison)
     if created_exact:
@@ -288,8 +303,19 @@ def get_filtered_ritms_current_year(
     total_items = query.count()
     total_pages = math.ceil(total_items / limit) if limit > 0 else 0
 
-    # Order by newest first, apply pagination
-    results = query.order_by(TestRitms.created.desc()).offset((page - 1) * limit).limit(limit).all()
+    # --- 5. DYNAMIC SORTING ---
+    if sort_by == 'name_app':
+        query = query.order_by(TestRitms.name_app.asc())
+    elif sort_by == 'company':
+        query = query.order_by(TestRitms.company.asc())
+    elif sort_by == 'id':
+        query = query.order_by(TestRitms.id.asc())
+    else:
+        # Fallback to your original default
+        query = query.order_by(TestRitms.created.desc())
+
+    # --- 6. PAGINATE & EXECUTE ---
+    results = query.offset((page - 1) * limit).limit(limit).all()
 
     # Format the payload for the frontend
     items = [{
@@ -321,22 +347,27 @@ def match_tests_with_ritms(db: Session):
     current_year = datetime.now(timezone.utc).year
 
     # 1. Fetch current-year active tests linked to assets with a valid snow_number
+    # Only fetches UNMATCHED tests
     query_assets_tests = (
         db.query(
             RawAssets.id.label("raw_asset_id"),
             RawAssets.name.label("raw_asset_name"),
             RawAssetsSnowMetadata.snow_data['u_onetrust_number'].astext.label("onetrust_id"),
             Tests.id.label("test_id"),
-            Tests.name.label("test_name")
+            Tests.name.label("test_name"),
+            Country.name.label("country_name"),
+            ServiceLanes.name.label("service_name")
         )
         .join(Assets, RawAssets.id == Assets.raw_asset_id)
         .join(TestAssets, Assets.id == TestAssets.asset_id)
         .join(Tests, TestAssets.test_id == Tests.id)
         .outerjoin(RawAssetsSnowMetadata, RawAssets.id == RawAssetsSnowMetadata.correlation_id)
+        .outerjoin(Country, RawAssets.country_id == Country.id)
+        .outerjoin(ServiceLanes, Tests.service_lane_id == ServiceLanes.id)
         .filter(
             Tests.start_year == current_year,
             Tests.stages != TestStages.STOPPED,
-            Tests.ritm_matched.isnot(True),  # ONLY unmatched tests
+            Tests.ritm_matched.isnot(True),
             RawAssets.snow_number.isnot(None),
             RawAssets.snow_number != ''
         )
@@ -358,12 +389,13 @@ def match_tests_with_ritms(db: Session):
                 "ritms": []
             }
 
-        # Deduplicate tests per asset
         existing_test_ids = {t["uuid"] for t in asset_map[raw_id_str]["tests"]}
         if str(row.test_id) not in existing_test_ids:
             asset_map[raw_id_str]["tests"].append({
                 "name": row.test_name,
-                "uuid": str(row.test_id)
+                "uuid": str(row.test_id),
+                "country_name": row.country_name,
+                "service_name": row.service_name
             })
 
     # 3. Fetch current-year RITMs (excluding cancelled)
@@ -387,7 +419,7 @@ def match_tests_with_ritms(db: Session):
                 ritm_by_onetrust[clean_ot_id] = []
             ritm_by_onetrust[clean_ot_id].append(r.id)
 
-    # 4. Perform the matching and track matched RITMs
+    # 4. Perform the matching and track matched RITMs (from THIS execution)
     matched_ritm_ids = set()
 
     for asset in asset_map.values():
@@ -411,12 +443,10 @@ def match_tests_with_ritms(db: Session):
                 test_id = asset["tests"][0]["uuid"]
                 ritm_id = asset["ritms"][0]
 
-                # Check if it's already linked just in case
                 existing_link = db.query(RitmsAndTests).filter_by(ritm_id=ritm_id, test_id=test_id).first()
                 if not existing_link:
                     db.add(RitmsAndTests(ritm_id=ritm_id, test_id=test_id))
 
-                    # Update the test flag
                     test_obj = db.query(Tests).filter(Tests.id == test_id).first()
                     if test_obj:
                         test_obj.ritm_matched = True
@@ -425,20 +455,25 @@ def match_tests_with_ritms(db: Session):
         else:
             unmatched_tests.append(asset)
 
-    # Commit any newly created links and flag updates
     if total_tests_set_ritm > 0:
         db.commit()
 
-    # 6. Find RITMs that did not match any asset
+    # --- FIX: Fetch all historically linked RITMs from the database ---
+    historically_linked_ritms = db.query(RitmsAndTests.ritm_id).all()
+    linked_ritm_id_set = {r[0] for r in historically_linked_ritms}
+
+    # 6. Find RITMs that did not match any asset AND are not already linked in the DB
     unmatched_ritms = [
         {
             "id": r.id,
             "onetrust_id": str(r.onetrust_id).strip() if r.onetrust_id else None,
-            "name_app": str(r.name_app).strip() if r.name_app else None,
-            "description": str(r.description).strip() if r.description else None,
+            "name_app": r.name_app,
+            "stage": r.stage,
+            "description": r.description,
+            "company": r.company
         }
         for r in current_year_ritms
-        if r.id not in matched_ritm_ids
+        if r.id not in matched_ritm_ids and r.id not in linked_ritm_id_set
     ]
 
     return {
@@ -452,3 +487,98 @@ def match_tests_with_ritms(db: Session):
             "total_tests_set_ritm": total_tests_set_ritm
         }
     }
+
+
+def link_test_to_ritm(db: Session, test_id: str, ritm_id: str, current_user: dict):
+    # 1. Verify Test exists
+    test = db.query(Tests).filter(Tests.id == test_id).first()
+    if not test:
+        raise HTTPException(status_code=404, detail="Test not found.")
+
+    # 2. Verify RITM exists
+    ritm = db.query(TestRitms).filter(TestRitms.id == ritm_id).first()
+    if not ritm:
+        raise HTTPException(status_code=404, detail="RITM not found.")
+
+    # 3. Check if they are already linked
+    existing_link = db.query(RitmsAndTests).filter_by(ritm_id=ritm_id, test_id=test_id).first()
+    if existing_link:
+        return {"status": "Success", "message": "Already linked."}
+
+    # 4. Create the link
+    new_link = RitmsAndTests(ritm_id=ritm_id, test_id=test_id)
+    db.add(new_link)
+
+    # 5. Update the test's matched flag
+    test.ritm_matched = True
+
+    db.commit()
+
+    log_audit_event(
+        user_id=str(current_user["id"]),
+        role=current_user["role"],
+        action="RITM_MANUAL_LINK",
+        resource_type="SNOW_RITMS",
+        resource_id=ritm_id,
+        details=f"Manually linked Test {test_id} to RITM {ritm_id}."
+    )
+    return {"status": "Success", "message": "Successfully linked Test to RITM."}
+
+
+def unlink_test_from_ritm(db: Session, test_id: str, ritm_id: str, current_user: dict):
+    # 1. Find the link
+    link = db.query(RitmsAndTests).filter_by(ritm_id=ritm_id, test_id=test_id).first()
+    if not link:
+        raise HTTPException(status_code=404, detail="Link not found.")
+
+    # 2. Delete the link
+    db.delete(link)
+
+    # 3. Check if the test has any other RITMs remaining
+    remaining_links = db.query(RitmsAndTests).filter_by(test_id=test_id).count()
+    if remaining_links == 0:
+        test = db.query(Tests).filter(Tests.id == test_id).first()
+        if test:
+            test.ritm_matched = False
+
+    db.commit()
+
+    log_audit_event(
+        user_id=str(current_user["id"]),
+        role=current_user["role"],
+        action="RITM_MANUAL_UNLINK",
+        resource_type="SNOW_RITMS",
+        resource_id=ritm_id,
+        details=f"Manually unlinked Test {test_id} from RITM {ritm_id}."
+    )
+    return {"status": "Success", "message": "Successfully unlinked Test from RITM."}
+
+
+def unlink_all_tests_and_ritms(db: Session, current_user: dict):
+    try:
+        # 1. Delete all links in the junction table
+        db.query(RitmsAndTests).delete(synchronize_session=False)
+
+        # 2. Reset the ritm_matched flag on all tests that are currently matched
+        db.query(Tests).filter(Tests.ritm_matched == True).update(
+            {"ritm_matched": False},
+            synchronize_session=False
+        )
+
+        db.commit()
+
+        # 3. Log the bulk action
+        log_audit_event(
+            user_id=str(current_user["id"]),
+            role=current_user["role"],
+            action="RITM_BULK_UNLINK",
+            resource_type="SNOW_RITMS",
+            resource_id="ALL",
+            details="Bulk unlinked all Tests and RITMs and reset matched flags."
+        )
+
+        return {"status": "Success", "message": "Successfully unlinked all tests and RITMs."}
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to bulk unlink records: {str(e)}")

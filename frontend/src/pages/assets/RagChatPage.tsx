@@ -10,10 +10,10 @@ import {
   ThumbsUp, ThumbsDown, Share2
 } from 'lucide-react';
 import toast, { Toaster } from "react-hot-toast";
-import { useAppContext } from "../context/AppContext";
-import greenStainIcon from '../assets/greenstain-icon.png';
-import type { Citation, Message, FilterItem, ChatSession, ExtendedMessage, ActiveFilters } from "../types/board";
-import ConfirmModal from '../components/Modals/ConfirmModal';
+import { useAppContext } from "../../context/AppContext";
+import greenStainIcon from '../../assets/greenstain-icon.png';
+import type { Citation, Message, FilterItem, ChatSession, ExtendedMessage, ActiveFilters } from "../../types/board";
+import ConfirmModal from '../../components/Modals/ConfirmModal';
 
 // Syntax Highlighter
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';

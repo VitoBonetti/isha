@@ -1,22 +1,23 @@
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from "react-router-dom";
 import { ThemeProvider } from "./components/ThemeProvider";
 import { AppProvider, useAppContext } from "./context/AppContext";
+import ControlPanelLayout from './layouts/ControlPanelLayout';
+import AssetsLayout from './layouts/AssetsLayout';
+import SyncLayout from './layouts/SyncLayout';
 import Dashboard from "./pages/Dashboard";
 import CalendarView from "./pages/CalendarView";
-import AssetsView from "./pages/AssetsView";
-import RawAssetsView from "./pages/RawAssetsView";
-import AssetDetailView from "./pages/AssetDetailView";
 import TestsView from "./pages/TestsView";
 import Planner from "./pages/Planner";
-import CountriesView from "./pages/CountriesView";
-import InsightsView from "./pages/InsightsView";
 import TestDetailsView from "./pages/TestDetailsView";
 import VulnAnalysisView from "./pages/VulnAnalysisView"
 import ValidatingVulnsView from "./pages/ValidatingVulnsView";
-import DocumentsView from "./pages/DocumentsView";
-import RagChatPage from './pages/RagChatPage';
-import AssetReconciliationView from './pages/settings/AssetReconciliationView';
-import ControlPanelLayout from './layouts/ControlPanelLayout';
+import RagChatPage from './pages/assets/RagChatPage';
+import AssetsView from "./pages/assets/AssetsView";
+import RawAssetsView from "./pages/assets/RawAssetsView";
+import AssetDetailView from "./pages/assets/AssetDetailView";
+import CountriesView from "./pages/assets/CountriesView";
+import InsightsView from "./pages/assets/InsightsView";
+import DocumentsView from "./pages/assets/DocumentsView";
 import ControlPanelHome from './pages/settings/ControlPanelHome';
 import UsersSettings from './pages/settings/UsersSettings';
 import LocationsSettings from './pages/settings/LocationsSettings';
@@ -27,12 +28,14 @@ import RegionsSettings from './pages/settings/RegionsSettings';
 import CountriesSettings from './pages/settings/CountriesSettings';
 import ApiKeysSettings from './pages/settings/ApiKeysSettings';
 import SystemLogsSettings from './pages/settings/SystemLogsSettings';
-import ServiceNowSyncSettings from './pages/settings/ServiceNowSyncSettings';
 import DangerZoneSettings from './pages/settings/DangerZoneSettings';
 import ContactsSettings from './pages/settings/ContactsSettings';
-import Kiss24SyncSettings from './pages/settings/Kiss24SyncSettings';
 import AssetCriteriaSettings from './pages/settings/AssetCriteriaSettings';
-import AssetsLayout from './layouts/AssetsLayout';
+import AssetReconciliationView from './pages/sync/AssetReconciliationView';
+import ServiceNowSyncSettings from './pages/sync/ServiceNowSyncSettings';
+import Kiss24SyncSettings from './pages/sync/Kiss24SyncSettings';
+import TestReconciliationView from './pages/sync/TestReconciliationView';
+import ScheduledTasksView from "./pages/sync/ScheduledTasksView";
 
 // --- ROUTE GUARD COMPONENT ---
 // Rejects users who do not have an explicitly allowed role
@@ -97,6 +100,17 @@ function AppContent() {
           </Route>
         </Route>
 
+        {/* Modular sync Panel */}
+        <Route path="/sync" element={<SyncLayout />}>
+          <Route element={<RoleGuard allowedRoles={['admin']} />}>
+            <Route path="kiss24" element={<Kiss24SyncSettings />} />
+            <Route path="servicenow" element={<ServiceNowSyncSettings />} />
+            <Route path="asset-reconciliation" element={<AssetReconciliationView />} />
+            <Route path="test-reconciliation" element={<TestReconciliationView />} />
+            <Route path="scheduled-tasks" element={<ScheduledTasksView />} />
+          </Route>
+        </Route>
+
         {/* Modular Control Panel */}
         <Route path="/settings" element={<ControlPanelLayout />}>
           <Route element={<RoleGuard allowedRoles={['admin', 'read_only']} />}>
@@ -113,9 +127,6 @@ function AppContent() {
             <Route path="logs" element={<SystemLogsSettings />} />
           </Route>
           <Route element={<RoleGuard allowedRoles={['admin']} />}>
-            <Route path="kiss24" element={<Kiss24SyncSettings />} />
-            <Route path="servicenow" element={<ServiceNowSyncSettings />} />
-            <Route path="reconciliation" element={<AssetReconciliationView />} />
             <Route path="api-keys" element={<ApiKeysSettings />} />
             <Route path="danger" element={<DangerZoneSettings />} />
           </Route>

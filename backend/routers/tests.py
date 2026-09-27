@@ -49,6 +49,7 @@ def get_all_tests(
     start_date: Optional[date] = Query(None, description="Start date (YYYY-MM-DD) to filter tests"),
     end_date: Optional[date] = Query(None, description="End date (YYYY-MM-DD) to filter tests"),
     pentester_emails: Optional[List[str]] = Query(None, description="Filter by assigned pentester email(s)"),
+    ritm_status: Optional[str] = Query(None, description="Filter by RITM match: 'matched' or 'unmatched'"),
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -58,7 +59,8 @@ def get_all_tests(
         service_lane_name=service_lane_name,
         start_date=start_date,
         end_date=end_date,
-        pentester_emails=pentester_emails
+        pentester_emails=pentester_emails,
+        ritm_status=ritm_status
     )
 
 

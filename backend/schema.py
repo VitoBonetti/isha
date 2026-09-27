@@ -360,3 +360,8 @@ class LogSearchRequest(BaseModel):
     end_date: Optional[datetime] = None
     page: int = Field(1, ge=1)
     limit: int = Field(100, ge=1, le=500)
+
+
+class LinkRitmPayload(BaseModel):
+    test_id: str
+    ritm_id: str

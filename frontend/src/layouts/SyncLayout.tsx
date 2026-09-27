@@ -1,45 +1,36 @@
 import React from 'react';
-import { Outlet, NavLink } from 'react-router-dom';
+import { Outlet, NavLink, Navigate, useLocation } from 'react-router-dom';
 import TopNav from '../components/TopNav';
+import { ShieldCheck, CloudSync, Unplug, Blocks, LayoutDashboard, Metronome } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
-import {
-  Database, Layers, BarChart3, Lightbulb, Unplug, Files, Bot
-} from 'lucide-react';
 
-export default function AssetsLayout() {
+
+export default function SyncLayout() {
+  const location = useLocation();
   const { currentUser } = useAppContext();
 
   let navItems: any[] = [];
 
-  // 1. Maintainer gets a strictly limited menu
-  if (currentUser?.role === 'maintainer') {
+   if (currentUser?.role === 'admin') {
     navItems = [
-      { path: "/assets/pool", label: "Active Pool", icon: Layers }
+      { path: "/sync", label: "Sync Dashboard", icon: LayoutDashboard, exact: true },
+      { path: "/sync/kiss24", label: "Keep Secure 24", icon: ShieldCheck },
+      { path: "/sync/servicenow", label: "SNow Manual Sync", icon: CloudSync },
+      { path: "/sync/asset-reconciliation", label: "Asset Reconciliation", icon: Unplug },
+      { path: "/sync/test-reconciliation", label: "Test Reconciliation", icon: Blocks },
+      { path: "/sync/scheduled-tasks", label: "Scheduled Tasks", icon: Metronome },
     ];
-  }
-  // 2. Everyone else gets the standard menu
-  else {
+  } else {
     navItems = [
-      { path: "/assets/raw", label: "Raw Data Lab", icon: Database },
-      { path: "/assets/pool", label: "Active Pool", icon: Layers },
-      { path: "/assets/analytics", label: "Analytics", icon: BarChart3 },
-      { path: "/assets/insights", label: "Insights", icon: Lightbulb },
+      { path: "/sync", label: "Sync Dashboard", icon: LayoutDashboard, exact: true },
     ];
-
-    if (currentUser?.role === 'admin') {
-      navItems.push({ path: "/assets/documents", label: "Documents", icon: Files });
-      navItems.push({ path: "/assets/rag", label: "Luigi Intelligence", icon: Bot });
-      navItems.push({ path: "/sync/asset-reconciliation", label: "Asset Reconciliation", icon: Unplug, isExternal: true });
-    }
   }
 
   const getNavLinkClass = (isActive: boolean) => {
     const baseClass = "flex items-center gap-3 px-4 py-2.5 rounded-xl font-medium text-sm whitespace-nowrap transition-colors";
-
     if (isActive) {
       return `${baseClass} bg-slate-200 dark:bg-zinc-800 text-slate-900 dark:text-zinc-100 border border-slate-300 dark:border-zinc-700 shadow-sm`;
     }
-
     return `${baseClass} text-slate-500 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-100 hover:bg-slate-100 dark:hover:bg-zinc-800/50`;
   };
 
@@ -47,18 +38,16 @@ export default function AssetsLayout() {
     <div className="min-h-screen bg-slate-50 dark:bg-zinc-950 text-slate-900 dark:text-zinc-100">
       <TopNav />
 
+      {/* MOBILE: Horizontally Scrollable Pills */}
       <div className="pt-32 md:pt-36 pb-12 px-4 md:px-6 w-full max-w-[1600px] mx-auto flex flex-col md:flex-row gap-6">
-
-        {/* MOBILE: Horizontally Scrollable Pills */}
         <div className="md:hidden flex overflow-x-auto gap-2 pb-2 -mx-4 px-4 [&::-webkit-scrollbar]:hidden">
           {navItems.map((item) => (
             <NavLink
               key={item.path}
               to={item.path}
-              end={!item.isExternal}
-              className={({ isActive }) => getNavLinkClass(item.isExternal ? false : isActive)}
+              end={item.exact}
+              className={({ isActive }) => getNavLinkClass(isActive)}
             >
-              <item.icon size={16} />
               {item.label}
             </NavLink>
           ))}
@@ -70,16 +59,14 @@ export default function AssetsLayout() {
             <NavLink
               key={item.path}
               to={item.path}
-              end={!item.isExternal}
-              className={({ isActive }) => getNavLinkClass(item.isExternal ? false : isActive)}
+              end={item.exact}
+              className={({ isActive }) => getNavLinkClass(isActive)}
             >
               <item.icon size={18} />
               {item.label}
             </NavLink>
           ))}
         </div>
-
-        {/* MAIN CONTENT AREA */}
         <div className="flex-1 w-full min-w-0">
           <Outlet />
         </div>

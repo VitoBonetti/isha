@@ -222,6 +222,7 @@ export default function TopNav() {
         {['admin', 'read_only'].includes(currentUser?.role) && (
           <>
             <Link to="/assets" className={navClass("/assets")}>Assets</Link>
+            <Link to="/sync" className={navClass("/sync")}>Sync</Link>
             <Link to="/settings" className={navClass("/settings")}>System</Link>
           </>
         )}

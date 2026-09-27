@@ -9,7 +9,7 @@ import {
   ChevronLeft, Save, ChevronDown, CalendarClock, CalendarCheck, ChevronRight,
   Database, Users, Shield, Code, MapPin, Server, Activity, Calendar, FolderOpen,
   FolderPlus, Lock, LockOpen, Presentation, FileDown, CheckSquare, History,
-  ListChecks, Mail, CheckCircle, CircleFadingPlus, Cable, Bot, Sparkles, MessageSquareQuote
+  ListChecks, Mail, CheckCircle, CircleFadingPlus, Cable, Bot, Sparkles, MessageSquareQuote, Copy
 } from "lucide-react";
 import { useAppContext } from "../context/AppContext";
 import RequirementsModal from "../components/Modals/RequirementsModal";
@@ -159,14 +159,7 @@ export default function TestDetailsView() {
 
     const checkAnalysis = () => {
       axios.get(`/api/tests/${id}/analysis`)
-        .then((res) => {
-          // Explicitly verify the payload contains actual data (like the timestamp)
-          if (res.data && res.data.timestamp) {
-            setHasAnalysis(true);
-          } else {
-            setHasAnalysis(false);
-          }
-        })
+        .then(() => setHasAnalysis(true))
         .catch(() => setHasAnalysis(false));
     };
     checkAnalysis();
@@ -402,11 +395,31 @@ export default function TestDetailsView() {
                         <Database size={12} /> {a.asset_name}
                       </Link>
                     ))}
+
+                    {test.ritm_matched && test.ritm_id && (
+                      <span className="text-xs font-bold text-slate-400 flex items-center mr-1">
+                        {test.ritm_id}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            navigator.clipboard.writeText(test.ritm_id);
+                            toast.success("RITM ID copied!");
+                          }}
+                          className="ml-1 hover:text-slate-600 transition-colors focus:outline-none"
+                          title="Copy RITM ID"
+                        >
+                          <Copy size={12} />
+                        </button>
+                      </span>
+                    )}
                   </div>
                 )}
 
                 <div className="text-slate-500 text-xs md:text-sm mt-4 flex flex-col gap-2">
-                  <span className="font-mono break-all">Test ID: {test.id}</span>
+                  <div className="flex items-center gap-3">
+                    <span className="font-mono break-all">Test ID: {test.id}</span>
+                  </div>
+
                   <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-6 mt-1">
                     {test.start_week && test.start_year ? (
                       <span className="flex items-center gap-1.5 font-bold text-slate-700 dark:text-zinc-300">

@@ -141,7 +141,7 @@ def create_placeholder(db: Session, p, current_user: dict):
         service_lane_id=p.service_lane_id,
         year=p.year,
         week=p.week,
-        credits=2.0
+        credits=2
     )
     db.add(new_ph)
     db.commit()

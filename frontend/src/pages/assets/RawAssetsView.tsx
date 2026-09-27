@@ -1,23 +1,12 @@
 import { useState, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 import axios from "axios";
-import AddRawAssetModal from "../components/Modals/AddRawAssetModal";
-import ConfirmModal from "../components/Modals/ConfirmModal";
-import { useAppContext } from "../context/AppContext";
+import AddRawAssetModal from "../../components/Modals/AddRawAssetModal";
+import ConfirmModal from "../../components/Modals/ConfirmModal";
+import { useAppContext } from "../../context/AppContext";
 import { Search, Plus, Filter, ChevronUp, ChevronDown, ChevronsUpDown, Globe, Database, MoveRight } from "lucide-react";
 import toast, { Toaster } from 'react-hot-toast';
-
-interface RawAsset {
-  id: string;
-  name: string;
-  asset_type_name?: string;
-  facing_internet: boolean;
-  country_code?: string;
-  service_name?: string;
-  category_name?: string;
-  business_critical: number;
-  is_promoted: boolean;
-}
+import type { RawAsset } from '../../types/board'
 
 export default function RawAssetsView() {
   const { currentUser } = useAppContext();

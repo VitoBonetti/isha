@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, BackgroundTasks, Query
 from database import get_db
 from routers.auth import require_admin
 from system_services import snow_service
+from schema import LinkRitmPayload
 
 
 router = APIRouter(prefix="/api/snow", tags=["ServiceNow Tools"])
@@ -50,7 +51,9 @@ def get_ritms_endpoint(
     created_to: Optional[date] = None,
     estimated_exact: Optional[date] = None,
     estimated_from: Optional[date] = None,
-    estimated_to: Optional[date] = None
+    estimated_to: Optional[date] = None,
+    global_search: Optional[str] = None,
+    sort_by: str = "created"
 ):
     """
     Fetches filtered ServiceNow RITM requests.
@@ -72,7 +75,9 @@ def get_ritms_endpoint(
         estimated_exact=estimated_exact,
         estimated_from=estimated_from,
         estimated_to=estimated_to,
-        current_year=current_year
+        current_year=current_year,
+        global_search=global_search,
+        sort_by=sort_by
     )
 
 
@@ -91,7 +96,9 @@ def get_ritms_endpoint(
     created_to: Optional[date] = None,
     estimated_exact: Optional[date] = None,
     estimated_from: Optional[date] = None,
-    estimated_to: Optional[date] = None
+    estimated_to: Optional[date] = None,
+    global_search: Optional[str] = None,
+    sort_by: str = "created"
 ):
     """
     Fetches filtered ServiceNow RITM requests.
@@ -112,7 +119,9 @@ def get_ritms_endpoint(
         estimated_exact=estimated_exact,
         estimated_from=estimated_from,
         estimated_to=estimated_to,
-        current_year=None
+        current_year=None,
+        global_search=global_search,
+        sort_by=sort_by
     )
 
 
@@ -126,3 +135,35 @@ def match_tests_endpoint(
     Returns matched records, unmatched tests, and unmatched RITMs.
     """
     return snow_service.match_tests_with_ritms(db)
+
+
+@router.post("/link-test-ritm")
+def link_test_ritm_endpoint(
+    payload: LinkRitmPayload,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(require_admin)
+):
+    """Manually links an orphaned Test to an orphaned RITM."""
+    return snow_service.link_test_to_ritm(db, payload.test_id, payload.ritm_id, current_user)
+
+
+@router.post("/unlink-test-ritm")
+def unlink_test_ritm_endpoint(
+    payload: LinkRitmPayload,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(require_admin)
+):
+    """Removes a link between a Test and a RITM."""
+    return snow_service.unlink_test_from_ritm(db, payload.test_id, payload.ritm_id, current_user)
+
+
+@router.post("/unlink-all-test-ritm")
+def bulk_unlink_ritms_and_tests(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(require_admin)
+):
+    """
+    [Admin Only] Removes all links between Tests and RITMs and resets the ritm_matched flag.
+    Useful for resetting the reconciliation engine during testing.
+    """
+    return snow_service.unlink_all_tests_and_ritms(db, current_user)
