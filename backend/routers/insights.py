@@ -8,17 +8,22 @@ from system_services import insight_service
 router = APIRouter(prefix="/api/insights", tags=["Insights"])
 
 
-@router.get("/available-years", summary="[Admin Only]")
+@router.get("/available-years", summary="[Admin/ReadOnly] Get Available Years")
 def get_available_years(current_user: dict = Depends(require_admin_or_read_only), db: Session = Depends(get_db)):
     """
-    Admin Only Endpoint to Get Available Years
+    Get Available Years for Insights.
+
+    Fetches a distinct list of operational years that have active records, utilized for populating frontend dropdown filters.
     """
     return insight_service.get_available_years(db)
 
 
-@router.get("/", summary="[Admin Only]")
-def get_yearly_insights(year: Optional[int] = None, current_user: dict = Depends(require_admin_or_read_only), db: Session = Depends(get_db)):
+@router.get("/", summary="[Admin/ReadOnly] Get Yearly Insights")
+def get_yearly_insights(year: Optional[int] = None, current_user: dict = Depends(require_admin_or_read_only),
+                        db: Session = Depends(get_db)):
     """
-    Admin Only Endpoint to Get Yearly Insights
+    Get Yearly Insights.
+
+    Retrieves aggregated analytics, metrics, and KPI tracking data for the specified operational year.
     """
     return insight_service.get_yearly_insights(db, year)

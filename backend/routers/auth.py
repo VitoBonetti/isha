@@ -215,12 +215,15 @@ def require_admin_or_pentester(current_user: dict = Depends(get_current_user)):
     return current_user
 
 
-@router.post("/logout")
+@router.post("/logout", summary="Logout User")
 def logout(background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user)):
     """
-    Log the user out of the current session
-    1. We still want to announce the user left via websockets
-    2. send the required Google IAP logout URL back to the React frontend.
+    Securely log the user out of the current session.
+
+    This endpoint:
+    1. Announces the user's departure via WebSockets to update active presence lists.
+    2. Logs the logout event to the system audit trail.
+    3. Returns the required Google IAP logout URL back to the React frontend to clear cookies.
     """
     # 1. We still want to announce the user left via websockets
     background_tasks.add_task(
@@ -245,8 +248,16 @@ def logout(background_tasks: BackgroundTasks, current_user: dict = Depends(get_c
 
 
 # --- 2. SESSION & API KEY MANAGEMENT ---
-@router.get("/keys")
-def list_api_keys(global_view: bool = False, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+@router.get("/keys", summary="List API Keys")
+def list_api_keys(global_view: bool = False, current_user: dict = Depends(get_current_user),
+                  cursor=Depends(get_db_cursor)):
+    """
+    Retrieve all active API keys.
+
+    Standard users will receive a list of their own programmatic access keys.
+    If the `global_view` flag is set to true and the user is an Administrator, the endpoint
+    will return all active API keys across the entire platform.
+    """
     if global_view and current_user['role'] == 'admin':
         cursor.execute("""
             SELECT ak.id, ak.name as key_name, ak.prefix, ak.created_at, ak.expires_at, ak.is_read_only, u.name as owner_name, u.email as owner_email
@@ -266,8 +277,14 @@ def list_api_keys(global_view: bool = False, current_user: dict = Depends(get_cu
     return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
 
-@router.post("/keys")
+@router.post("/keys", summary="Create API Key")
 def create_api_key(req: ApiKeyCreate, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
+    """
+    Generate a new secure API key for programmatic access.
+
+    Creates a new key with a 90-day expiration window. The raw key is returned exactly once
+    in the response payload; only a SHA-256 hash and prefix are retained in the database.
+    """
     raw_key = "isha_" + secrets.token_urlsafe(32)
     prefix = raw_key[:10]
     hashed = hash_api_key(raw_key)
@@ -294,10 +311,13 @@ def create_api_key(req: ApiKeyCreate, current_user: dict = Depends(get_current_u
     }
 
 
-@router.delete("/keys/{key_id}")
+@router.delete("/keys/{key_id}", summary="Revoke API Key")
 def revoke_api_key(key_id: str, current_user: dict = Depends(get_current_user), cursor=Depends(get_db_cursor)):
     """
-    Deletes an API key. Admins can delete any key, users can only delete their own.
+    Delete and invalidate an active API key.
+
+    Once revoked, the key will instantly fail all authentication checks.
+    Standard users can only revoke their own keys, while Administrators can revoke any key.
     """
     if current_user['role'] == 'admin':
         cursor.execute("DELETE FROM api_keys WHERE id = %s", (key_id,))

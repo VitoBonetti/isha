@@ -15,11 +15,16 @@ export default function Planner() {
   // Time state
   const [targetYear, setTargetYear] = useState(new Date().getFullYear());
   const [targetQuarter, setTargetQuarter] = useState(() => {
-    const month = new Date().getMonth() + 1;
-    if (month > 9) return 4;
-    if (month > 6) return 3;
-    if (month > 3) return 2;
-    return 1;
+    const date = new Date();
+    const currentDay = date.getDay() || 7;
+    date.setDate(date.getDate() + (4 - currentDay));
+    const workingMonth = date.getMonth() + 1;
+    return Math.ceil(workingMonth / 3);
+//     const month = new Date().getMonth() + 1;
+//     if (month > 9) return 4;
+//     if (month > 6) return 3;
+//     if (month > 3) return 2;
+//     return 1;
   });
 
   const [assignModalTest, setAssignModalTest] = useState<Test | null>(null);
@@ -119,10 +124,24 @@ export default function Planner() {
     else { setTargetQuarter(q => q + 1); }
   };
 
+//   const handleCurrentQuarter = () => {
+//     setTargetYear(new Date().getFullYear());
+//     const month = new Date().getMonth() + 1;
+//     setTargetQuarter(month > 9 ? 4 : month > 6 ? 3 : month > 3 ? 2 : 1);
+//   };
+
   const handleCurrentQuarter = () => {
-    setTargetYear(new Date().getFullYear());
-    const month = new Date().getMonth() + 1;
-    setTargetQuarter(month > 9 ? 4 : month > 6 ? 3 : month > 3 ? 2 : 1);
+    const date = new Date();
+    // 1. Get the current day of the week (Convert Sunday from 0 to 7)
+    const currentDay = date.getDay() || 7;
+    // 2. Shift the date to the Thursday of this week (Thursday is day 4)
+    date.setDate(date.getDate() + (4 - currentDay));
+    // 3. Extract the year and month from that Thursday
+    const workingYear = date.getFullYear();
+    const workingMonth = date.getMonth() + 1;
+    // 4. Set state
+    setTargetYear(workingYear);
+    setTargetQuarter(Math.ceil(workingMonth / 3));
   };
 
   // --- Verification handler function ---

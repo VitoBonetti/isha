@@ -7,17 +7,22 @@ from routers.auth import require_admin
 from system_services import snow_service
 from schema import LinkRitmPayload
 
-
 router = APIRouter(prefix="/api/snow", tags=["ServiceNow Tools"])
 
-@router.post("/sync-ritms")
+@router.post(
+    "/sync-ritms",
+    summary="[Admin Only] Trigger RITM Sync"
+)
 def trigger_ritm_sync(
         background_tasks: BackgroundTasks,
         current_user: dict = Depends(require_admin)
 ):
     """
-    Triggers the background process to fetch, parse, and upsert the latest RITM sheet
-    from the GCS bucket, then archives the file.
+    Launch a background synchronization to parse the latest RITM sheet.
+
+    Triggers an asynchronous background process that fetches the latest ServiceNow RITM export
+    from the connected GCS bucket, parses the spreadsheet, upserts the data into the internal database,
+    and archives the processed file.
     """
     background_tasks.add_task(
         snow_service.process_ritm_sync_background,
@@ -28,15 +33,24 @@ def trigger_ritm_sync(
     return {"message": "RITM Sync background task has been successfully triggered."}
 
 
-@router.get("/ritm-last-sync")
+@router.get(
+    "/ritm-last-sync",
+    summary="[Admin Only] Get Last RITM Sync Time"
+)
 def get_ritm_last_sync(current_user: dict = Depends(require_admin)):
     """
-    Fetches the last successful RITM sync timestamp directly from BigQuery audit logs.
+    Fetch the timestamp of the last successful RITM sync.
+
+    Queries the BigQuery audit logs directly to retrieve the exact timestamp of the
+    most recent successfully completed RITM synchronization process.
     """
     return snow_service.get_last_ritm_sync_date()
 
 
-@router.get("/ritms/current-year")
+@router.get(
+    "/ritms/current-year",
+    summary="[Admin Only] Get Current Year RITMs"
+)
 def get_ritms_endpoint(
     db: Session = Depends(get_db),
     current_user: dict = Depends(require_admin),
@@ -56,8 +70,11 @@ def get_ritms_endpoint(
     sort_by: str = "created"
 ):
     """
-    Fetches filtered ServiceNow RITM requests.
-    Base Rule: Includes records targeting the current year and excludes 'Request Cancelled'.
+    Fetch a paginated list of RITMs targeted for the current year.
+
+    Retrieves filtered ServiceNow RITM requests from the database.
+    **Base Rule:** This endpoint automatically restricts results to records whose estimated date
+    or creation date falls within the current UTC year, and strictly excludes any requests with a 'Request Cancelled' stage.
     """
     current_year = int(datetime.now(timezone.utc).year)
 
@@ -81,8 +98,11 @@ def get_ritms_endpoint(
     )
 
 
-@router.get("/ritms/all-year")
-def get_ritms_endpoint(
+@router.get(
+    "/ritms/all-year",
+    summary="[Admin Only] Get All RITMs (Unrestricted Year)"
+)
+def get_all_year_ritms_endpoint(
     db: Session = Depends(get_db),
     current_user: dict = Depends(require_admin),
     page: int = Query(1, ge=1),
@@ -101,10 +121,12 @@ def get_ritms_endpoint(
     sort_by: str = "created"
 ):
     """
-    Fetches filtered ServiceNow RITM requests.
-    Base Rule:Excludes 'Request Cancelled'.
-    """
+    Fetch a paginated list of RITMs regardless of their target year.
 
+    Retrieves filtered ServiceNow RITM requests from the database across all historical years.
+    **Base Rule:** Unlike the current-year endpoint, this ignores the year restriction but
+    still securely filters out 'Request Cancelled' stages.
+    """
     return snow_service.get_filtered_ritms_current_year(
         db=db,
         page=page,
@@ -125,45 +147,72 @@ def get_ritms_endpoint(
     )
 
 
-@router.get("/match-tests")
+@router.get(
+    "/match-tests",
+    summary="[Admin Only] Run RITM Reconciliation Engine"
+)
 def match_tests_endpoint(
     db: Session = Depends(get_db),
     current_user: dict = Depends(require_admin)
 ):
     """
-    Matches active current-year tests against ServiceNow RITM requests using OneTrust Asset IDs.
-    Returns matched records, unmatched tests, and unmatched RITMs.
+    Extract unmatched Tests and unmatched RITMs.
+
+    Executes the reconciliation algorithm to identify orphaned active tests and orphaned RITMs.
+    The matching logic relies primarily on querying OneTrust Asset IDs linked to both sets of records.
     """
     return snow_service.match_tests_with_ritms(db)
 
 
-@router.post("/link-test-ritm")
+@router.post(
+    "/link-test-ritm",
+    summary="[Admin Only] Link Test to RITM"
+)
 def link_test_ritm_endpoint(
     payload: LinkRitmPayload,
     db: Session = Depends(get_db),
     current_user: dict = Depends(require_admin)
 ):
-    """Manually links an orphaned Test to an orphaned RITM."""
+    """
+    Create a manual mapping between an orphaned Test and a RITM.
+
+    Inserts a new relationship into the junction table connecting a specified Test ID
+    to a ServiceNow RITM ID, and automatically updates the test's `ritm_matched` status flag.
+    """
     return snow_service.link_test_to_ritm(db, payload.test_id, payload.ritm_id, current_user)
 
 
-@router.post("/unlink-test-ritm")
+@router.post(
+    "/unlink-test-ritm",
+    summary="[Admin Only] Unlink Test from RITM"
+)
 def unlink_test_ritm_endpoint(
     payload: LinkRitmPayload,
     db: Session = Depends(get_db),
     current_user: dict = Depends(require_admin)
 ):
-    """Removes a link between a Test and a RITM."""
+    """
+    Remove the manual mapping between a Test and a RITM.
+
+    Deletes the specific relationship between a Test and a RITM from the junction table.
+    If this leaves the test with zero linked RITMs, its `ritm_matched` flag is reverted to False.
+    """
     return snow_service.unlink_test_from_ritm(db, payload.test_id, payload.ritm_id, current_user)
 
 
-@router.post("/unlink-all-test-ritm")
+@router.post(
+    "/unlink-all-test-ritm",
+    summary="[Admin Only] Bulk Unlink All Tests & RITMs"
+)
 def bulk_unlink_ritms_and_tests(
     db: Session = Depends(get_db),
     current_user: dict = Depends(require_admin)
 ):
     """
-    [Admin Only] Removes all links between Tests and RITMs and resets the ritm_matched flag.
-    Useful for resetting the reconciliation engine during testing.
+    WARNING: Nuclear option to reset the entire reconciliation engine.
+
+    **DANGER ZONE:** Removes all links across the entire system between Tests and RITMs
+    and resets the `ritm_matched` flag to False for every test.
+    This is highly destructive and primarily used for resetting the environment during integration testing.
     """
     return snow_service.unlink_all_tests_and_ritms(db, current_user)

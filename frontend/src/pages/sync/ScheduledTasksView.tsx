@@ -6,7 +6,8 @@ import {
   CloudSync,
   ShieldCheck,
   Database,
-  Clock
+  Clock,
+  Speech
 } from 'lucide-react';
 
 export default function ScheduledTaskView() {
@@ -41,7 +42,7 @@ export default function ScheduledTaskView() {
     {
       title: "Keep Secure 24 Automation",
       description: "Creates the tests on Keep Secure 24 for the current week's tests, provided all requirements are satisfied.",
-      schedule: "Every Monday at 00:00",
+      schedule: "Every Monday at 01:00 AM",
       timezone: "Amsterdam Time",
       icon: ShieldCheck,
       iconColor: "text-emerald-500",
@@ -55,6 +56,15 @@ export default function ScheduledTaskView() {
       icon: Database,
       iconColor: "text-indigo-500",
       bgColor: "bg-indigo-50 dark:bg-indigo-900/20"
+    },
+    {
+      title: "Snitcher Dashboard",
+      description: "Launch the Snitcher Metrics data pipeline.",
+      schedule: "Every Monday at 1:30 AM",
+      timezone: "Amsterdam Time",
+      icon: Speech,
+      iconColor: "text-mist-500",
+      bgColor: "bg-mist-50 dark:bg-mist-900/20"
     }
   ];
 

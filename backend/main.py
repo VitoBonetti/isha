@@ -12,7 +12,7 @@ import textwrap
 from jose import jwt
 from routers import (
     auth, services, users, regions, countries, assets, tests, board, logs, locations, insights, contacts, luigi,
-    kiss24, danger, documents, rag, kpi_criteria, cronos,snow
+    kiss24, danger, documents, rag, kpi_criteria, cronos,snow, dashboards
 )
 from routers.auth import require_admin, get_google_public_keys, get_current_user
 from database import get_db_connection, run_alembic_migrations
@@ -135,7 +135,7 @@ routers_list = [
     assets.router, kpi_criteria.router, auth.router, board.router,
     contacts.router, countries.router, documents.router, cronos.router, insights.router,
     kiss24.router, locations.router, logs.router, luigi.router,
-    rag.router, regions.router, services.router, snow.router, tests.router,
+    rag.router, regions.router, services.router, dashboards.router, snow.router, tests.router,
     users.router, danger.router
 ]
 
@@ -232,8 +232,19 @@ def health_check():
     return {"status": "online", "system": "Mario"}
 
 
-@app.get("/api-external/health", tags=["Health Check"])
+@app.get(
+    "/api-external/health",
+    tags=["Health Check"],
+    summary="Check API Health Status"
+)
 def check_health(current_user: dict = Depends(get_current_user)):
+    """
+    Verify the operational status of the external API.
+
+    This endpoint serves as a basic health check for external clients, scripts, or monitoring systems.
+    Because it explicitly requires authentication, it is also highly useful for validating that a newly
+    generated API key or IAP token is actively working and recognized by the system.
+    """
     return {"status": "online", "system": "Mario"}
 
 # --- EXCEPTION HANDLER ---

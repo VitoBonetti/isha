@@ -437,3 +437,7 @@ def bulk_delete_chat_sessions(db: Session, request, current_user: dict):
     query.update({"is_session_active": False}, synchronize_session=False)
     db.commit()
     return {"status": "success"}
+
+
+def get_all_rag_logs(db: Session):
+    return db.query(RagChatLogs).order_by(RagChatLogs.timestamp.asc()).all()

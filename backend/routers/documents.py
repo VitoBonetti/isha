@@ -7,7 +7,8 @@ from system_services import document_service
 
 router = APIRouter(prefix="/api/documents", tags=["Documents"])
 
-@router.get("/", summary="[Admin Only] Get all test documents with metadata")
+
+@router.get("/", summary="[Admin Only] Get All Documents")
 def get_all_documents(
         page: int = Query(1, ge=1),
         limit: int = Query(20, ge=1, le=100),
@@ -19,6 +20,11 @@ def get_all_documents(
         current_user: dict = Depends(require_admin),
         db: Session = Depends(get_db)
 ):
+    """
+    Get all test documents with metadata.
+
+    Retrieves a paginated, sortable, and filterable list of all documents indexed in the system, optionally filtered by service lane or document type.
+    """
     return document_service.get_all_documents(
         db, page, limit, search, service_lane_id, doc_type, sort_by, sort_dir
     )

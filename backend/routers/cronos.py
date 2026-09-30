@@ -6,7 +6,7 @@ from routers.auth import get_google_public_keys
 from websockets_manager import manager
 from database import db_cursor_context
 from audit_logger import log_audit_event
-from system_services import asset_service, rag_service, kiss24_service, snow_service
+from system_services import asset_service, rag_service, kiss24_service, snow_service, dashboard_service
 
 router = APIRouter(prefix="/api/cronos", tags=["Google CronJobs"])
 
@@ -23,7 +23,8 @@ def verify_cron_caller(request: Request) -> bool:
     if os.environ.get("ENV") != "local":
         iap_jwt = request.headers.get("x-goog-iap-jwt-assertion")
         if not iap_jwt:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing IAP JWT. Request bypassed IAP.")
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
+                                detail="Missing IAP JWT. Request bypassed IAP.")
 
         try:
             kid = jwt.get_unverified_header(iap_jwt).get("kid")
@@ -105,11 +106,21 @@ async def run_api_key_expiration_check():
 # --- GOOGLE SCHEDULER ENDPOINTS ---
 # ---------------------------------------------------------
 
-@router.post("/api-key-alerts", summary="GCP Scheduler trigger for daily API Key expiration alerts")
+@router.post(
+    "/api-key-alerts",
+    summary="Daily API Key Expiration Check"
+)
 async def gcp_trigger_api_key_alerts(
-    request: Request,
-    authenticated: bool = Depends(verify_cron_caller)
+        request: Request,
+        authenticated: bool = Depends(verify_cron_caller)
 ):
+    """
+    Trigger the daily API Key expiration routine.
+
+    Called securely via Google Cloud Scheduler. Queries the database for all active API keys
+    expiring within exactly 7 days (to trigger a warning notification) and keys expiring today
+    (to trigger invalidation and error notifications).
+    """
     print("🔔 GCP Scheduler triggered daily API key expiration check.")
     await run_api_key_expiration_check()
 
@@ -125,14 +136,19 @@ async def gcp_trigger_api_key_alerts(
     return {"message": "API key expiration check executed successfully."}
 
 
-@router.post("/servicenow-sync", summary="GCP Scheduler trigger for weekly ServiceNow CMDB sync")
+@router.post(
+    "/servicenow-sync",
+    summary="Weekly ServiceNow CMDB Sync"
+)
 def gcp_trigger_servicenow_sync(
-    background_tasks: BackgroundTasks,
-    authenticated: bool = Depends(verify_cron_caller)
+        background_tasks: BackgroundTasks,
+        authenticated: bool = Depends(verify_cron_caller)
 ):
     """
-    Weekly background sync with ServiceNow CMDB.
-    Runs asynchronously using FastAPI BackgroundTasks.
+    Trigger the automated background sync with ServiceNow CMDB.
+
+    Called securely via Google Cloud Scheduler. It immediately returns a success HTTP code to
+    GCP and delegates the heavy CMDB processing script to a FastAPI BackgroundTask.
     """
     background_tasks.add_task(
         asset_service.full_background_sync_wrapper,
@@ -152,14 +168,20 @@ def gcp_trigger_servicenow_sync(
     return {"message": "Weekly ServiceNow sync queued successfully."}
 
 
-@router.post("/rag-sync", summary="GCP Scheduler trigger for daily RAG knowledge base sync")
+@router.post(
+    "/rag-sync",
+    summary="Daily RAG Knowledge Base Sync"
+)
 def gcp_trigger_rag_sync(
-    background_tasks: BackgroundTasks,
-    authenticated: bool = Depends(verify_cron_caller)
+        background_tasks: BackgroundTasks,
+        authenticated: bool = Depends(verify_cron_caller)
 ):
     """
-    Daily background sync for RAG Knowledge Base and Test Documents.
-    Runs asynchronously at 05:00 UTC.
+    Trigger the daily Retrieval-Augmented Generation (RAG) Sync.
+
+    Called securely via Google Cloud Scheduler. Triggers a background process that crawls
+    Google Drive workspaces for newly uploaded scoping documents and rules, embedding them
+    into the Vector Database for AI retrieval.
     """
     background_tasks.add_task(
         rag_service.sync_all_active_tests_background,
@@ -179,14 +201,20 @@ def gcp_trigger_rag_sync(
     return {"message": "Daily RAG sync queued successfully."}
 
 
-@router.post("/kiss24-weekly-provision", summary="GCP Scheduler trigger for weekly KISS24 test provisioning")
+@router.post(
+    "/kiss24-weekly-provision",
+    summary="Weekly KISS24 Test Provisioning"
+)
 def gcp_trigger_kiss24_provision(
-    background_tasks: BackgroundTasks,
-    authenticated: bool = Depends(verify_cron_caller)
+        background_tasks: BackgroundTasks,
+        authenticated: bool = Depends(verify_cron_caller)
 ):
     """
-    Weekly background task that auto-provisions tests in Keep Secure 24
-    for the current week. Runs asynchronously at 00:00 UTC on Mondays.
+    Trigger the Keep Secure 24 test auto-provisioning cycle.
+
+    Called securely via Google Cloud Scheduler (typically Monday at 00:00 UTC). Looks for all
+    platform tests scheduled for the current week that have met requirements but lack a KISS24 UUID,
+    and automatically provisions them on the external platform.
     """
     background_tasks.add_task(
         kiss24_service.auto_provision_weekly_tests_background,
@@ -206,14 +234,19 @@ def gcp_trigger_kiss24_provision(
     return {"message": "Weekly KISS24 auto-provisioning queued successfully."}
 
 
-@router.post("/servicenow-ritm-sync", summary="GCP Scheduler trigger for daily sync for RITM fro ServiceNow")
+@router.post(
+    "/servicenow-ritm-sync",
+    summary="Daily ServiceNow RITM Sync"
+)
 def gcp_trigger_snow_ritm_sync(
-    background_tasks: BackgroundTasks,
-    authenticated: bool = Depends(verify_cron_caller)
+        background_tasks: BackgroundTasks,
+        authenticated: bool = Depends(verify_cron_caller)
 ):
     """
-    Daily background task that sync database for RITM from ServiceNow.
-    Runs asynchronously at 08:15 CTE.
+    Trigger the daily sync of active RITM tickets from ServiceNow.
+
+    Called securely via Google Cloud Scheduler. Triggers an asynchronous task that fetches the
+    most recent RITM data from the connected GCS bucket to ensure the local database stays in sync.
     """
     background_tasks.add_task(
         snow_service.process_ritm_sync_background,
@@ -230,7 +263,38 @@ def gcp_trigger_snow_ritm_sync(
         details="Daily scheduled database sync for RITM from ServiceNow initiated by Cloud Scheduler."
     )
 
-    return {"message": "Daily sync for RITM from ServiceNow  queued successfully."}
+    return {"message": "Daily sync for RITM from ServiceNow queued successfully."}
 
 
+@router.post(
+    "/snitcher-metrics",
+    summary="Daily ServiceNow RITM Sync"
+)
+def gcp_trigger_snitch_metrics(
+        background_tasks: BackgroundTasks,
+        authenticated: bool = Depends(verify_cron_caller)
+):
+    """
+    Trigger the weekly sync for the snitcher metrics.
 
+    Called securely via Google Cloud Scheduler. Launch the Snitcher Metrics data pipeline.
+    Initiates an asynchronous background worker that connects to the external Vulnerability Manager,
+    fetches the full asset and history ledgers, calculates KPI movements via a Pandas dataframe,
+    and commits the aggregated metrics to the PostgreSQL database.
+    """
+    background_tasks.add_task(
+        dashboard_service.run_snitcher_sync,
+        "SYSTEM_CRON",
+        "scheduler"
+    )
+
+    log_audit_event(
+        user_id="SYSTEM_CRON",
+        role="scheduler",
+        action="CRON_SNITCHER_STARTED",
+        resource_type="SNITCHER",
+        resource_id="snitcher_metrics",
+        details="Weekly sync for the snitcher metrics initiated by Cloud Scheduler."
+    )
+
+    return {"message": "Weekly sync for the snitcher metrics queued successfully."}

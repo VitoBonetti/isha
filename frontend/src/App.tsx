@@ -36,6 +36,7 @@ import ServiceNowSyncSettings from './pages/sync/ServiceNowSyncSettings';
 import Kiss24SyncSettings from './pages/sync/Kiss24SyncSettings';
 import TestReconciliationView from './pages/sync/TestReconciliationView';
 import ScheduledTasksView from "./pages/sync/ScheduledTasksView";
+import SnitcherDashboard from "./pages/dashboards/SnitcherDashboard";
 
 // --- ROUTE GUARD COMPONENT ---
 // Rejects users who do not have an explicitly allowed role
@@ -56,6 +57,9 @@ function AppContent() {
       <div className="fixed bottom-[-20%] right-[-10%] w-[50vw] h-[50vh] rounded-full bg-indigo-500/10 dark:bg-indigo-500/5 blur-[120px] pointer-events-none z-0" />
 
       <Routes>
+        {/* INDEPENDENT DASHBOARD ROUTE - No TopNav, No Sidebar */}
+        <Route path="/snitcher-dashboard" element={<SnitcherDashboard />} />
+
         {/* Core Application - Accessible by Everyone */}
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/planner" element={<Planner />} />

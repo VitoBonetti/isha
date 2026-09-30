@@ -8,43 +8,85 @@ from schema import LogSearchRequest
 router = APIRouter(prefix="/api/system/logs", tags=["Logs"])
 
 
-@router.get("/", summary="[Admin Only]")
+@router.get(
+    "/",
+    summary="[Admin/ReadOnly] Get Recent Logs"
+)
 def get_recent_logs(current_user: dict = Depends(require_admin_or_read_only)):
     """
-    Admin Only endpoint to Queries BigQuery for the 100 most recent logs for the UI terminal.
+    Retrieve the most recent system audit events.
+
+    Queries the external BigQuery data warehouse to fetch the 100 most recent
+    system logs, used to populate the live terminal view in the frontend UI.
     """
     return log_service.get_recent_logs()
 
 
-@router.get("/filters", summary="[Admin Only] Get dynamic BigQuery log filters")
+@router.get(
+    "/filters",
+    summary="[Admin Only] Get Log Search Filters"
+)
 def get_audit_log_filters(current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
-    """Returns unique resources, actions, and mapped users for the search dropdowns."""
+    """
+    Retrieve dynamically generated filter options for the search interface.
+
+    Queries BigQuery to extract unique resource types, action categories,
+    and mapped users to populate the dropdown menus in the advanced log search UI.
+    """
     return log_service.get_log_filters(db)
 
 
-@router.post("/search", summary="[Admin Only] Advanced Paginated Log Search")
+@router.post(
+    "/search",
+    summary="[Admin Only] Advanced Paginated Log Search"
+)
 def search_audit_logs(req: LogSearchRequest, current_user: dict = Depends(require_admin)):
-    """Queries BigQuery using dynamic filters, timeframes, and pagination."""
+    """
+    Execute a complex search query against the audit log table.
+
+    Translates the frontend search payload into a dynamic BigQuery SQL statement,
+    supporting pagination, timeframe boundaries, and specific filtering by user or action.
+    """
     return log_service.search_audit_logs(req, current_user)
 
 
-@router.get("/download/csv", summary="[Admin Only]")
+@router.get(
+    "/download/csv",
+    summary="[Admin Only] Download All Logs (CSV)"
+)
 def download_logs_csv(current_user: dict = Depends(require_admin)):
     """
-    Admin Only endpoint to Generates a dynamic CSV file of ALL logs from BigQuery.
+    Generate and download a complete extract of the audit trail.
+
+    Pulls every single log entry currently stored in BigQuery and streams it
+    back to the client as a raw CSV file for external compliance auditing.
     """
     return log_service.download_logs_csv(current_user)
 
 
-@router.post("/search/download/csv", summary="[Admin Only] Download filtered logs as CSV")
+@router.post(
+    "/search/download/csv",
+    summary="[Admin Only] Download Filtered Logs (CSV)"
+)
 def download_filtered_logs_csv(req: LogSearchRequest, current_user: dict = Depends(require_admin)):
-    """Downloads all logs matching the advanced search criteria as a CSV."""
+    """
+    Export a targeted subset of audit logs.
+
+    Applies the exact filters from the advanced search interface and exports
+    only the matching log entries to a downloadable CSV format.
+    """
     return log_service.download_search_logs_csv(req, current_user)
 
 
-@router.delete("/clear", summary="[Admin Only]")
+@router.delete(
+    "/clear",
+    summary="[Admin Only] Clear All Audit Logs"
+)
 def clear_all_logs(current_user: dict = Depends(require_admin)):
     """
-    Admin Only endpoint to Deletes all data from the BigQuery table.
+    **DANGER ZONE:** Permanently erase the entire system audit trail.
+
+    Issues a direct truncation command to the BigQuery dataset, deleting all
+    historical log data. This action cannot be undone.
     """
     return log_service.clear_all_logs(current_user)
