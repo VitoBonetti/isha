@@ -147,6 +147,7 @@ def bulk_create_tests(req: BulkTestCreate, background_tasks: BackgroundTasks,
     sl_id = str(current_user.get('service_lane_id')) if current_user.get('service_lane_id') else None
     background_tasks.add_task(test_service.process_bulk_tests_background, req.asset_ids, str(current_user['id']),
                               str(current_user['role']), sl_id)
+    background_tasks.add_task(invalidate_board_cache)
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     return {"message": f"Generating {len(req.asset_ids)} tests from active pool."}
 
