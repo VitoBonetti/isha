@@ -462,6 +462,8 @@ async def process_vuln_analysis_background(test_id: str, kiss24_id: str, user_id
         await manager.broadcast(
             json.dumps({"action": "REPORT_FAILED", "email": user_email, "message": f"Analysis failed: {str(e)}"}))
 
+    await manager.broadcast('{"action": "REFRESH_BOARD"}')
+
 
 def bulk_create_tests_sync(db: Session, asset_ids: list, user_id: str, role: str, service_lane_id: str = None):
     """Executes the fast PostgreSQL inserts synchronously so the UI has immediate access to the data."""
