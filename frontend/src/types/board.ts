@@ -173,3 +173,24 @@ export interface RawAsset {
   business_critical: number;
   is_promoted: boolean;
 }
+
+export interface User {
+  id: string;
+  email: string;
+  name: string;
+  role: 'admin' | 'pentester' | 'read_only' | 'maintainer' | 'stakeholder';
+  location_id: string;
+  has_kiss24_key?: boolean;
+}
+
+export interface AppContextType {
+  currentUser: User | null;
+  isLoading: boolean;
+  handleLogout: () => Promise<void>;
+  wsStatus: 'connecting' | 'connected' | 'disconnected';
+  notifications: any[];
+  showNotifications: boolean;
+  setShowNotifications: (val: boolean) => void;
+  markNotificationsRead: () => Promise<void>;
+  refreshUser: () => Promise<void>;
+}

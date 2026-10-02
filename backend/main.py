@@ -12,7 +12,7 @@ import textwrap
 from jose import jwt
 from routers import (
     auth, services, users, regions, countries, assets, tests, board, logs, locations, insights, contacts, luigi,
-    kiss24, danger, documents, rag, kpi_criteria, cronos,snow, dashboards
+    kiss24, danger, documents, rag, kpi_criteria, cronos,snow, dashboards, global_dash
 )
 from routers.auth import require_admin, get_google_public_keys, get_current_user
 from database import get_db_connection, run_alembic_migrations
@@ -133,7 +133,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 # Helper list to cleanly loop and mount standard vs external routes
 routers_list = [
     assets.router, kpi_criteria.router, auth.router, board.router,
-    contacts.router, countries.router, documents.router, cronos.router, insights.router,
+    contacts.router, countries.router, documents.router, cronos.router, global_dash.router, insights.router,
     kiss24.router, locations.router, logs.router, luigi.router,
     rag.router, regions.router, services.router, dashboards.router, snow.router, tests.router,
     users.router, danger.router

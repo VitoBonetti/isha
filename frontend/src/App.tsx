@@ -37,6 +37,7 @@ import Kiss24SyncSettings from './pages/sync/Kiss24SyncSettings';
 import TestReconciliationView from './pages/sync/TestReconciliationView';
 import ScheduledTasksView from "./pages/sync/ScheduledTasksView";
 import SnitcherDashboard from "./pages/dashboards/SnitcherDashboard";
+import GlobalDashboard from "./pages/dashboards/GlobalDashboard";
 
 // --- ROUTE GUARD COMPONENT ---
 // Rejects users who do not have an explicitly allowed role
@@ -51,91 +52,97 @@ const RoleGuard = ({ allowedRoles }: { allowedRoles: string[] }) => {
 };
 
 function AppContent() {
+  const { currentUser } = useAppContext();
+  const isStakeholder = currentUser?.role === 'stakeholder';
+
   return (
     <div className="bg-slate-50 dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 min-h-screen transition-colors">
       <div className="fixed top-[-20%] left-[-10%] w-[50vw] h-[50vh] rounded-full bg-emerald-500/10 dark:bg-emerald-500/5 blur-[120px] pointer-events-none z-0" />
       <div className="fixed bottom-[-20%] right-[-10%] w-[50vw] h-[50vh] rounded-full bg-indigo-500/10 dark:bg-indigo-500/5 blur-[120px] pointer-events-none z-0" />
 
       <Routes>
-        {/* INDEPENDENT DASHBOARD ROUTE - No TopNav, No Sidebar */}
-        <Route path="/snitcher-dashboard" element={<SnitcherDashboard />} />
+        {/* EXECUTIVE STAKEHOLDER DASHBOARD */}
+        <Route path="/global-dashboard" element={<GlobalDashboard />} />
 
-        {/* Core Application - Accessible by Everyone */}
-        <Route path="/dashboard" element={<Dashboard />} />
-        <Route path="/planner" element={<Planner />} />
-        <Route path="/tests" element={<TestsView />} />
-        <Route path="/tests/:id" element={<TestDetailsView />} />
-        <Route path="/tests/:id/analysis" element={<VulnAnalysisView />} />
+        {/* Redirect Stakeholders away from internal pages */}
+        {isStakeholder ? (
+          <Route path="*" element={<Navigate to="/global-dashboard" replace />} />
+        ) : (
+          <>
+            {/* INDEPENDENT DASHBOARD ROUTE */}
+            <Route path="/snitcher-dashboard" element={<SnitcherDashboard />} />
 
-        {/* Pentesters, Admins, & Read-Only (Maintainer Blocked) */}
-        <Route element={<RoleGuard allowedRoles={['admin', 'pentester', 'read_only']} />}>
-          <Route path="/calendar" element={<CalendarView />} />
-        </Route>
-        <Route element={<RoleGuard allowedRoles={['admin', 'pentester']} />}>
-          <Route path="/validating" element={<ValidatingVulnsView />} />
-        </Route>
+            {/* Core Application - Accessible by Everyone */}
+            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/planner" element={<Planner />} />
+            <Route path="/tests" element={<TestsView />} />
+            <Route path="/tests/:id" element={<TestDetailsView />} />
+            <Route path="/tests/:id/analysis" element={<VulnAnalysisView />} />
 
-        {/* Modular Assets & Analytics Area */}
-        <Route path="/assets" element={<AssetsLayout />}>
-          {/* Default to pool instead of raw, since maintainers can't access raw */}
-          <Route index element={<Navigate to="pool" replace />} />
+            {/* Pentesters, Admins, & Read-Only */}
+            <Route element={<RoleGuard allowedRoles={['admin', 'pentester', 'read_only']} />}>
+              <Route path="/calendar" element={<CalendarView />} />
+            </Route>
+            <Route element={<RoleGuard allowedRoles={['admin', 'pentester']} />}>
+              <Route path="/validating" element={<ValidatingVulnsView />} />
+            </Route>
 
-          {/* Admin, Maintainer, Read-Only (Pentester Blocked from viewing unassigned inventory) */}
-          <Route element={<RoleGuard allowedRoles={['admin', 'maintainer', 'read_only']} />}>
-            <Route path="pool" element={<AssetsView />} />
-          </Route>
+            {/* Modular Assets & Analytics Area */}
+            <Route path="/assets" element={<AssetsLayout />}>
+              <Route index element={<Navigate to="pool" replace />} />
+              <Route element={<RoleGuard allowedRoles={['admin', 'maintainer', 'read_only']} />}>
+                <Route path="pool" element={<AssetsView />} />
+              </Route>
+              <Route element={<RoleGuard allowedRoles={['admin', 'maintainer', 'read_only']} />}>
+                <Route path="raw/:id" element={<AssetDetailView />} />
+              </Route>
+              <Route element={<RoleGuard allowedRoles={['admin', 'read_only']} />}>
+                <Route path="raw" element={<RawAssetsView />} />
+                <Route path="analytics" element={<CountriesView />} />
+                <Route path="insights" element={<InsightsView />} />
+                <Route path="documents" element={<DocumentsView />} />
+              </Route>
+              <Route element={<RoleGuard allowedRoles={['admin']} />}>
+                <Route path="rag" element={<RagChatPage />} />
+                <Route path="rag/share/:sharedSessionId" element={<RagChatPage />} />
+              </Route>
+            </Route>
 
-          {/* Admin & Maintainer & Read-Only  */}
-          <Route element={<RoleGuard allowedRoles={['admin', 'maintainer', 'read_only']} />}>
-            <Route path="raw/:id" element={<AssetDetailView />} />
-          </Route>
+            {/* Modular sync Panel */}
+            <Route path="/sync" element={<SyncLayout />}>
+              <Route element={<RoleGuard allowedRoles={['admin']} />}>
+                <Route path="kiss24" element={<Kiss24SyncSettings />} />
+                <Route path="servicenow" element={<ServiceNowSyncSettings />} />
+                <Route path="asset-reconciliation" element={<AssetReconciliationView />} />
+                <Route path="test-reconciliation" element={<TestReconciliationView />} />
+                <Route path="scheduled-tasks" element={<ScheduledTasksView />} />
+              </Route>
+            </Route>
 
-          {/* Admin & Read-Only  Raw and Analytics */}
-          <Route element={<RoleGuard allowedRoles={['admin', 'read_only']} />}>
-            <Route path="raw" element={<RawAssetsView />} />
-            <Route path="analytics" element={<CountriesView />} />
-            <Route path="insights" element={<InsightsView />} />
-            <Route path="documents" element={<DocumentsView />} />
-          </Route>
-          {/* Admin Only  Rag */}
-          <Route element={<RoleGuard allowedRoles={['admin']} />}>
-            <Route path="rag" element={<RagChatPage />} />
-            <Route path="rag/share/:sharedSessionId" element={<RagChatPage />} />
-          </Route>
-        </Route>
+            {/* Modular Control Panel */}
+            <Route path="/settings" element={<ControlPanelLayout />}>
+              <Route element={<RoleGuard allowedRoles={['admin', 'read_only']} />}>
+                <Route index element={<ControlPanelHome />} />
+                <Route path="users" element={<UsersSettings />} />
+                <Route path="locations" element={<LocationsSettings />} />
+                <Route path="asset-types" element={<AssetTypesSettings />} />
+                <Route path="asset-criteria" element={<AssetCriteriaSettings />} />
+                <Route path="services" element={<ServicesSettings />} />
+                <Route path="categories" element={<CategoriesSettings />} />
+                <Route path="regions" element={<RegionsSettings />} />
+                <Route path="countries" element={<CountriesSettings />} />
+                <Route path="contacts" element={<ContactsSettings />} />
+                <Route path="logs" element={<SystemLogsSettings />} />
+              </Route>
+              <Route element={<RoleGuard allowedRoles={['admin']} />}>
+                <Route path="api-keys" element={<ApiKeysSettings />} />
+                <Route path="danger" element={<DangerZoneSettings />} />
+              </Route>
+            </Route>
 
-        {/* Modular sync Panel */}
-        <Route path="/sync" element={<SyncLayout />}>
-          <Route element={<RoleGuard allowedRoles={['admin']} />}>
-            <Route path="kiss24" element={<Kiss24SyncSettings />} />
-            <Route path="servicenow" element={<ServiceNowSyncSettings />} />
-            <Route path="asset-reconciliation" element={<AssetReconciliationView />} />
-            <Route path="test-reconciliation" element={<TestReconciliationView />} />
-            <Route path="scheduled-tasks" element={<ScheduledTasksView />} />
-          </Route>
-        </Route>
-
-        {/* Modular Control Panel */}
-        <Route path="/settings" element={<ControlPanelLayout />}>
-          <Route element={<RoleGuard allowedRoles={['admin', 'read_only']} />}>
-            <Route index element={<ControlPanelHome />} />
-            <Route path="users" element={<UsersSettings />} />
-            <Route path="locations" element={<LocationsSettings />} />
-            <Route path="asset-types" element={<AssetTypesSettings />} />
-            <Route path="asset-criteria" element={<AssetCriteriaSettings />} />
-            <Route path="services" element={<ServicesSettings />} />
-            <Route path="categories" element={<CategoriesSettings />} />
-            <Route path="regions" element={<RegionsSettings />} />
-            <Route path="countries" element={<CountriesSettings />} />
-            <Route path="contacts" element={<ContactsSettings />} />
-            <Route path="logs" element={<SystemLogsSettings />} />
-          </Route>
-          <Route element={<RoleGuard allowedRoles={['admin']} />}>
-            <Route path="api-keys" element={<ApiKeysSettings />} />
-            <Route path="danger" element={<DangerZoneSettings />} />
-          </Route>
-        </Route>
-        <Route path="*" element={<Navigate to="/dashboard" replace />} />
+            <Route path="*" element={<Navigate to="/dashboard" replace />} />
+          </>
+        )}
       </Routes>
     </div>
   );

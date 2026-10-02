@@ -4,6 +4,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import text, func, or_
 from models.users import Users
+from models.contacts import Contacts, CountryContacts
 from models.tests import Assignments
 from models.notifications import Notifications
 from audit_logger import log_audit_event
@@ -172,9 +173,32 @@ def validate_stored_kiss24_key(db: Session, current_user: dict):
 
 
 def get_my_profile(db: Session, current_user: dict):
-    user = db.query(Users).filter(Users.id == str(current_user["id"])).first()
     profile = dict(current_user)
-    profile["has_kiss24_key"] = bool(user and user.kiss24_api_key)
+    user_id = current_user.get("id")
+
+    # Safely query Users ONLY if user_id exists and is not None
+    user = db.query(Users).filter(Users.id == user_id).first() if user_id else None
+
+    if user:
+        # Internal Team Member
+        profile["has_kiss24_key"] = bool(user.kiss24_api_key)
+    else:
+        # Stakeholder lookup by email in Contacts
+        email = current_user.get("email", "").lower().strip()
+        stakeholder_contact = (
+            db.query(Contacts)
+            .join(CountryContacts, Contacts.id == CountryContacts.contact_id)
+            .filter(
+                func.lower(Contacts.email) == email,
+                CountryContacts.is_stakeholder == True
+            )
+            .first()
+        )
+        if stakeholder_contact:
+            profile["role"] = "stakeholder"
+            profile["name"] = stakeholder_contact.full_name or stakeholder_contact.email
+            profile["has_kiss24_key"] = False
+
     return profile
 
 

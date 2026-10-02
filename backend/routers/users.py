@@ -1,7 +1,10 @@
-from fastapi import APIRouter, Depends, BackgroundTasks
+from fastapi import APIRouter, Depends, BackgroundTasks, Request, HTTPException
 from database import get_db
+from jose import jwt, JWTError
 from sqlalchemy.orm import Session
-from routers.auth import get_current_user, require_admin, require_admin_or_read_only
+from sqlalchemy import func
+from models.users import Users
+from routers.auth import get_current_user, require_admin, require_admin_or_read_only, get_google_public_keys, IAP_AUDIENCE
 from schema import UserCreate, UserBase, Kiss24KeyUpdate, PublicKeyUpdate
 from websockets_manager import manager
 from system_services import user_service
@@ -10,10 +13,7 @@ from utils.memory_cache import invalidate_board_cache
 router = APIRouter(prefix="/api/users", tags=["Users"])
 
 
-@router.get(
-    "/system/status",
-    summary="Check System Status"
-)
+@router.get("/system/status", summary="Check System Status")
 def check_system_status(current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
     """
     Verify the operational status of the core backend.
@@ -134,14 +134,50 @@ def validate_stored_kiss24_key(current_user: dict = Depends(get_current_user), d
     "/me",
     summary="Get My Profile"
 )
-def get_my_profile(current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
-    """
-    Retrieve the authenticated user's profile and configuration details.
+def get_my_profile(request: Request, db: Session = Depends(get_db)):
+    iap_jwt = request.headers.get("X-Goog-IAP-JWT-Assertion")
 
-    Returns standard identity metrics along with statuses indicating whether they
-    have published a PGP/Public Key and a valid KISS24 API Token.
-    """
-    return user_service.get_my_profile(db, current_user)
+    if not iap_jwt:
+        raise HTTPException(status_code=401, detail="Not authenticated via IAP")
+
+    try:
+        unverified_header = jwt.get_unverified_header(iap_jwt)
+        kid = unverified_header.get("kid")
+        public_keys = get_google_public_keys()
+        public_key = public_keys.get(kid)
+
+        if not public_key:
+            raise HTTPException(status_code=401, detail="Invalid IAP Key ID")
+
+        payload = jwt.decode(iap_jwt, public_key, algorithms=["ES256"], audience=IAP_AUDIENCE)
+        email = payload.get("email", "").lower().strip()
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=f"Token verification failed: {e}")
+
+    if not email:
+        raise HTTPException(status_code=401, detail="No email found in token")
+
+    # Check if internal user
+    user = db.query(Users).filter(func.lower(Users.email) == email).first()
+
+    if user:
+        current_user_dict = {
+            "id": str(user.id),
+            "email": user.email,
+            "name": user.name,
+            "role": user.role,
+            "location_id": str(user.location_id) if user.location_id else None,
+            "service_lane_id": str(user.service_lane_id) if user.service_lane_id else None,
+            "auth_method": "IAP_SSO"
+        }
+    else:
+        # External stakeholder
+        current_user_dict = {
+            "id": None,
+            "email": email
+        }
+
+    return user_service.get_my_profile(db, current_user_dict)
 
 
 @router.get(

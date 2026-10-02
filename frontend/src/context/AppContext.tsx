@@ -1,27 +1,7 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
-
-export interface User {
-  id: string;
-  email: string;
-  name: string;
-  role: 'admin' | 'pentester' | 'read_only';
-  location_id: string;
-  has_kiss24_key?: boolean;
-}
-
-interface AppContextType {
-  currentUser: User | null;
-  isLoading: boolean;
-  handleLogout: () => Promise<void>;
-  wsStatus: 'connecting' | 'connected' | 'disconnected';
-  notifications: any[];
-  showNotifications: boolean;
-  setShowNotifications: (val: boolean) => void;
-  markNotificationsRead: () => Promise<void>;
-  refreshUser: () => Promise<void>;
-}
+import type { User, AppContextType } from '../types/board';
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
@@ -29,7 +9,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // App State
   const [wsStatus, setWsStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting');
   const [notifications, setNotifications] = useState<any[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
@@ -37,6 +16,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
 
   const fetchNotifications = async () => {
+    if (currentUser?.role === 'stakeholder') return;
     try {
       const res = await axios.get('/api/users/me/notifications');
       setNotifications(res.data);
@@ -61,7 +41,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setCurrentUser(res.data);
     } catch (err) {
       setCurrentUser(null);
-      navigate('/login');
     } finally {
       setIsLoading(false);
     }
@@ -69,15 +48,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     fetchUser();
-  }, [navigate]);
+  }, []);
 
   useEffect(() => {
-    if (currentUser) fetchNotifications();
+    if (currentUser && currentUser.role !== 'stakeholder') {
+      fetchNotifications();
+    }
   }, [currentUser]);
 
-  // WebSocket Connection
+  // WebSocket Connection (EXPLICITLY BYPASS STAKEHOLDERS)
   useEffect(() => {
-    if (!currentUser) return;
+    if (!currentUser || currentUser.role === 'stakeholder') return;
 
     let ws: WebSocket;
     let reconnectTimer: number;
@@ -86,7 +67,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const backendUrl = new URL(import.meta.env.VITE_API_URL || window.location.origin);
       const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 
-      ws = new WebSocket(`${wsProtocol}//${backendUrl.host}/api/ws/board`);;
+      ws = new WebSocket(`\({wsProtocol}//\){backendUrl.host}/api/ws/board`);
 
       ws.onopen = () => setWsStatus('connected');
 
@@ -102,7 +83,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (event.code === 1008) {
           setCurrentUser(null);
           clearTimeout(reconnectTimer);
-          navigate('/login');
         } else if (event.code !== 1000) {
           reconnectTimer = setTimeout(connectWebSocket, 3000);
         }
@@ -117,11 +97,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       clearTimeout(reconnectTimer);
       if (ws) ws.close(1000, "Unmounting");
     };
-  }, [currentUser, navigate]);
-
+  }, [currentUser]);
 
   const handleLogout = async () => {
-    const response = await api.post('/api/auth/logout');
+    const response = await axios.post('/api/auth/logout');
     window.location.href = response.data.iap_logout_url;
   };
 
