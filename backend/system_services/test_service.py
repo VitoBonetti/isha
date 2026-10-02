@@ -463,62 +463,66 @@ async def process_vuln_analysis_background(test_id: str, kiss24_id: str, user_id
             json.dumps({"action": "REPORT_FAILED", "email": user_email, "message": f"Analysis failed: {str(e)}"}))
 
 
-def process_bulk_tests_background(asset_ids, user_id: str, role: str, service_lane_id: str = None):
+def bulk_create_tests_sync(db: Session, asset_ids: list, user_id: str, role: str, service_lane_id: str = None):
+    """Executes the fast PostgreSQL inserts synchronously so the UI has immediate access to the data."""
     tests_to_provision = []
-    db = SessionLocal()
-    try:
-        for asset_id in asset_ids:
-            query = (db.query(
-                RawAssets.name, RawAssets.service_forecast_id, ServiceLanes.default_credits,
-                ServiceLanes.default_duration_weeks, ServiceLanes.name.label("service_name"),
-                Country.name.label("country_name"), ServiceLanes.auto_provision_workspace, RawAssets.category_id)
-                     .select_from(Assets)
-                     .join(RawAssets, Assets.raw_asset_id == RawAssets.id)
-                     .outerjoin(ServiceLanes, RawAssets.service_forecast_id == ServiceLanes.id)
-                     .outerjoin(Country, RawAssets.country_id == Country.id)
-                     .filter(Assets.id == str(asset_id)))
 
-            if role == 'maintainer':
-                query = query.filter(RawAssets.service_forecast_id == (
-                    str(service_lane_id) if service_lane_id else '00000000-0000-0000-0000-000000000000'))
+    for asset_id in asset_ids:
+        query = (db.query(
+            RawAssets.name, RawAssets.service_forecast_id, ServiceLanes.default_credits,
+            ServiceLanes.default_duration_weeks, ServiceLanes.name.label("service_name"),
+            Country.name.label("country_name"), ServiceLanes.auto_provision_workspace, RawAssets.category_id)
+                 .select_from(Assets)
+                 .join(RawAssets, Assets.raw_asset_id == RawAssets.id)
+                 .outerjoin(ServiceLanes, RawAssets.service_forecast_id == ServiceLanes.id)
+                 .outerjoin(Country, RawAssets.country_id == Country.id)
+                 .filter(Assets.id == str(asset_id)))
 
-            # Filter where (duplicate allowed OR test doesn't exist in active state)
-            active_test_exists = (db.query(TestAssets.test_id)
-                                  .join(Tests, TestAssets.test_id == Tests.id)
-                                  .filter(TestAssets.asset_id == Assets.id, Tests.stages.in_([TestStages.NOT_PLANNED, TestStages.SCHEDULED, TestStages.IN_PROGRESS]))
-                                  .exists())
+        if role == 'maintainer':
+            query = query.filter(RawAssets.service_forecast_id == (
+                str(service_lane_id) if service_lane_id else '00000000-0000-0000-0000-000000000000'))
 
-            query = query.filter(or_(RawAssets.duplicate_allowed == True, ~active_test_exists))
-            asset_data = query.first()
+        # Filter where (duplicate allowed OR test doesn't exist in active state)
+        active_test_exists = (db.query(TestAssets.test_id)
+                              .join(Tests, TestAssets.test_id == Tests.id)
+                              .filter(TestAssets.asset_id == Assets.id, Tests.stages.in_(
+            [TestStages.NOT_PLANNED, TestStages.SCHEDULED, TestStages.IN_PROGRESS]))
+                              .exists())
 
-            if not asset_data or not asset_data.service_forecast_id: continue
+        query = query.filter(or_(RawAssets.duplicate_allowed == True, ~active_test_exists))
+        asset_data = query.first()
 
-            new_test_id = str(uuid.uuid4())
-            new_test = Tests(
-                id=new_test_id, name=asset_data.name, service_lane_id=str(asset_data.service_forecast_id),
-                category_id=str(asset_data.category_id) if asset_data.category_id else None,
-                credits_per_week=float(asset_data.default_credits or 2.0),
-                duration_weeks=int(asset_data.default_duration_weeks or 1),
-                stages=TestStages.NOT_PLANNED
-            )
-            db.add(new_test)
-            db.flush()
-            db.add(TestAssets(test_id=new_test_id, asset_id=str(asset_id)))
+        if not asset_data or not asset_data.service_forecast_id: continue
 
-            log_test_history(db, new_test_id, user_id, "GENERATED", f"Test generated from Asset Pool.")
-            log_audit_event(user_id=user_id, role=role, action="TEST_CREATED", resource_type="TESTS",
-                            resource_id=new_test_id, details=f"Bulk created test for {asset_data.name}.")
+        new_test_id = str(uuid.uuid4())
+        new_test = Tests(
+            id=new_test_id, name=asset_data.name, service_lane_id=str(asset_data.service_forecast_id),
+            category_id=str(asset_data.category_id) if asset_data.category_id else None,
+            credits_per_week=float(asset_data.default_credits or 2.0),
+            duration_weeks=int(asset_data.default_duration_weeks or 1),
+            stages=TestStages.NOT_PLANNED
+        )
+        db.add(new_test)
+        db.flush()
+        db.add(TestAssets(test_id=new_test_id, asset_id=str(asset_id)))
 
-            tests_to_provision.append(
-                (new_test_id, datetime.now().year, asset_data.service_name, asset_data.country_name, asset_data.name,
-                 asset_data.auto_provision_workspace))
+        log_test_history(db, new_test_id, user_id, "GENERATED", f"Test generated from Asset Pool.")
+        log_audit_event(user_id=user_id, role=role, action="TEST_CREATED", resource_type="TESTS",
+                        resource_id=new_test_id, details=f"Bulk created test for {asset_data.name}.")
 
-        db.commit()
-    finally:
-        db.close()
+        tests_to_provision.append(
+            (new_test_id, datetime.now().year, asset_data.service_name, asset_data.country_name, asset_data.name,
+             asset_data.auto_provision_workspace))
 
+    db.commit()
+    return tests_to_provision
+
+
+def provision_bulk_workspaces_background(tests_to_provision: list):
+    """Executes the slow Google Drive API calls asynchronously."""
     for test_id, year, s_name, c_name, t_name, auto_prov in tests_to_provision:
-        if auto_prov: DriveManager().provision_test_workspace(test_id, year, s_name, c_name, t_name)
+        if auto_prov:
+            DriveManager().provision_test_workspace(test_id, year, s_name, c_name, t_name)
 
 
 # --- ENDPOINTS LOGIC ---

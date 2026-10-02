@@ -82,6 +82,34 @@ def get_all_tests(
     )
 
 
+@router.post(
+    "/bulk",
+    summary="[Admin/Maintainer] Bulk Test Creation"
+)
+def bulk_create_tests(req: BulkTestCreate, background_tasks: BackgroundTasks,
+                      current_user: dict = Depends(require_maintainer_or_admin),
+                      db: Session = Depends(get_db)):
+    """
+    Generate multiple tests from the active asset pool simultaneously.
+    """
+    sl_id = str(current_user.get('service_lane_id')) if current_user.get('service_lane_id') else None
+
+    # 1. Execute DB operations synchronously
+    tests_to_provision = test_service.bulk_create_tests_sync(
+        db, req.asset_ids, str(current_user['id']), str(current_user['role']), sl_id
+    )
+
+    # 2. Delegate the slow Google Drive operations to the background
+    if tests_to_provision:
+        background_tasks.add_task(test_service.provision_bulk_workspaces_background, tests_to_provision)
+
+    # 3. Clear cache and notify WebSocket clients immediately
+    invalidate_board_cache()
+    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
+
+    return {"message": f"Generated {len(tests_to_provision)} tests from active pool."}
+
+
 @router.get(
     "/{test_id}",
     summary="Get Full Test Details & Contacts"
@@ -116,6 +144,7 @@ def update_test(test_id: str, t: TestBase, background_tasks: BackgroundTasks,
 @router.delete(
     "/{test_id}",
     summary="[Admin/Maintainer] Delete a specific test"
+
 )
 def delete_test(test_id: str, background_tasks: BackgroundTasks,
                 current_user: dict = Depends(require_maintainer_or_admin), db: Session = Depends(get_db)):
@@ -130,26 +159,6 @@ def delete_test(test_id: str, background_tasks: BackgroundTasks,
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
     background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_ASSETS"}')
     return res
-
-
-@router.post(
-    "/bulk",
-    summary="[Admin/Maintainer] Bulk Test Creation"
-)
-def bulk_create_tests(req: BulkTestCreate, background_tasks: BackgroundTasks,
-                      current_user: dict = Depends(require_maintainer_or_admin)):
-    """
-    Generate multiple tests from the active asset pool simultaneously.
-
-    Accepts a list of asset IDs from the Active Pool and kicks off a background task
-    to automatically generate unscheduled tests for all of them based on their default configurations.
-    """
-    sl_id = str(current_user.get('service_lane_id')) if current_user.get('service_lane_id') else None
-    background_tasks.add_task(test_service.process_bulk_tests_background, req.asset_ids, str(current_user['id']),
-                              str(current_user['role']), sl_id)
-    background_tasks.add_task(invalidate_board_cache)
-    background_tasks.add_task(manager.broadcast, '{"action": "REFRESH_BOARD"}')
-    return {"message": f"Generating {len(req.asset_ids)} tests from active pool."}
 
 
 @router.post(
